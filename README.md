@@ -4,6 +4,8 @@ A desktop window for chatting with models that run on your own computer. The
 shell is Rust (Tauri 2), the page is Vue 3, and nothing you type leaves the
 machine.
 
+![The Rusty Business window: saved chats on the left, a question and Phi-4's answer in the middle, the model picker at the top right, and a token meter under the message box](docs/chat-window.webp)
+
 ## What it does
 
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
