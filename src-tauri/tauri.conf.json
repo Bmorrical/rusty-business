@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "rusty-business",
+  "productName": "Rusty Business",
   "version": "0.1.0",
   "identifier": "net.morrical.rusty-business",
   "build": {
@@ -12,13 +12,16 @@
   "app": {
     "windows": [
       {
-        "title": "rusty-business",
-        "width": 800,
-        "height": 600
+        "title": "Rusty Business",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 680,
+        "minHeight": 480
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 ws://127.0.0.1:1420"
     }
   },
   "bundle": {
