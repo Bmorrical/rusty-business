@@ -22,8 +22,10 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-There is no release yet. The app's version is 0.1.0, and it is built from
-source. Fixes go into `main`, and only `main` is covered.
+The app's version is 0.2.0. Its downloads, for a Mac and for Windows, are
+on the newest release on GitHub, built from `main`. Fixes go into `main`,
+then into a new release, and only `main` and the newest release are
+covered.
 
 Everything in this repository is covered:
 
@@ -53,6 +55,6 @@ Please report these to their makers:
   and Caddy.
 - Docker, macOS, and Windows.
 
-One thing is known, so it needs no report: the installers, when they come,
-will be unsigned at first, and the computer will warn before it opens one.
-Signing them is pin 1 on the [roadmap](ROADMAP.md).
+One thing is known, so it needs no report: the installers are unsigned for
+now, so the computer warns before it opens one. Signing them is pin 1 on the
+[roadmap](ROADMAP.md).

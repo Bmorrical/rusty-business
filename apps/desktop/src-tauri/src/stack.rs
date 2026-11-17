@@ -834,6 +834,7 @@ mod tests {
     // tests read the file.
     const PUT_TOGETHER: &str = include_str!("lib.rs");
 
+    #[cfg(unix)]
     fn scratch() -> PathBuf {
         let folder = std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();

@@ -6,9 +6,10 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
-**Status:** version 0.1.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.2.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
-command. What it cannot do yet is under [Limits](#limits).
+command. Windows has [an installer](#run-the-chat-window-windows), and no
+model engine yet. What it cannot do yet is under [Limits](#limits).
 
 ## Screenshots
 
@@ -59,9 +60,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 ### Why choose Ollama
 
 - **Install and go, anywhere.** Ollama installs on macOS, Windows, and Linux
-  with one download or one command. Rusty Business™ has one download, for a
-  Mac with Apple silicon, and it is not signed yet, so macOS stops it once
-  before it opens.
+  with one download or one command. Rusty Business™ has two downloads, for a
+  Mac with Apple silicon and for Windows, and only the Mac's runs a model.
+  Neither is signed yet, so the computer warns once before it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads one of its three models on a first run, when
   none of them is on the computer yet, and offers no others.
@@ -99,7 +100,7 @@ says what is in it.
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
-| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app |
+| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app and the Windows installer |
 
 The chat window starts the stack when Docker is on the computer, and does not
 use it yet: it talks only to the model engine on this computer. The stack is
@@ -175,6 +176,40 @@ already running is used as it is.
 More in [apps/desktop](apps/desktop), including where the app looks for the
 engine.
 
+## Run the chat window (Windows)
+
+On 64-bit Windows 10 or 11:
+
+1. Download
+   [Rusty-Business-windows-x64-setup.exe](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-windows-x64-setup.exe)
+   and open it.
+2. It is not signed yet, so Windows may stop it the first time: choose More
+   info, then Run anyway. See pin 1 on the [roadmap](ROADMAP.md).
+
+It installs for your account alone, with no prompt for an administrator.
+The window draws with Microsoft's WebView2, which Windows 10 and 11 usually
+have; where it is missing, the installer downloads it from Microsoft.
+
+The app has no model engine for Windows yet, so the window opens and says
+so. (On the roadmap: An engine for Windows.) The `.exe`'s checksum is beside
+it on the
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+
+### Or build it yourself
+
+In Git Bash on 64-bit Windows, with Microsoft's C++ build tools installed,
+this one line builds the same installer:
+
+```bash
+git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && scripts/windows-app.sh
+```
+
+It fetches its own Rust and Node, each pinned by version and checksum, into
+`apps/desktop/src-tauri/target/windows`, which git ignores, and leaves the
+installer there. It changes no setting of the computer's. The download above
+is that installer, built on GitHub's Windows computer by the Release workflow
+after a green gate.
+
 ## Run the stack
 
 You need Docker (with Compose), `make`, and `openssl`.
@@ -239,11 +274,13 @@ pull requests, so run `make test` and `make e2e` before you push. More in
 What Rusty Business™ cannot do yet. The [roadmap](ROADMAP.md) says what comes
 next.
 
-- **One kind of computer.** It runs on a Mac with Apple silicon. Windows has
-  no engine chosen yet. (On the roadmap: An engine for Windows.)
+- **Chats need a Mac.** Only the Mac app has a model engine. The Windows app
+  opens and says it has none yet, and there is no app for Linux. (On the
+  roadmap: An engine for Windows.)
 - **Not signed yet.** macOS stops the downloaded app the first time it
-  opens, until you choose Open Anyway in System Settings. (On the roadmap:
-  Signed installers.)
+  opens, until you choose Open Anyway in System Settings. Windows may stop
+  the installer until you choose More info, then Run anyway. (On the
+  roadmap: Signed installers.)
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer. It does not put Docker there. The chat does not need the
   stack yet.

@@ -265,10 +265,20 @@ pub fn plan(facts: &Facts) -> Step {
 /// Why nothing was started, as one sentence for the window.
 pub fn sentence(why: Why, name: &str, port: u16) -> String {
     match why {
-        Why::NoEngineForThisSystem => "The app cannot start an engine on this system yet.".to_string(),
+        Why::NoEngineForThisSystem => no_engine_on(std::env::consts::OS).to_string(),
         Why::PortTaken => format!("Something that is not the engine is using port {port} on this computer, so the app did not start one."),
         Why::NoProgram => format!("The app looked for {name} on this computer and did not find it."),
         Why::NoModel => "With no model to serve, the app did not start the engine.".to_string(),
+    }
+}
+
+/// Why no engine starts on `os`, one of Rust's names for a system. Taking
+/// the system lets the Mac's tests check what Windows says.
+fn no_engine_on(os: &str) -> &'static str {
+    if os == "windows" {
+        "The app has no engine for Windows yet, so it cannot start one."
+    } else {
+        "The app cannot start an engine on this system yet."
     }
 }
 
@@ -458,6 +468,7 @@ mod tests {
     use super::*;
 
     const NAME: &str = "mlx_lm.server";
+    #[cfg(unix)]
     const SHORT: Duration = Duration::from_millis(300);
 
     // Where the app is put together. No test can run the whole app, so two
@@ -498,6 +509,19 @@ mod tests {
     }
 
     #[test]
+    fn windows_says_it_has_no_engine_yet() {
+        // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
+        // from read me and install and go, one click ready." The roadmap, of
+        // the .exe: "Until Windows has an engine, the window opens and says
+        // so." The Mac's tests check the words Windows gets.
+        assert_eq!(no_engine_on("windows"), "The app has no engine for Windows yet, so it cannot start one.");
+        assert_eq!(no_engine_on("linux"), "The app cannot start an engine on this system yet.");
+        if cfg!(target_os = "windows") {
+            assert_eq!(program_name(), None, "nothing is looked for, so the plan says why");
+        }
+    }
+
+    #[test]
     fn every_reason_is_one_plain_sentence() {
         for why in [Why::NoEngineForThisSystem, Why::PortTaken, Why::NoProgram, Why::NoModel] {
             let said = sentence(why, NAME, 8081);
@@ -508,6 +532,7 @@ mod tests {
         assert_eq!(sentence(Why::NoProgram, NAME, 8081), "The app looked for mlx_lm.server on this computer and did not find it.");
         assert!(sentence(Why::PortTaken, NAME, 8081).contains("port 8081"));
         assert!(NOT_YET.ends_with('.'));
+        assert_eq!(sentence(Why::NoEngineForThisSystem, NAME, 8081), no_engine_on(std::env::consts::OS));
     }
 
     #[test]

@@ -53,18 +53,27 @@ pub fn checked_base_url(raw: &str) -> Result<String, String> {
 }
 
 pub fn engine_name() -> &'static str {
-    if cfg!(target_os = "macos") {
+    engine_name_on(std::env::consts::OS)
+}
+
+/// The engine's name on `os`, one of Rust's names for a system ("macos",
+/// "windows", "linux"). Taking the system lets the Mac's tests check the
+/// words every other system gets.
+fn engine_name_on(os: &str) -> &'static str {
+    if os == "macos" {
         "MLX"
     } else {
         "Local engine"
     }
 }
 
-fn start_hint() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "mlx_lm.server --port 8080"
-    } else {
-        "Start an OpenAI-style server on port 8080 of this computer."
+/// How to start the engine by hand on `os`. Windows has no engine chosen
+/// yet, so it gets no hint, and the window shows none.
+fn start_hint_on(os: &str) -> &'static str {
+    match os {
+        "macos" => "mlx_lm.server --port 8080",
+        "windows" => "",
+        _ => "Start an OpenAI-style server on port 8080 of this computer.",
     }
 }
 
@@ -188,7 +197,7 @@ fn first_status() -> EngineStatus {
         on_disk: crate::models::on_disk(),
         offers: crate::downloads::offers(),
         error: None,
-        start_hint: start_hint().to_string(),
+        start_hint: start_hint_on(std::env::consts::OS).to_string(),
     }
 }
 
@@ -705,6 +714,22 @@ mod tests {
             max_tokens: None,
         };
         assert!(checked_request(&request).is_err());
+    }
+
+    #[test]
+    fn windows_gets_no_command_to_start_an_engine_it_does_not_have() {
+        // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
+        // from read me and install and go, one click ready." The roadmap, of
+        // the .exe: "Until Windows has an engine, the window opens and says
+        // so." Windows gets no command to run; the Mac keeps its own.
+        assert_eq!(start_hint_on("windows"), "");
+        assert_eq!(start_hint_on("macos"), "mlx_lm.server --port 8080");
+        assert_eq!(start_hint_on("linux"), "Start an OpenAI-style server on port 8080 of this computer.");
+        assert_eq!(engine_name_on("macos"), "MLX");
+        assert_eq!(engine_name_on("windows"), "Local engine");
+        let first = first_status();
+        assert_eq!(first.start_hint, start_hint_on(std::env::consts::OS));
+        assert_eq!(first.name, engine_name_on(std::env::consts::OS));
     }
 
     #[test]

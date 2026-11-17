@@ -6,7 +6,7 @@ What GitHub runs for this repository.
 | ------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
 | `gate.yml`    | Once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
 | `deploy.yml`  | Only on request, only from `main`                                   | Runs the gate, then puts the API and worker images on GitHub's container registry |
-| `release.yml` | Only on request, only from `main`                                   | Runs the gate, then builds the Mac app on a Mac and puts it on a GitHub release, where the README's download link finds it |
+| `release.yml` | Only on request, only from `main`                                   | Runs the gate, then builds the Mac app on a Mac and the Windows installer on Windows, and puts both on a GitHub release, where the README's download links find them |
 
 ## The rule
 
@@ -54,16 +54,18 @@ stand-in Docker, so nothing is built or pushed by a test.
 
 ## What Release publishes
 
-Release puts the Mac app on a GitHub release named for its version, such as
-`v0.1.0`: `Rusty-Business-mac-arm64.dmg`, with the model engine inside, and
-its checksum. It is marked as the newest release, which is the one the
-README's download link finds.
+Release puts the app on a GitHub release named for its version, such as
+`v0.2.0`: `Rusty-Business-mac-arm64.dmg`, with the model engine inside,
+`Rusty-Business-windows-x64-setup.exe`, with no engine yet, and a checksum
+for each. It is marked as the newest release, which is the one the README's
+download links find.
 
 | Job       | Machine                  | What it does                                                   |
 | --------- | ------------------------ | -------------------------------------------------------------- |
 | `gate`    | as above                 | The whole gate. Nothing below starts until it is green         |
-| `build`   | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the next job |
-| `publish` | Linux                    | Checks the checksum and that the app's three version numbers agree, then makes the release and its tag at this commit |
+| `mac`     | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the next job |
+| `windows` | Windows, Intel or AMD    | Runs `scripts/windows-app.sh` in Git Bash, the command a person runs, and keeps the `.exe` and its checksum for the next job |
+| `publish` | Linux                    | Checks both checksums and that the app's three version numbers agree, then makes the release and its tag at this commit |
 
 A release that is out is never changed. When the version's tag is already
 on GitHub, the run stops, so publishing again means raising the version in
@@ -112,7 +114,8 @@ The gate then judges what actually landed on `main`.
 `scripts/workflows.test.mjs` checks these rules, that every job in
 `deploy.yml` and `release.yml` waits for the gate, that Deploy builds each
 kind of image on its own kind of computer before it joins them, and that
-Release builds the Mac app on a Mac with `make dmg`. It runs with
+Release builds the Mac app on a Mac with `make dmg` and the Windows
+installer on Windows with `scripts/windows-app.sh`. It runs with
 `make test-repo`, so the gate checks its own rules.
 
 There is no README directly in `.github`: GitHub would show it as the

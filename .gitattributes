@@ -1,0 +1,4 @@
+# Git on Windows can change line endings on checkout, and Git Bash cannot run
+# a script whose lines end that way. The Release workflow runs
+# scripts/windows-app.sh on Windows, so every shell script stays as it is.
+*.sh text eol=lf

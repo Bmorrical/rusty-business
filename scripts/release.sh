@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Puts the Mac app on a GitHub release, where the README's download link
-# finds it. The Release workflow runs it after a green gate, with the .dmg
-# and its checksum from `make dmg` downloaded into one folder:
+# Puts the Mac app and the Windows installer on a GitHub release, where the
+# README's download links find them. The Release workflow runs it after a
+# green gate, with the .dmg from `make dmg`, the .exe from
+# scripts/windows-app.sh, and their checksums downloaded into one folder:
 #
 #   scripts/release.sh publish dist
 #
 # It checks that the app's three version numbers agree, that the folder
-# holds the .dmg and its checksum and nothing else, and that the checksum
-# matches the .dmg. It stops when the version's tag is already on GitHub: a
-# release that is out is never changed, so publishing again needs a new
-# version. Then it makes release v<version> at this commit, with the two
-# files, marked as the newest, which is the one the README links.
+# holds the two downloads and their checksums and nothing else, and that each
+# checksum matches its download. It stops when the version's tag is already
+# on GitHub: a release that is out is never changed, so publishing again
+# needs a new version. Then it makes release v<version> at this commit, with
+# the four files, marked as the newest, which is the one the README links.
 #
 # It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, and GH_TOKEN,
 # which the workflow passes on. Nothing here removes, edits, or replaces a
@@ -19,6 +20,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DMG=Rusty-Business-mac-arm64.dmg
+EXE=Rusty-Business-windows-x64-setup.exe
 USAGE="use: scripts/release.sh publish <folder>"
 
 fail() {
@@ -60,14 +62,25 @@ sha256_of() {
 notes_for() {
     local version="$1"
     cat <<NOTES
-Rusty Business™ ${version} for a Mac with Apple silicon and macOS 14 or later, with its model engine inside.
+Rusty Business™ ${version}, for a Mac and for Windows.
+
+On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:
 
 1. Download ${DMG}, open it, and drag Rusty Business™ to Applications.
 2. Open the app. It is not signed yet, so macOS stops it the first time: open System Settings, then Privacy & Security, and choose Open Anyway.
 
-To check the download first, put both files in one folder and run:
+On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the window opens and says so.
+
+1. Download ${EXE} and open it.
+2. It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.
+
+To check a download first, put it and its .sha256 file in one folder. On a Mac, run:
 
     shasum -a 256 -c ${DMG}.sha256
+
+On Windows, in PowerShell, run this, which prints True when the two match:
+
+    (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]
 
 Built from https://github.com/${repository}/commit/${commit} by the Release workflow, after a green gate.
 NOTES
@@ -75,21 +88,25 @@ NOTES
 
 publish() {
     local dir="$1" version tag listed name sum found
+    local -a sums=()
     version="$(version_of_app)"
     tag="v${version}"
 
     [ -d "${dir}" ] || fail "${dir} is not a folder"
     listed="$(cd "${dir}" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
-    [ "${listed}" = "${DMG} ${DMG}.sha256 " ] ||
-        fail "${dir} should hold ${DMG} and ${DMG}.sha256 and nothing else, and holds: ${listed}"
-    for name in "${DMG}" "${DMG}.sha256"; do
+    [ "${listed}" = "${DMG} ${DMG}.sha256 ${EXE} ${EXE}.sha256 " ] ||
+        fail "${dir} should hold ${DMG}, ${EXE}, and their .sha256 files, and nothing else, and holds: ${listed}"
+    for name in "${DMG}" "${DMG}.sha256" "${EXE}" "${EXE}.sha256"; do
         [ -f "${dir}/${name}" ] && [ ! -L "${dir}/${name}" ] && [ -s "${dir}/${name}" ] ||
             fail "${dir}/${name} is not a plain file with something in it"
     done
-    sum="$(sha256_of "${dir}/${DMG}")"
-    [[ "${sum}" =~ ^[0-9a-f]{64}$ ]] || fail "${DMG} gave no plain checksum: ${sum}"
-    [ "$(cat "${dir}/${DMG}.sha256")" = "${sum}  ${DMG}" ] ||
-        fail "${DMG}.sha256 does not give the checksum of the ${DMG} beside it"
+    for name in "${DMG}" "${EXE}"; do
+        sum="$(sha256_of "${dir}/${name}")"
+        [[ "${sum}" =~ ^[0-9a-f]{64}$ ]] || fail "${name} gave no plain checksum: ${sum}"
+        [ "$(cat "${dir}/${name}.sha256")" = "${sum}  ${name}" ] ||
+            fail "${name}.sha256 does not give the checksum of the ${name} beside it"
+        sums+=("${sum}")
+    done
 
     # GitHub answers with every tag whose name starts with this one, so only
     # an exact match counts.
@@ -105,10 +122,11 @@ publish() {
         --title "Rusty Business™ ${version}" \
         --notes "$(notes_for "${version}")" \
         --latest \
-        "${dir}/${DMG}" "${dir}/${DMG}.sha256"
+        "${dir}/${DMG}" "${dir}/${DMG}.sha256" "${dir}/${EXE}" "${dir}/${EXE}.sha256"
     echo "Released ${tag}: https://github.com/${repository}/releases/tag/${tag}"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        printf '### Released %s\n\n- `%s`: `%s`\n' "${tag}" "${DMG}" "${sum}" >>"${GITHUB_STEP_SUMMARY}"
+        printf '### Released %s\n\n- `%s`: `%s`\n- `%s`: `%s`\n' \
+            "${tag}" "${DMG}" "${sums[0]}" "${EXE}" "${sums[1]}" >>"${GITHUB_STEP_SUMMARY}"
     fi
 }
 

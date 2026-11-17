@@ -16,6 +16,7 @@ import {
   requestMessages,
   savedTurn,
   shouldStart,
+  showsStartHint,
   stackLine,
   startLine,
   titleFrom,
@@ -61,6 +62,7 @@ const full = computed(() => fullness(used.value, model.value?.context));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boolean(model.value));
 const offers = computed(() => firstRunOffers(engine.value));
 const quick = computed(() => quickest(offers.value));
+const handStart = computed(() => showsStartHint(engine.value, starting.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
 
 function remembered() {
@@ -422,8 +424,8 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
           <p class="quiet small">{{ onDiskLine(engine.onDisk) }}</p>
           <p v-if="starting" class="quiet small">Starting the engine...</p>
           <p v-if="!starting && startNote" class="small">{{ startNote }}</p>
-          <p v-if="!starting" class="quiet small">To start it yourself:</p>
-          <code v-if="!starting" class="hint">{{ engine.startHint }}</code>
+          <p v-if="handStart" class="quiet small">To start it yourself:</p>
+          <code v-if="handStart" class="hint">{{ engine.startHint }}</code>
           <button v-if="!starting" class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>
         </template>
         <p v-if="stackStarting" class="quiet small">{{ stackLine(stack, true) }}</p>

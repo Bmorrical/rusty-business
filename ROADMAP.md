@@ -14,11 +14,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-In this order:
-
-- **An installer for Windows.** An `.exe`, linked from the README beside the
-  Mac's `.dmg`: download, open, and go. Until Windows has an engine, the
-  window opens and says so. Unsigned at first; see pin 1.
+Nothing is picked yet.
 
 ## Later
 
@@ -53,3 +49,7 @@ In this order:
   model engine inside: download, open, and go. The Release workflow builds
   it on a Mac with `make dmg`, after a green gate, and a release that is out
   is never changed. Unsigned for now; see pin 1.
+- **An installer for Windows.** The README links the newest `.exe`, beside
+  the Mac's `.dmg`: download, open, and go. The Release workflow builds it
+  on Windows with `scripts/windows-app.sh`, after a green gate. Until Windows
+  has an engine, the window opens and says so. Unsigned for now; see pin 1.
