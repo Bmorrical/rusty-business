@@ -35,7 +35,7 @@ test-services: ## Format, lint, and unit tests for the API, worker, and shared c
 	cargo clippy --workspace --all-targets --locked -- -D warnings
 	cargo test --workspace --locked
 
-test-repo: ## The repository's own rules (a README in every folder)
+test-repo: ## The repository's own rules (every test file in scripts)
 	node --test scripts/*.test.mjs
 
 test-desktop: ## The desktop app's tests (page, then Rust)

@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-labelledby="rb-title rb-desc">
+  <title id="rb-title">Rusty Business</title>
+  <desc id="rb-desc">A person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails lying on the ground below.</desc>
+
+  <!-- The picture carries its own background, so it reads the same on a
+       light page and a dark one. -->
+  <rect width="1280" height="560" rx="32" fill="#FBF3E4"/>
+
+  <!-- Wordmark -->
+  <g font-family="Georgia, 'Times New Roman', Times, serif" font-weight="700" font-size="104">
+    <text x="96" y="238" fill="#B7410E">Rusty</text>
+    <text x="96" y="346" fill="#2B2622">Business</text>
+  </g>
+  <text x="100" y="408" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27" fill="#6B5F53">Chat with models on your own computer.</text>
+
+  <!-- Ground -->
+  <ellipse cx="920" cy="486" rx="150" ry="7" fill="#2B2622" opacity="0.08"/>
+  <line x1="640" y1="480" x2="1200" y2="480" stroke="#2B2622" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- The light bulb, just out of reach -->
+  <line x1="1052" y1="0" x2="1052" y2="52" stroke="#2B2622" stroke-width="4"/>
+  <rect x="1041" y="50" width="22" height="16" rx="3" fill="#2B2622"/>
+  <circle cx="1052" cy="86" r="22" fill="#F6C945" stroke="#2B2622" stroke-width="5"/>
+  <g stroke="#E0A91B" stroke-width="4" stroke-linecap="round">
+    <line x1="1090" y1="86" x2="1106" y2="86"/>
+    <line x1="1080" y1="114" x2="1092" y2="126"/>
+    <line x1="1052" y1="124" x2="1052" y2="140"/>
+  </g>
+
+  <!-- The stepladder, tipping on its left foot with the right foot in the air -->
+  <g transform="rotate(-7 845 480)" stroke="#5C2E0E" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke-width="15">
+      <line x1="875" y1="280" x2="845" y2="480"/>
+      <line x1="965" y1="280" x2="995" y2="480"/>
+    </g>
+    <g stroke-width="11">
+      <line x1="867.5" y1="330" x2="972.5" y2="330"/>
+      <line x1="860" y1="380" x2="980" y2="380"/>
+      <line x1="852.5" y1="430" x2="987.5" y2="430"/>
+    </g>
+    <g stroke="#D9A14A" stroke-width="7">
+      <line x1="875" y1="280" x2="845" y2="480"/>
+      <line x1="965" y1="280" x2="995" y2="480"/>
+      <line x1="867.5" y1="330" x2="972.5" y2="330"/>
+      <line x1="860" y1="380" x2="980" y2="380"/>
+      <line x1="852.5" y1="430" x2="987.5" y2="430"/>
+    </g>
+    <rect x="860" y="266" width="120" height="18" rx="6" fill="#D9A14A" stroke-width="5"/>
+  </g>
+
+  <!-- Wobble marks -->
+  <g fill="none" stroke="#B7410E" stroke-width="5" stroke-linecap="round">
+    <path d="M 1012 452 q 12 -6 20 6"/>
+    <path d="M 1024 434 q 16 -8 28 8"/>
+    <path d="M 812 262 q -14 12 -8 32"/>
+    <path d="M 792 252 q -20 18 -12 46"/>
+    <path d="M 900 62 q 10 -14 28 -14"/>
+    <path d="M 984 150 q 14 8 14 24"/>
+  </g>
+
+  <!-- The person: one foot on the top cap, the other leg and both arms out -->
+  <g fill="none" stroke="#2B2622" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 884 258 L 906 255"/>
+    <path d="M 898 254 L 903 214 L 915 178"/>
+    <path d="M 915 178 L 880 192 L 852 174 L 842 160"/>
+    <path d="M 915 178 L 940 114"/>
+    <path d="M 938 122 L 976 112 L 1008 92"/>
+    <path d="M 938 122 L 902 118 L 876 92"/>
+  </g>
+  <circle cx="950" cy="88" r="22" fill="#2B2622"/>
+
+  <!-- Two rusty nails on the ground below -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <g stroke="#5C2E0E" stroke-width="13">
+      <path d="M 712 470 L 790 466"/>
+      <path d="M 712 458 L 713 480"/>
+      <path d="M 1066 469 L 1124 467 Q 1146 466 1152 448"/>
+      <path d="M 1066 457 L 1067 479"/>
+    </g>
+    <g stroke="#B7410E" stroke-width="7">
+      <path d="M 712 470 L 790 466"/>
+      <path d="M 712 458 L 713 480"/>
+      <path d="M 1066 469 L 1124 467 Q 1146 466 1152 448"/>
+      <path d="M 1066 457 L 1067 479"/>
+    </g>
+  </g>
+  <g fill="#5C2E0E">
+    <path d="M 790 459 L 812 465 L 790 473 Z"/>
+    <path d="M 1145 449 L 1158 430 L 1160 452 Z"/>
+    <circle cx="738" cy="468" r="2.2"/>
+    <circle cx="762" cy="467.5" r="1.8"/>
+    <circle cx="1090" cy="468" r="2.2"/>
+    <circle cx="1114" cy="467" r="1.8"/>
+  </g>
+</svg>

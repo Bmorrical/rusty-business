@@ -2,6 +2,13 @@
   "name": "rusty-business",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
+  "homepage": "https://rusty.business",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bmorrical/rusty-business.git",
+    "directory": "apps/desktop"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
