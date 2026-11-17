@@ -3,10 +3,11 @@
 # anything goes out.
 #
 # What goes out, on a GitHub release named for the app's version: the Mac
-# app, as a .dmg with the model engine inside, and the Windows installer, as
-# an .exe, each with its checksum. The README links the newest release's
-# two. A Mac and a Windows computer each build theirs with the same command
-# a person runs, and the last job, the only one that may write, publishes
+# app, as a .dmg with the model engine inside, the Windows installer, as an
+# .exe, and the Linux app, as a .deb, an .rpm, and a .tar.gz, each with its
+# checksum. The README links the newest release's five. A Mac, a Windows
+# computer, and a Linux computer each build theirs with the same command a
+# person runs, and the last job, the only one that may write, publishes
 # them. A release that is out is never changed: for a version already
 # tagged, the run stops.
 name: Release
@@ -72,9 +73,44 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  linux:
+    name: Build the Linux app
+    needs: gate
+    runs-on: ubuntu-24.04
+    # Built in Ubuntu 22.04, the oldest system the packages are for: a program
+    # built against a newer C library does not start on an older one. GitHub
+    # is retiring its own 22.04 computers, so the build runs in 22.04's image
+    # instead, pinned by digest.
+    container: ubuntu:22.04@sha256:9abcaffc92a5279fff3a6a41635c0800ea33e528425fb389658806476e7defde
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install WebKitGTK, OpenSSL, and a C compiler
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: apt-get update && apt-get install --yes --no-install-recommends ca-certificates build-essential curl pkg-config libwebkit2gtk-4.1-dev libssl-dev
+      - name: Build the .deb, the .rpm, and the .tar.gz
+        run: bash scripts/linux-app.sh
+      - name: Keep the three and their checksums for the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-packages
+          path: |
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.deb
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.deb.sha256
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.rpm
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.rpm.sha256
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.tar.gz
+            apps/desktop/src-tauri/target/linux/Rusty-Business-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   publish:
     name: Publish the release
-    needs: [gate, mac, windows]
+    needs: [gate, mac, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # The only job that may write anything, and only the repository's
@@ -92,6 +128,10 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-exe
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-packages
           path: dist
       - name: Check the checksums, and make the release
         env:

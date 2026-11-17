@@ -288,6 +288,12 @@ test('the README lists what the app cannot do yet, and each limit on the roadmap
     assert.ok(!done.includes(pointer), `"${pointer}" is done on the roadmap, so it is no longer a limit`);
     assert.ok(ahead.includes(pointer), `a limit points to "${pointer}", which the roadmap does not have ahead`);
   }
+
+  // The download sections point to the roadmap the same way, and are held to
+  // the same rule.
+  for (const pointer of roadmapPointers(readme.replace(/\s+/g, ' '))) {
+    assert.ok(ahead.includes(pointer), `README.md points to "${pointer}", which the roadmap does not have ahead`);
+  }
 });
 
 test('sections, reasons, addresses, and policies are read from the text', () => {
