@@ -7,7 +7,8 @@ the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
 **Status:** version 0.1.0, and early. It runs on a Mac with Apple silicon, and
-you build it from source. What it cannot do yet is under [Limits](#limits).
+you build it from source with one command. What it cannot do yet is under
+[Limits](#limits).
 
 ## Screenshots
 
@@ -58,12 +59,11 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 ### Why choose Ollama
 
 - **Install and go, today.** Ollama installs on macOS, Windows, and Linux with
-  one download or one command. Rusty Business™ has no installer yet, and runs
-  on a Mac with Apple silicon only.
+  one download or one command. Rusty Business™ has no download yet: you build
+  it with one command, on a Mac with Apple silicon only.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads one of its three models on a first run, when
-  none of them is on the computer yet, and its engine is a separate program
-  that you install yourself.
+  none of them is on the computer yet, and offers no others.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
   a model.
@@ -106,20 +106,44 @@ the ground the next features stand on.
 
 ## Run the chat window (macOS)
 
-You need Rust, Node 20 or later, Xcode's command line tools, and the model
-engine, `mlx_lm.server`.
+On a Mac with Apple silicon and macOS 14 or later, this one line builds the
+app with its model engine inside, and opens it:
 
 ```bash
-cd apps/desktop && npm install && npm run tauri dev
+git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && make app
 ```
+
+It needs Apple's command line tools, which bring `git` and `make`. On a Mac
+without them, the first `git` offers to install them; then run the line
+again. Everything else it fetches itself, its own Rust, Node, and Python
+included, each pinned by version and checksum. All of it stays in
+`apps/desktop/src-tauri/target/mac`, which git ignores, and nothing is
+installed in your home folder or on the system. The first run takes longer,
+since it fetches and builds everything once; later runs keep what still
+matches its pins.
+
+`make dmg` builds the same app and packs it as a `.dmg`, with its checksum
+beside it, in that folder. The app is not signed yet; see pin 1 on the
+[roadmap](ROADMAP.md).
 
 On a first run, with none of its models on the computer, the app lists them
 with their download sizes. Download brings the one you pick from Hugging
 Face, and the app then starts the engine with it.
 
-When no engine is answering, the app starts one and stops it again when the
-app quits. An engine that is already running is used as it is and left
-running. To start one yourself, in another terminal:
+When no engine is answering, the app starts the one it carries and stops it
+again when the app quits. An engine that is already running is used as it is
+and left running.
+
+To work on the app itself, with the page reloading as you edit it, you need
+Rust, Node 20 or later, Xcode's command line tools, and the model engine,
+`mlx_lm.server`, on the computer:
+
+```bash
+cd apps/desktop && npm install && npm run tauri dev
+```
+
+Run that way, the app carries no engine, so it starts `mlx_lm.server` from
+where it is installed. To start one yourself, in another terminal:
 
 ```bash
 mlx_lm.server --port 8080
@@ -200,10 +224,8 @@ next.
 
 - **One kind of computer.** It runs on a Mac with Apple silicon. Windows has
   no engine chosen yet. (On the roadmap: An engine for Windows.)
-- **No installer.** You build it from source. (On the roadmap: Installers.)
-- **It does not install its engine.** The app starts `mlx_lm.server` when
-  that program is already on the computer. It does not put it there. (On the
-  roadmap: Installers.)
+- **No download yet.** You build it from source, with one command:
+  `make app`. (On the roadmap: Installers.)
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer. It does not put Docker there. The chat does not need the
   stack yet.

@@ -1,8 +1,9 @@
 //! Starting the engine.
 //!
 //! When no engine answers, the app starts one, so there is nothing to type in
-//! a terminal first. On a Mac the engine's program is `mlx_lm.server`. The app
-//! does not install it: it starts one that is already on this computer.
+//! a terminal first. On a Mac the engine's program is `mlx_lm.server`. The Mac
+//! app that `make app` and `make dmg` build carries one inside it; otherwise
+//! the app starts one that is already on this computer. It installs none.
 //!
 //! Four rules live here:
 //! - the whole plan is checked before anything starts: the program, a model
@@ -52,16 +53,33 @@ pub fn program_name() -> Option<&'static str> {
 ///
 /// A program named by `RUSTY_ENGINE_PROGRAM` is the only one tried: the app
 /// does not fall back to another than the one it was told to use. Otherwise
-/// the first one found in `places` is used.
+/// the engine the app carries comes first, when it carries one, then the
+/// first one found in `places`.
 ///
-/// `variable` reads one environment variable.
-pub fn find_program(name: &str, variable: impl Fn(&str) -> Option<String>, home: Option<&Path>) -> Option<PathBuf> {
+/// `variable` reads one environment variable, and `carried` is the folder of
+/// the engine the app carries (see `carried_folder`).
+pub fn find_program(name: &str, variable: impl Fn(&str) -> Option<String>, home: Option<&Path>, carried: Option<&Path>) -> Option<PathBuf> {
     let set = |key: &str| variable(key).map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
     if let Some(named) = set(PROGRAM_VARIABLE) {
         let named = PathBuf::from(named);
         return (named.is_absolute() && can_run(&named)).then_some(named);
     }
-    places(set("PATH").as_deref(), home).into_iter().map(|folder| folder.join(name)).find(|candidate| can_run(candidate))
+    carried
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(places(set("PATH").as_deref(), home))
+        .map(|folder| folder.join(name))
+        .find(|candidate| can_run(candidate))
+}
+
+/// Where the engine the app carries is, when the app runs as a Mac app:
+/// `Contents/Resources/engine/bin`, beside the `Contents/MacOS` folder that
+/// holds the app's own program, `exe`. `make app` and `make dmg` put it there.
+/// None when the app runs any other way, as it does from `npm run tauri dev`.
+pub fn carried_folder(exe: &Path) -> Option<PathBuf> {
+    let programs = exe.parent()?;
+    let contents = programs.parent()?;
+    (programs.file_name()? == "MacOS" && contents.file_name()? == "Contents").then(|| contents.join("Resources").join("engine").join("bin"))
 }
 
 /// The folders the program is looked for in, in order: each folder on `PATH`
@@ -183,7 +201,8 @@ pub struct Found {
 pub fn look() -> Found {
     let name = program_name();
     let home = std::env::home_dir();
-    let program = name.and_then(|name| find_program(name, |key| std::env::var(key).ok(), home.as_deref()));
+    let carried = std::env::current_exe().ok().and_then(|exe| carried_folder(&exe));
+    let program = name.and_then(|name| find_program(name, |key| std::env::var(key).ok(), home.as_deref(), carried.as_deref()));
     Found { name, program, models: crate::models::on_disk().len() }
 }
 
@@ -893,7 +912,7 @@ mod tests {
             let unusual = program_in(&root.join("unusual"), "exit 0");
             let find = |pairs: &[(&str, String)]| {
                 let set: HashMap<String, String> = pairs.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
-                find_program(NAME, |name| set.get(name).cloned(), Some(&home))
+                find_program(NAME, |name| set.get(name).cloned(), Some(&home), None)
             };
             let text = |file: &Path| file.to_str().unwrap().to_string();
             let path = ("PATH", format!("/nowhere/at/all:{}", text(on_path.parent().unwrap())));
@@ -940,8 +959,53 @@ mod tests {
 
             let found = find_program(NAME, |name| (name == "PATH").then(|| {
                 [root.join("folder"), root.join("plain"), root.join("links")].map(|folder| folder.to_str().unwrap().to_string()).join(":")
-            }), None);
+            }), None, None);
             assert_eq!(found, Some(root.join("links").join(NAME)));
+        }
+
+        #[test]
+        fn the_engine_the_app_carries_comes_first() {
+            let root = scratch();
+            let home = root.join("home");
+            let carried = program_in(&root.join("Any Name.app/Contents/Resources/engine/bin"), "exit 0");
+            let carried_folder = carried.parent().unwrap();
+            let on_path = program_in(&root.join("on-path"), "exit 0");
+            let named = program_in(&root.join("named"), "exit 0");
+            let text = |file: &Path| file.to_str().unwrap().to_string();
+            let path = text(on_path.parent().unwrap());
+            let find = |pairs: &[(&str, String)], carried: Option<&Path>| {
+                let set: HashMap<String, String> = pairs.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
+                find_program(NAME, |name| set.get(name).cloned(), Some(&home), carried)
+            };
+
+            // Ahead of PATH and every usual folder.
+            assert_eq!(find(&[("PATH", path.clone())], Some(carried_folder)), Some(carried.clone()));
+            // Not there, or not one that can run: the usual search goes on.
+            assert_eq!(find(&[("PATH", path.clone())], Some(&root.join("empty"))), Some(on_path.clone()));
+            fs::set_permissions(&carried, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(find(&[("PATH", path.clone())], Some(carried_folder)), Some(on_path));
+            fs::set_permissions(&carried, fs::Permissions::from_mode(0o755)).unwrap();
+            // A program named outright is still the only one tried.
+            assert_eq!(find(&[("PATH", path.clone()), (PROGRAM_VARIABLE, text(&named))], Some(carried_folder)), Some(named));
+            assert_eq!(find(&[("PATH", path), (PROGRAM_VARIABLE, text(&root.join("gone").join(NAME)))], Some(carried_folder)), None);
+        }
+
+        #[test]
+        fn the_carried_engine_is_looked_for_only_inside_a_mac_app() {
+            // The app's file name does not matter, only where its program is.
+            let app = Path::new("/Applications/Any Name.app/Contents");
+            assert_eq!(carried_folder(&app.join("MacOS").join("rusty-business")), Some(app.join("Resources").join("engine").join("bin")));
+            // Anywhere the app runs without its bundle, there is none.
+            for exe in [
+                "/Users/someone/rusty-business/apps/desktop/src-tauri/target/debug/rusty-business",
+                "/usr/local/bin/rusty-business",
+                "/Applications/Any Name.app/Contents/rusty-business",
+                "/Applications/Somewhere/MacOS/rusty-business",
+                "rusty-business",
+                "/",
+            ] {
+                assert_eq!(carried_folder(Path::new(exe)), None, "{exe}");
+            }
         }
 
         /// Needs the engine's program where the app looks for it (or named

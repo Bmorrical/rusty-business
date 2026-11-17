@@ -19,6 +19,8 @@ Helpers the Makefile calls, and the repository's own checks.
 | `screenshots.test.mjs` | Fails when a picture stops opening full size, is too small to read, or is missing from the set, when the first wide picture is shown outside the gallery, when the recorded chats name a model the app does not allow, when the recorded engine report and the app's own differ in their fields, when the page stops naming the models on this computer while the engine is off, when the page stops asking for the engine to be started or stops saying why it could not be, or when the page stops asking for the stack to be started or stops saying why it is not running | `make test-repo`  |
 | `comparison.test.mjs` | Fails when the README's comparison with Ollama is missing or gives fewer than three reasons either way, leaves out a maker on the app's list of models, or links anywhere but Ollama's own site, when the README stops listing what the app cannot do yet, or when the chat window gains a way to reach past this computer | `make test-repo`  |
 | `app-stack.test.mjs` | Fails when the stack the desktop app starts drifts from the one `make up` starts in anything but its three changes, gives a port to anything but the front door or moves it off 4700, builds an image or pulls one not pinned by digest, reads a setting the app never writes to its `stack.env`, or shares the make-up stack's name | `make test-repo`  |
+| `mac-app.sh`       | Builds the Mac app with its engine inside, from the checkout alone. It fetches its own Rust, Node, and Python, each pinned by version and checksum, installs the engine's packages, each pinned by hash, and keeps all of it in `apps/desktop/src-tauri/target/mac`. It runs with none of the account's own tools or settings, and installs nothing in the home folder or on the system. `app` opens the app; `dmg` packs it as a `.dmg`, with its checksum beside it | `make app`, `make dmg` |
+| `mac-app.test.mjs` | Fails when the Mac app's script takes anything from the account it runs in, keeps anything outside `target/mac`, removes anything it did not make, downloads anything not over HTTPS or not pinned by checksum, installs a package not pinned by hash or built for a newer macOS than the app allows, or lets this computer's Python settings into the engine, or when the app stops looking first for the engine it carries, or the Mac stops showing the name with its ™ | `make test-repo`  |
 
 `stack-env.sh` is how a program on this computer finds the stack:
 
@@ -30,6 +32,7 @@ prints, among others, `DATABASE_URL`, `REDIS_URL`, and the `STACK_` addresses
 the end-to-end suite uses. It reads `infra/.env` as text and never runs it.
 
 Scripts here are Bash or plain Node with no packages to install, start by
-moving to the repository's root, and stop at the first error.
-`screenshots.mjs` is the one that needs something more: Google Chrome or
-Chromium on the computer. No test starts the browser.
+moving to the repository's root, and stop at the first error. Two need
+something more. `screenshots.mjs` needs Google Chrome or Chromium on the
+computer, and `mac-app.sh` needs a Mac with Apple silicon and Apple's
+command line tools. No test starts the browser or builds the app.

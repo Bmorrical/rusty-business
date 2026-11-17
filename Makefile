@@ -4,7 +4,8 @@ COMPOSE := docker compose --env-file infra/.env --file infra/compose.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap up down logs ps health \
-        test test-services test-repo test-desktop test-live e2e screenshots
+        test test-services test-repo test-desktop test-live e2e screenshots \
+        app dmg engine-pins
 
 help: ## List these commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) \
@@ -51,3 +52,15 @@ e2e: ## End to end: every part of the running stack, from outside
 screenshots: ## Remake the pictures in docs/screenshots (needs Google Chrome)
 	cd apps/desktop && { [ -d node_modules ] || npm ci; } && npm run build
 	node scripts/screenshots.mjs
+
+app: ## Build the Mac app with its engine inside, and open it (fetches its own tools)
+	@scripts/mac-app.sh app
+
+dmg: ## Build the Mac app and pack it as a .dmg, with its checksum
+	@scripts/mac-app.sh dmg
+
+engine-pins: ## Pin the app's engine again from apps/desktop/engine/requirements.in (needs uv)
+	MACOSX_DEPLOYMENT_TARGET=14.0 uv pip compile apps/desktop/engine/requirements.in \
+		--generate-hashes --python-version 3.12 --python-platform aarch64-apple-darwin \
+		--only-binary :all: --custom-compile-command "make engine-pins" \
+		--output-file apps/desktop/engine/requirements.txt
