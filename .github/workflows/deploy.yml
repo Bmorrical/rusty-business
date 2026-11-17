@@ -1,0 +1,31 @@
+# Deploy. A stub: there is nothing to deploy yet.
+#
+# What is real is the order. This workflow runs only on request, only from
+# main, and its first job is the gate. Every other job needs the gate, so a
+# red gate stops the run before anything goes out.
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Gate
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/gate.yml
+
+  deploy:
+    name: Deploy (nothing yet)
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Nothing to deploy yet
+        run: echo "The gate is green. There is nothing to deploy yet."
