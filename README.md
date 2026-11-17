@@ -211,6 +211,11 @@ next.
 What is planned, and in what order, is in [ROADMAP.md](ROADMAP.md). It
 promises no dates: a thing ships when its tests are green.
 
+## Security
+
+To report a security problem, use GitHub's private reporting, not a public
+issue. [SECURITY.md](SECURITY.md) says how, and what is covered.
+
 ## License
 
 Rusty Business™ is open source under the [MIT License](LICENSE).
