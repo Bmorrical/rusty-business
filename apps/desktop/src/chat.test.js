@@ -15,6 +15,8 @@ import {
   requestMessages,
   savedTurn,
   shouldStart,
+  STACK_STARTING,
+  stackLine,
   startLine,
   titleFrom,
   tokensPerSecond,
@@ -235,4 +237,26 @@ test("a download's progress stays between nothing and done", () => {
   assert.equal(downloadLine({ done: 3.1e9, total: 8256384748 }), "3.1 of 8.3 GB");
   assert.equal(downloadLine({ done: 9e9, total: 8256384748 }), "8.3 of 8.3 GB");
   assert.equal(downloadLine(null), "0.0 of 0.0 GB");
+});
+
+// Brad: "it should search and up the local models and stack." The footer says
+// the stack is starting, then where it answers, or why it is not running in
+// the app's own words, so a person knows whether to select Try again.
+test("the stack's line says it is starting, where it answers, or why it is not running", () => {
+  const running = { running: true, started: true, address: "127.0.0.1:4700", reason: null };
+  assert.equal(stackLine(running, false), "Stack on 127.0.0.1:4700");
+  assert.equal(stackLine({ ...running, started: false }, false), "Stack on 127.0.0.1:4700");
+
+  // While the app starts it, that is all the line says, even over an older report.
+  assert.equal(stackLine(null, true), STACK_STARTING);
+  assert.equal(stackLine({ running: false, started: false, address: "127.0.0.1:4700", reason: "Docker is not running." }, true), STACK_STARTING);
+  assert.match(STACK_STARTING, /first start downloads it/);
+
+  const noDocker = "Docker is not on this computer, so the stack is not running; the chat does not need it yet.";
+  assert.equal(stackLine({ running: false, started: false, address: "127.0.0.1:4700", reason: `  ${noDocker}\n` }, false), noDocker);
+  assert.equal(stackLine({ running: false, started: false, address: "127.0.0.1:4700", reason: null }, false), "The stack is not running.");
+
+  // Before the app has asked, there is nothing to say.
+  assert.equal(stackLine(null, false), "");
+  assert.equal(stackLine(undefined, false), "");
 });

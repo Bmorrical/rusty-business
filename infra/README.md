@@ -46,7 +46,8 @@ make up
 make down
 ```
 
-`make down` keeps the data. No command in this repository removes a volume.
+`make down` keeps the data. Nothing in this repository removes a volume of a
+stack you use; the desktop app's live test removes only its own.
 `make ps` shows each container's health, and `make logs` follows the logs.
 
 ## How it is locked down
@@ -73,6 +74,14 @@ GitHub's container registry, for the desktop app to pull when it starts the
 stack. This stack does not use them: `make up` builds its own, as
 `rusty-business/api:dev` and `rusty-business/worker:dev`. How and when they
 are published is in [.github/workflows](../.github/workflows).
+
+The app's stack is
+[apps/desktop/src-tauri/stack-compose.yaml](../apps/desktop/src-tauri/stack-compose.yaml):
+this stack with the published images pinned by digest, and a port for the
+front door only. `scripts/app-stack.test.mjs` keeps the two files in step.
+When the services change, the new digests from Deploy's summary are pinned
+there by hand. Both stacks put the front door on 4700, so one runs at a
+time; while the stack from `make up` answers there, the app starts nothing.
 
 ## Notes
 

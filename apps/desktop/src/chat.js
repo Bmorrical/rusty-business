@@ -94,6 +94,21 @@ export function startLine(start, engine) {
   return reason;
 }
 
+/** What the footer says while the app starts the stack. */
+export const STACK_STARTING = "Starting the stack. The first start downloads it, which takes a few minutes.";
+
+/**
+ * The footer's line about the stack: that it is starting, where its front
+ * door answers once it runs, or why it is not running, in the app's words.
+ * Nothing before the app has asked.
+ */
+export function stackLine(stack, starting) {
+  if (starting) return STACK_STARTING;
+  if (!stack) return "";
+  if (stack.running) return `Stack on ${stack.address}`;
+  return (stack.reason ?? "").trim() || "The stack is not running.";
+}
+
 /** Tokens a second for one reply, or null when it cannot be worked out. */
 export function tokensPerSecond(turn) {
   if (!turn?.completionTokens || !turn?.seconds || turn.seconds < 0.05) return null;

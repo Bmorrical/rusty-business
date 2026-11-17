@@ -10,6 +10,7 @@ The desktop app's Rust code.
 | `models.rs`   | The models already on this computer: reads the Hugging Face cache folder and reports the app's models that are whole there |
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
+| `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each. Trash moves a file; nothing deletes |
 
 Three rules live in `engine.rs`, each with tests:
@@ -47,8 +48,21 @@ Five more live in `downloads.rs`, each with tests:
   only where there is no folder for it yet.
 - One download at a time, and Cancel stops it and leaves nothing behind.
 
+Four more live in `stack.rs`, each with tests:
+
+- The whole plan is checked before anything starts: this system, the port,
+  Docker, and a place for the settings and the log.
+- Only what is missing is started. A front door that answers is left alone,
+  and so is anything else that holds its port.
+- Asking twice changes nothing. There is one start at a time.
+- The app stops only a stack it started, and only when the app quits.
+  Stopping keeps every container and its data. Nothing removes a volume or
+  an image, and Docker Desktop is left running.
+
 An engine the app starts listens on this computer only, is told to stay
-offline, and is never asked to log what is typed.
+offline, and is never asked to log what is typed. A stack the app starts
+has its front door on this computer only, and its passwords are made on its
+first start and kept where only this computer's user can read them.
 
 A new command is written here, added to the list in `lib.rs`, and called from
 the page with `invoke`.

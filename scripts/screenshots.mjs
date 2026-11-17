@@ -112,6 +112,17 @@ export const NO_MODEL = {
 };
 
 /**
+ * What the app reports when the stack's front door already answers, as it
+ * does once the stack runs. Nothing is started while the pictures are made.
+ */
+export const STACK_RUNNING = {
+  running: true,
+  started: false,
+  address: '127.0.0.1:4700',
+  reason: null,
+};
+
+/**
  * What a scene's page is given: the report about the engine, the report about
  * starting it, and the saved chats. A first run has no saved chats yet.
  */
@@ -122,19 +133,22 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the four
+ * The script that stands in for Rust inside the page. It answers the five
  * calls the pictures need and refuses the rest, a download among them. Asked
  * to start the engine, it starts nothing and gives the reason it was handed,
- * by default that the engine's program was not found.
+ * by default that the engine's program was not found. Asked to start the
+ * stack, it starts nothing and says the stack is running.
  */
-export function standIn(engine, sessions, start = NOT_STARTED) {
+export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
     const engine = ${JSON.stringify(engine)};
     const sessions = ${JSON.stringify(sessions)};
     const notStarted = ${JSON.stringify(start)};
+    const stack = ${JSON.stringify(stack)};
     const answers = {
       engine_status: () => engine,
       start_engine: () => notStarted,
+      start_stack: () => stack,
       list_sessions: () =>
         sessions.map((entry) => ({
           id: entry.id,

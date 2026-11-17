@@ -2,6 +2,7 @@ mod downloads;
 mod engine;
 mod models;
 mod sessions;
+mod stack;
 mod starter;
 
 use tauri::Manager;
@@ -14,6 +15,7 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(starter::Starter::new(data.join("engine.log")));
+            app.manage(stack::Stack::new(data.join("stack"), data.join("stack.log"), stack::FRONT_DOOR_PORT));
             // What a download left when the app last quit part way is thrown away.
             let downloads = downloads::Downloads::new(data.join("downloads"));
             downloads.clear();
@@ -25,6 +27,7 @@ pub fn run() {
             engine::chat_stream,
             engine::stop_chat,
             starter::start_engine,
+            stack::start_stack,
             downloads::download_model,
             downloads::stop_download,
             sessions::list_sessions,
@@ -35,13 +38,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    // When the app quits, it stops the engine it started. An engine that was
-    // already running is not the app's to stop.
+    // When the app quits, it stops the engine and the stack it started. One
+    // that was already running is not the app's to stop.
     app.run(|app, event| {
-        if let tauri::RunEvent::Exit = event
-            && let Some(starter) = app.try_state::<starter::Starter>()
-        {
-            starter.stop();
+        if let tauri::RunEvent::Exit = event {
+            if let Some(starter) = app.try_state::<starter::Starter>() {
+                starter.stop();
+            }
+            if let Some(stack) = app.try_state::<stack::Stack>() {
+                stack.stop();
+            }
         }
     });
 }
