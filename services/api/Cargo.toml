@@ -1,0 +1,23 @@
+[package]
+name = "rusty-api"
+description = "The API: says who it is and whether Postgres and Redis answer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+redis = { version = "1.8.2", default-features = false, features = ["tokio-comp"] }
+rusty-shared = { workspace = true }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "io-util", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+# test-util lets a test pause the clock, so a timeout costs no real time.
+tokio = { version = "1.54.1", features = ["test-util"] }
+tower = { version = "0.5.3", features = ["util"] }

@@ -1,0 +1,9 @@
+# An allow-list: an image build sees only what the services are made of.
+# Everything else (the desktop app, docs, infra/.env) never leaves the disk.
+*
+!Cargo.toml
+!Cargo.lock
+!packages
+!services
+**/target
+**/*.md
