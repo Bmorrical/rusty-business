@@ -15,9 +15,13 @@ Select a picture to open it full size.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](docs/screenshots/chat.png)](docs/screenshots/chat.png?raw=true)
 
-| A model's thinking, apart from its answer | A new chat | No engine answering |
-| ----------------------------------------- | ---------- | ------------------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
+| A model's thinking, apart from its answer | A new chat |
+| ----------------------------------------- | ---------- |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
+
+| No engine answering | The first run: pick a model |
+| ------------------- | --------------------------- |
+| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -36,10 +40,13 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 - **A window that cannot reach past your computer.** That is how it is built,
   not a setting. The page has no way to call out, and the Rust behind it
   refuses an engine address that is not on this computer. An engine the app
-  starts listens on this computer only, and is told to stay offline. There is
-  no account, no sign-in, and nothing in the cloud. Ollama keeps your prompts
-  on your computer too when a model runs there. It also offers models that run
-  in its cloud, with a switch that turns them off.
+  starts listens on this computer only, and is told to stay offline. The app
+  itself reaches out once, and only when you ask: on a first run, Download
+  brings the model you pick from Hugging Face, over https and from nowhere
+  else, and nothing you type goes with it. There is no account, no sign-in,
+  and nothing in the cloud. Ollama keeps your prompts on your computer too
+  when a model runs there. It also offers models that run in its cloud, with
+  a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
   can open, copy, and back up. The trash is a folder too, so nothing is
   deleted.
@@ -53,8 +60,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   one download or one command. Rusty Business™ has no installer yet, and runs
   on a Mac with Apple silicon only.
 - **Any model, one command away.** Ollama downloads a model when you ask for
-  it. Rusty Business™ does not download models yet, and its engine is a
-  separate program that you install yourself.
+  it. Rusty Business™ downloads one of its three models on a first run, when
+  none of them is on the computer yet, and its engine is a separate program
+  that you install yourself.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
   a model.
@@ -102,6 +110,10 @@ engine, `mlx_lm.server`.
 ```bash
 cd apps/desktop && npm install && npm run tauri dev
 ```
+
+On a first run, with none of its models on the computer, the app lists them
+with their download sizes. Download brings the one you pick from Hugging
+Face, and the app then starts the engine with it.
 
 When no engine is answering, the app starts one and stops it again when the
 app quits. An engine that is already running is used as it is and left
@@ -183,9 +195,10 @@ next.
 - **No installer.** You build it from source. (On the roadmap: Installers.)
 - **It does not install its engine.** The app starts `mlx_lm.server` when
   that program is already on the computer. It does not put it there. (On the
-  roadmap: A first-run picker.)
-- **It does not download models.** The models have to be on the computer
-  already. (On the roadmap: A first-run picker.)
+  roadmap: Installers.)
+- **One model, on a first run.** The app offers its models only while none
+  of them is on the computer, and downloads one at a time. A second model
+  has to be downloaded by hand.
 - **Words only.** It takes no pictures and no files, and it shows an answer as
   plain text.
 - **A short list of models.** That is on purpose. A model that is not on the

@@ -111,10 +111,15 @@ struct WeightsIndex {
     weight_map: HashMap<String, String>,
 }
 
+/// The folder a model has in the models folder.
+pub(crate) fn folder_name(id: &str) -> String {
+    format!("{MODEL_FOLDER}{}", id.replace('/', "--"))
+}
+
 /// True when the folder holds a whole model: the download that `refs/main`
 /// names has the files the engine asks for, and every weights file the model
 /// names. A download that stopped part way leaves some of those out.
-fn whole(folder: &Path) -> bool {
+pub(crate) fn whole(folder: &Path) -> bool {
     let Ok(named) = fs::read_to_string(folder.join("refs").join("main")) else {
         return false;
     };
@@ -446,6 +451,7 @@ mod tests {
             models: Vec::new(),
             hidden: 0,
             on_disk: models_in(&hub),
+            offers: Vec::new(),
             error: Some("The engine is not answering.".to_string()),
             start_hint: "mlx_lm.server --port 8080".to_string(),
         };

@@ -3,10 +3,15 @@ import { test } from "node:test";
 
 import {
   dayLabel,
+  downloaded,
+  downloadLine,
+  firstRunOffers,
   formatCount,
+  formatSize,
   formatWindow,
   fullness,
   onDiskLine,
+  quickest,
   requestMessages,
   savedTurn,
   shouldStart,
@@ -184,4 +189,50 @@ test("when the app cannot start the engine, it says why, once", () => {
   // The same sentence is not said twice, one line under the other.
   const badAddress = "The engine address must be on this computer (for example http://127.0.0.1:8080/v1).";
   assert.equal(startLine({ answering: false, started: false, reason: badAddress }, { reachable: false, error: badAddress }), "");
+});
+
+// Brad, on the first run: "I should be able to just pull the .dmg or .exe from
+// read me and install and go, one click ready." He picked "Picker with sizes".
+// On a computer with none of the app's models, the page lists the ones it can
+// download, each with its size, and points to the quickest.
+const OFFERS = [
+  { id: "mlx-community/phi-4-4bit", name: "Phi-4", maker: "Microsoft", bytes: 8256384748 },
+  { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B", maker: "OpenAI", bytes: 12104215835 },
+  { id: "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", bytes: 17792581692 },
+];
+
+test("the picker shows only on a first run, with none of the app's models anywhere", () => {
+  assert.deepEqual(firstRunOffers({ reachable: false, onDisk: [], models: [], offers: OFFERS }), OFFERS);
+  // One model on the disk is enough to start from, so nothing is offered.
+  assert.deepEqual(firstRunOffers({ reachable: false, onDisk: [OFFERS[0]], models: [], offers: OFFERS }), []);
+  // An engine that already serves a model needs no download either.
+  assert.deepEqual(firstRunOffers({ reachable: true, onDisk: [], models: [{ id: "x" }], offers: OFFERS }), []);
+  // Before the first report, or from an older one, there is nothing to offer.
+  assert.deepEqual(firstRunOffers(null), []);
+  assert.deepEqual(firstRunOffers({ reachable: false, onDisk: [] }), []);
+});
+
+test("the quickest to start is the smallest download", () => {
+  assert.equal(quickest(OFFERS), "mlx-community/phi-4-4bit");
+  assert.equal(quickest([OFFERS[2], OFFERS[1]]), "mlx-community/gpt-oss-20b-MXFP4-Q8");
+  assert.equal(quickest([]), "");
+  assert.equal(quickest(undefined), "");
+});
+
+test("sizes read in gigabytes, the way the app's sentences give them", () => {
+  assert.deepEqual(OFFERS.map((offer) => formatSize(offer.bytes)), ["8.3 GB", "12.1 GB", "17.8 GB"]);
+  assert.equal(formatSize(0), "0.0 GB");
+  assert.equal(formatSize(undefined), "0.0 GB");
+});
+
+test("a download's progress stays between nothing and done", () => {
+  assert.equal(downloaded({ done: 0, total: 8256384748 }), 0);
+  assert.equal(downloaded({ done: 4128192374, total: 8256384748 }), 0.5);
+  assert.equal(downloaded({ done: 9e9, total: 8256384748 }), 1);
+  assert.equal(downloaded({ done: 5, total: 0 }), 0);
+  assert.equal(downloaded(null), 0);
+
+  assert.equal(downloadLine({ done: 3.1e9, total: 8256384748 }), "3.1 of 8.3 GB");
+  assert.equal(downloadLine({ done: 9e9, total: 8256384748 }), "8.3 of 8.3 GB");
+  assert.equal(downloadLine(null), "0.0 of 0.0 GB");
 });

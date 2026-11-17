@@ -122,3 +122,40 @@ export function savedTurn(turn) {
   }
   return saved;
 }
+
+/** "8.3 GB": a download's size, the way the app's own sentences give it. */
+export function formatSize(bytes) {
+  return `${(Number(bytes ?? 0) / 1e9).toFixed(1)} GB`;
+}
+
+/**
+ * The models the page offers to download, in the app's order. Only on a first
+ * run: when none of the app's models is on this computer's disk and the engine
+ * serves none of them either. Otherwise nothing is offered.
+ */
+export function firstRunOffers(engine) {
+  if (!engine || engine.onDisk?.length || engine.models?.length) return [];
+  return engine.offers ?? [];
+}
+
+/** The offer that gets talking soonest: the smallest download. */
+export function quickest(offers) {
+  let best = null;
+  for (const offer of offers ?? []) {
+    if (!best || offer.bytes < best.bytes) best = offer;
+  }
+  return best?.id ?? "";
+}
+
+/** How far a download has come, from 0 to 1. */
+export function downloaded(progress) {
+  if (!progress?.total) return 0;
+  return Math.min(1, Math.max(0, progress.done / progress.total));
+}
+
+/** "3.1 of 8.3 GB": how far a download has come, in words. */
+export function downloadLine(progress) {
+  const total = Number(progress?.total ?? 0);
+  const done = Math.min(Number(progress?.done ?? 0), total);
+  return `${(done / 1e9).toFixed(1)} of ${formatSize(total)}`;
+}

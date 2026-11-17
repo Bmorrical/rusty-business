@@ -35,14 +35,16 @@ export const SCALE = 2;
 
 /**
  * One picture each. `open` is the id of the saved chat to show, `thinking`
- * opens that chat's thinking, and `engine: 'off'` is the app with no engine
- * answering.
+ * opens that chat's thinking, `engine: 'off'` is the app with no engine
+ * answering, and `engine: 'first-run'` is the app on a computer with none of
+ * its models yet.
  */
 export const SCENES = [
   { file: 'chat.png', scheme: 'dark', engine: 'on', open: 'nails' },
   { file: 'thinking.png', scheme: 'dark', engine: 'on', open: 'ladder', thinking: true },
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
+  { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
 ];
 
 const BROWSERS = [
@@ -82,6 +84,14 @@ export function engineOff(engine) {
 }
 
 /**
+ * What the app reports on a computer with none of its models: no engine
+ * answers, nothing is on the disk, and the models it can download are offered.
+ */
+export function firstRun(engine) {
+  return { ...engineOff(engine), onDisk: [] };
+}
+
+/**
  * What the app reports when it went to start the engine and could not find
  * the engine's program. The sentence is the app's own, from starter.rs.
  */
@@ -92,15 +102,36 @@ export const NOT_STARTED = {
 };
 
 /**
- * The script that stands in for Rust inside the page. It answers the four
- * calls the pictures need and refuses the rest. Asked to start the engine, it
- * starts nothing and says the engine's program was not found.
+ * What the app reports when it went to start the engine with no model on the
+ * disk to serve. The sentence is the app's own, from starter.rs.
  */
-export function standIn(engine, sessions) {
+export const NO_MODEL = {
+  answering: false,
+  started: false,
+  reason: 'With no model to serve, the app did not start the engine.',
+};
+
+/**
+ * What a scene's page is given: the report about the engine, the report about
+ * starting it, and the saved chats. A first run has no saved chats yet.
+ */
+export function engineFor(scene, engine, sessions) {
+  if (scene.engine === 'first-run') return { report: firstRun(engine), start: NO_MODEL, saved: [] };
+  if (scene.engine === 'off') return { report: engineOff(engine), start: NOT_STARTED, saved: sessions };
+  return { report: engine, start: NOT_STARTED, saved: sessions };
+}
+
+/**
+ * The script that stands in for Rust inside the page. It answers the four
+ * calls the pictures need and refuses the rest, a download among them. Asked
+ * to start the engine, it starts nothing and gives the reason it was handed,
+ * by default that the engine's program was not found.
+ */
+export function standIn(engine, sessions, start = NOT_STARTED) {
   return `(() => {
     const engine = ${JSON.stringify(engine)};
     const sessions = ${JSON.stringify(sessions)};
-    const notStarted = ${JSON.stringify(NOT_STARTED)};
+    const notStarted = ${JSON.stringify(start)};
     const answers = {
       engine_status: () => engine,
       start_engine: () => notStarted,
@@ -247,17 +278,17 @@ async function takePicture(send, address, scene, engine, sessions) {
   );
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scene.scheme }] }, tab);
   await send('Emulation.setFocusEmulationEnabled', { enabled: true }, tab);
-  await send(
-    'Page.addScriptToEvaluateOnNewDocument',
-    { source: standIn(scene.engine === 'off' ? engineOff(engine) : engine, sessions) },
-    tab,
-  );
+  const { report, start, saved } = engineFor(scene, engine, sessions);
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: standIn(report, saved, start) }, tab);
   await send('Page.navigate', { url: address }, tab);
   await until(send, tab, `document.querySelector('.engine .dot') !== null`, 'the engine line');
-  if (scene.engine === 'off') {
+  if (scene.engine !== 'on') {
     // With no engine answering, the page asks for one to be started. The
     // picture is of the page once it has its answer, not of the wait.
     await until(send, tab, `document.querySelector('.engine button.wide') !== null`, 'the Try again button');
+  }
+  if (scene.engine === 'first-run') {
+    await until(send, tab, `document.querySelectorAll('.offer').length > 0`, 'the models to download');
   }
 
   if (scene.open) {

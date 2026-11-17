@@ -4,10 +4,15 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
   dayLabel,
+  downloaded,
+  downloadLine,
+  firstRunOffers,
   formatCount,
+  formatSize,
   formatWindow,
   fullness,
   onDiskLine,
+  quickest,
   requestMessages,
   savedTurn,
   shouldStart,
@@ -31,10 +36,15 @@ const draft = ref("");
 const busy = ref(false);
 const problem = ref("");
 const askTrash = ref("");
+const downloading = ref("");
+const progress = ref(null);
+const stopping = ref(false);
+const stoppedNote = ref("");
 const thread = ref(null);
 const composer = ref(null);
 
 let chatId = "";
+let checkAgain = false;
 let stickToBottom = true;
 
 function blankSession() {
@@ -46,6 +56,8 @@ const model = computed(() => models.value.find((entry) => entry.id === modelId.v
 const used = computed(() => tokensUsed(current.value.messages));
 const full = computed(() => fullness(used.value, model.value?.context));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boolean(model.value));
+const offers = computed(() => firstRunOffers(engine.value));
+const quick = computed(() => quickest(offers.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
 
 function remembered() {
@@ -75,7 +87,13 @@ watch(modelId, (id) => {
 });
 
 async function checkEngine() {
-  if (!inApp || checking.value) return;
+  if (!inApp) return;
+  if (checking.value) {
+    // The check under way may have looked before whatever asked for this
+    // one, such as a download that just finished, so one more follows it.
+    checkAgain = true;
+    return;
+  }
   checking.value = true;
   try {
     engine.value = await invoke("engine_status");
@@ -95,6 +113,49 @@ async function checkEngine() {
   } finally {
     starting.value = false;
     checking.value = false;
+    if (checkAgain) {
+      checkAgain = false;
+      checkEngine();
+    }
+  }
+}
+
+/**
+ * Downloads one model from the app's list, then starts the engine with it.
+ * Rust checks every file as it arrives and moves the model into place only
+ * when all of it is there.
+ */
+async function download(offer) {
+  if (downloading.value) return;
+  downloading.value = offer.id;
+  progress.value = { done: 0, total: offer.bytes };
+  stoppedNote.value = "";
+  problem.value = "";
+  const channel = new Channel();
+  channel.onmessage = (update) => {
+    progress.value = update;
+  };
+  try {
+    const report = await invoke("download_model", { id: offer.id, onProgress: channel });
+    if (report.stopped) stoppedNote.value = `The download of ${offer.name} stopped, and none of it was kept.`;
+    // With the model in place, the engine can start with it.
+    if (report.whole) await checkEngine();
+  } catch (error) {
+    problem.value = String(error);
+  } finally {
+    downloading.value = "";
+    progress.value = null;
+    stopping.value = false;
+  }
+}
+
+async function cancelDownload() {
+  stopping.value = true;
+  try {
+    await invoke("stop_download");
+  } catch (error) {
+    problem.value = String(error);
+    stopping.value = false;
   }
 }
 
@@ -362,11 +423,49 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
 
       <section ref="thread" class="thread" @scroll="onScroll">
         <div v-if="!current.messages.length" class="empty">
-          <p class="lead">Ask anything.</p>
-          <p v-if="model" class="quiet">
-            {{ model.name }} by {{ model.maker }} answers, with room for {{ formatCount(model.context) }} tokens.
-          </p>
-          <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
+          <div v-if="offers.length" class="first-run">
+            <p class="lead">Pick a model to start.</p>
+            <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
+            <ul class="offers" aria-label="Models to download">
+              <li v-for="offer in offers" :key="offer.id" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ offer.name }}</span>
+                  <span class="quiet small">
+                    by {{ offer.maker }} · {{ formatSize(offer.bytes) }}{{ offer.id === quick ? " · quickest to start" : "" }}
+                  </span>
+                </span>
+                <template v-if="downloading === offer.id">
+                  <span class="offer-progress">
+                    <progress
+                      :value="downloaded(progress)"
+                      max="1"
+                      :aria-label="`How much of ${offer.name} has downloaded`"
+                    ></progress>
+                    <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                  </span>
+                  <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                </template>
+                <button
+                  v-else
+                  :class="{ primary: offer.id === quick }"
+                  type="button"
+                  :disabled="Boolean(downloading)"
+                  @click="download(offer)"
+                >
+                  Download
+                </button>
+              </li>
+            </ul>
+            <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+          </div>
+          <template v-else>
+            <p class="lead">Ask anything.</p>
+            <p v-if="model" class="quiet">
+              {{ model.name }} by {{ model.maker }} answers, with room for {{ formatCount(model.context) }} tokens.
+            </p>
+            <p v-else-if="starting" class="quiet">Starting the engine...</p>
+            <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
+          </template>
         </div>
 
         <article v-for="(turn, index) in current.messages" :key="index" class="turn" :class="turn.role">
@@ -727,6 +826,48 @@ select {
 .lead {
   font-size: 1.4rem;
   font-weight: 600;
+}
+
+.first-run {
+  display: grid;
+  gap: 0.5rem;
+  justify-self: center;
+  width: min(34rem, 100%);
+  text-align: left;
+}
+
+.offers {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.offer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.offer-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.offer-name {
+  font-weight: 600;
+}
+
+.offer-progress {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: end;
 }
 
 .turn {

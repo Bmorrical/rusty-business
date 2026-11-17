@@ -23,11 +23,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Plain http to this computer only, so no TLS stack is built in.
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+# Plain http to the engine on this computer, and https to Hugging Face only,
+# for downloads, through the system's own TLS.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "macros", "time"] }
 uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+libc = "0.2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

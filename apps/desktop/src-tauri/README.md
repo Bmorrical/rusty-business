@@ -5,10 +5,11 @@ from [../src](../src), and runs the commands the page calls.
 
 | Path                         | What it is                                               |
 | ---------------------------- | -------------------------------------------------------- |
-| [src](src)                   | The Rust code: the engine adapter and the saved chats    |
+| [src](src)                   | The Rust code: the engine adapter, its start, the models on the disk and their download, and the saved chats |
 | [capabilities](capabilities) | What the page is allowed to ask Tauri for                |
 | [icons](icons)               | The app's icon in every size the systems ask for         |
 | `tauri.conf.json`            | The window's size and title, the page's content security policy, and what gets bundled |
+| `pinned-models.json`         | The app's models as downloads: each one's revision on Hugging Face, and every file's name, size, and SHA-256 |
 | `build.rs`                   | Tauri's build step                                       |
 | `Cargo.toml`, `Cargo.lock`   | This crate's packages, pinned                            |
 

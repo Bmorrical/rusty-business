@@ -1,6 +1,6 @@
 # Screenshots
 
-Four pictures of the chat window. Each is 1,840 pixels wide, taken from a
+Five pictures of the chat window. Each is 1,840 pixels wide, taken from a
 window 920 points wide, so the words are large enough to read. Select a
 picture to open it full size.
 
@@ -36,6 +36,14 @@ not start an engine itself: which of its models are already on this computer,
 why it did not start the engine, the command that starts one by hand, and a
 button to try again.
 
+## The first run
+
+[![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](first-run.png)](first-run.png?raw=true)
+
+What the app shows when none of its models is on this computer: each one it
+can download, with its maker and its download size, and the smallest marked
+as the quickest to start. Nothing downloads until Download is pressed.
+
 ## How these were made
 
 ```bash
@@ -52,10 +60,12 @@ These are pictures of the app's page, not captures of the app's window:
   uses the system's web view, which draws that control its own way.
 - Rust is not running. The page's calls to it are answered from
   [chats.json](chats.json): what the app reported about the engine on one
-  Mac, and replies the three models gave there, recorded once. The words,
+  Mac, the models it offers with their sizes, and replies the three models
+  gave there, recorded once. The words,
   token counts, and speeds are real. Nothing is sent to a model while the
-  pictures are made, and no engine is started: in the last picture, the page
-  is told what the app says when it does not find the engine's program.
+  pictures are made, and no engine is started: in the last two pictures, the
+  page is told why the app did not start one. For the first run, it is also
+  told that none of the models is on this computer, and nothing downloads.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 
@@ -75,4 +85,5 @@ nowhere else.
 | `thinking.png`   | A chat with the model's thinking opened                        |
 | `new-chat.png`   | A new chat, before the first question                          |
 | `engine-off.png` | The app with no engine answering                               |
-| `chats.json`     | What the pictures are made from: the engine's report and four recorded chats |
+| `first-run.png`  | The first run, with none of the app's models on this computer  |
+| `chats.json`     | What the pictures are made from: the engine's report, the models offered, and four recorded chats |
