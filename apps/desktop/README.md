@@ -3,7 +3,10 @@
 A window for chatting with models that run on your own computer. The shell is
 Rust (Tauri 2), the page is Vue 3, and nothing you type leaves the machine.
 
-![The Rusty Business window: saved chats on the left, a question and Phi-4's answer in the middle, the model picker at the top right, and a token meter under the message box](../../docs/chat-window.webp)
+[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
+
+Select the picture to open it full size. The rest of the set is in
+[docs/screenshots](../../docs/screenshots).
 
 ## What it does
 
