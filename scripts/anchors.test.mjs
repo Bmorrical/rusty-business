@@ -93,3 +93,44 @@ test('every link in the README to a place on the page lands on a heading', () =>
     assert.ok(addresses.has(address), `README.md links #${address}, and no heading has that address`);
   }
 });
+
+// Brad, 2026-11-17: "make a better clickable index at the top of the page,
+// under the graphic", and then: "i had to scroll and hunt for the downloads".
+// So the picture is followed at once by a table with every download, one
+// click each, and then by an index of every section.
+const lines = readme.split('\n');
+const banner = lines.findIndex((line) => /^!\[Rusty Business™: .+\]\(docs\/rusty-business\.svg\)$/.test(line));
+const firstSection = lines.findIndex((line) => line.startsWith('## '));
+
+test('right under the picture, a table gives every download, one click each, with its first-time steps', () => {
+  assert.equal(banner, 2, 'the picture is no longer right under the name');
+  assert.equal(lines[banner + 1], '', 'nothing separates the picture from the downloads');
+  assert.match(lines[banner + 2], /^\| Download \|/, 'the line under the picture is not the table of downloads');
+  let end = banner + 2;
+  while (lines[end + 1]?.startsWith('|')) end += 1;
+  const table = lines.slice(banner + 2, end + 1).join('\n');
+
+  const downloads = new Set([...readme.matchAll(/\]\((https:\/\/github\.com\/Bmorrical\/rusty-business\/releases\/latest\/download\/[^)]+)\)/g)].map((match) => match[1]));
+  assert.ok(downloads.size >= 5, `the README links only ${downloads.size} downloads`);
+  for (const link of downloads) assert.ok(table.includes(`](${link})`), `the table at the top does not link ${link.split('/').pop()}`);
+
+  const rows = table.split('\n').slice(2);
+  assert.deepEqual(
+    rows.map((row) => /\]\(#(run-the-chat-window-[a-z]+)\) \|$/.exec(row)?.[1]),
+    ['run-the-chat-window-macos', 'run-the-chat-window-windows', 'run-the-chat-window-linux'],
+    'each row does not end with a link to its own steps',
+  );
+  for (const row of rows.slice(1)) assert.ok(row.includes('no model engine yet'), `a row does not say it has no engine: ${row}`);
+});
+
+test('under the downloads, the index links every section, in the order of the page', () => {
+  const at = lines.findIndex((line) => line.startsWith('**On this page:** '));
+  assert.ok(at > banner && at < firstSection, 'the index is not between the picture and the first section');
+  assert.ok(lines.slice(banner + 2, at - 1).every((line) => line.startsWith('|')), 'something other than the downloads comes between the picture and the index');
+  let end = at;
+  while (lines[end + 1]) end += 1;
+  const index = lines.slice(at, end + 1).join(' ');
+  const linked = [...index.matchAll(/\[([^\]]+)\]\(#([^)]+)\)/g)].map((match) => match[2]);
+  const sections = headings.filter((each) => each.level === 2).map((each) => each.address);
+  assert.deepEqual(linked, sections, 'the index and the sections differ');
+});
