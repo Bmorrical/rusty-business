@@ -105,6 +105,11 @@ pull requests, so run `make test` and `make e2e` before you push. More in
 
 `make` alone lists every command.
 
+## Roadmap
+
+What is planned, and in what order, is in [ROADMAP.md](ROADMAP.md). It
+promises no dates: a thing ships when its tests are green.
+
 ## License
 
 Rusty Business is open source under the [MIT License](LICENSE).
