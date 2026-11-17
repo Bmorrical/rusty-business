@@ -17,11 +17,15 @@ import {
   savedTurn,
   shouldStart,
   showsStartHint,
+  showsUpdate,
   stackLine,
   startLine,
   titleFrom,
   tokensPerSecond,
   tokensUsed,
+  UPDATE_EVERY,
+  updateDetail,
+  updateLine,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -46,6 +50,11 @@ const stopping = ref(false);
 const stoppedNote = ref("");
 const thread = ref(null);
 const composer = ref(null);
+const update = ref(null);
+const updateLater = ref("");
+const updateOpened = ref("");
+const updateProblem = ref("");
+let updateTimer = 0;
 
 let chatId = "";
 let checkAgain = false;
@@ -140,6 +149,35 @@ async function checkStack() {
     stack.value = { running: false, started: false, address: "", reason: String(error) };
   } finally {
     stackStarting.value = false;
+  }
+}
+
+/**
+ * "when a new build is ready, the user is notified in app, and it gives them
+ * the download". Rust asks GitHub for the newest release and answers with the
+ * new version, or none. A check that fails shows nothing: the next one, a day
+ * later or when the window opens again, tries again.
+ */
+async function checkUpdate() {
+  if (!inApp) return;
+  try {
+    update.value = await invoke("check_update");
+  } catch {
+    // Nothing to show; the notice stays as it was.
+  }
+}
+
+/**
+ * Opens the new version's download, or its notes, in the browser. The page
+ * names only which: Rust builds the address from what it found.
+ */
+async function openUpdate(part) {
+  updateProblem.value = "";
+  try {
+    await invoke("open_update", { part });
+    if (part === "download") updateOpened.value = update.value?.version ?? "";
+  } catch (error) {
+    updateProblem.value = String(error);
   }
 }
 
@@ -359,11 +397,17 @@ onMounted(async () => {
   window.addEventListener("focus", checkEngine);
   // The stack can take minutes, so the page does not wait for it.
   checkStack();
+  // So does the check for a new version, which asks GitHub.
+  checkUpdate();
+  updateTimer = window.setInterval(checkUpdate, UPDATE_EVERY);
   await Promise.all([checkEngine(), refreshSessions()]);
   focusComposer();
 });
 
-onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
+onBeforeUnmount(() => {
+  window.removeEventListener("focus", checkEngine);
+  window.clearInterval(updateTimer);
+});
 </script>
 
 <template>
@@ -439,6 +483,25 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
     </aside>
 
     <main class="main">
+      <section v-if="showsUpdate(update, updateLater)" class="update" role="status" aria-label="New version">
+        <div class="update-words">
+          <p>
+            <strong>{{ updateLine(update) }}</strong>
+            <span class="quiet small">{{ updateDetail(update) }}</span>
+          </p>
+          <template v-if="updateOpened === update.version">
+            <p class="small">{{ update.steps }}</p>
+            <code v-if="update.command" class="hint small">{{ update.command }}</code>
+            <p class="quiet small">If no download started, it is on {{ update.page }}.</p>
+          </template>
+          <p v-if="updateProblem" class="update-problem small" role="alert">{{ updateProblem }}</p>
+        </div>
+        <div class="update-buttons">
+          <button class="primary" type="button" @click="openUpdate('download')">Download</button>
+          <button type="button" @click="openUpdate('notes')">What changed</button>
+          <button class="link" type="button" @click="updateLater = update.version">Later</button>
+        </div>
+      </section>
       <header class="bar">
         <h2>{{ current.title || "New chat" }}</h2>
         <label class="picker">
@@ -822,6 +885,45 @@ code {
   gap: 1rem;
   padding: 0.7rem 1.25rem;
   border-bottom: 1px solid var(--line);
+}
+
+/* The notice of a new version, above the chat's title. */
+.update {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--page);
+}
+
+.update-words {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 18rem;
+}
+
+.update-words p {
+  margin: 0;
+}
+
+.update-words strong {
+  margin-right: 0.4rem;
+}
+
+.update-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.update-problem {
+  color: var(--bad);
 }
 
 .picker {

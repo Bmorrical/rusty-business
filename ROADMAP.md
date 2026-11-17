@@ -58,3 +58,7 @@ Nothing is picked yet.
   install, and go. The Release workflow builds them on Ubuntu with
   `scripts/linux-app.sh`, after a green gate. Until Linux has an engine, the
   window opens and says so.
+- **A notice of each new version.** When a new version is released, the
+  window says so, and Download opens this system's file in the browser: the
+  `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
+  GitHub when the window opens and once a day, and installs nothing itself.

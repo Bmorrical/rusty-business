@@ -20,6 +20,7 @@ const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const SESSIONS = 'apps/desktop/src-tauri/src/sessions.rs';
 const DOWNLOADS = 'apps/desktop/src-tauri/src/downloads.rs';
 const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
+const UPDATE = 'apps/desktop/src-tauri/src/update.rs';
 const TAURI = 'apps/desktop/src-tauri/tauri.conf.json';
 const PAGE = 'apps/desktop/src';
 const OLLAMA = 'https://ollama.com';
@@ -40,6 +41,9 @@ const KEPT_BY = [
   { file: DOWNLOADS, test: 'a_redirect_off_hugging_face_is_refused' },
   { file: DOWNLOADS, test: 'only_a_model_on_the_list_is_offered' },
   { file: SESSIONS, test: 'trash_moves_the_file_and_deletes_nothing' },
+  { file: UPDATE, test: 'the_check_asks_only_githubs_api_for_this_repositorys_newest_release' },
+  { file: UPDATE, test: 'a_redirect_is_never_followed' },
+  { file: UPDATE, test: 'only_this_repositorys_releases_are_opened' },
 ];
 
 function read(file) {
@@ -219,6 +223,10 @@ test('the chat window cannot reach past this computer', () => {
   assert.ok(engine.includes('The engine address must be on this computer'), `${ENGINE} no longer refuses an outside address`);
   assert.ok(engine.includes('.no_proxy()'), `${ENGINE} may now send its calls through a proxy`);
   assert.ok(engine.includes('redirect::Policy::none()'), `${ENGINE} may now follow a redirect somewhere else`);
+
+  const update = read(UPDATE);
+  assert.ok(update.includes('.no_proxy()'), `${UPDATE} may now send its check through a proxy`);
+  assert.ok(update.includes('redirect::Policy::none()'), `${UPDATE} may now follow a redirect somewhere else`);
 
   const files = readdirSync(path.join(REPO, PAGE)).filter((file) => /\.(?:js|vue)$/.test(file) && !file.includes('.test.'));
   assert.ok(files.length > 0, `${PAGE} holds no page source`);

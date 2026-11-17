@@ -184,3 +184,24 @@ export function downloadLine(progress) {
   const done = Math.min(Number(progress?.done ?? 0), total);
   return `${(done / 1e9).toFixed(1)} of ${formatSize(total)}`;
 }
+
+/** How often the page asks whether a new version is out, while it stays open. */
+export const UPDATE_EVERY = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether to show the notice of a new version: when one was found, and the
+ * person has not chosen Later for that same version.
+ */
+export function showsUpdate(update, later) {
+  return Boolean(update?.version) && update.version !== later;
+}
+
+/** "Rusty Business™ 0.5.0 is ready.": the notice's first line. */
+export function updateLine(update) {
+  return `Rusty Business™ ${update.version} is ready.`;
+}
+
+/** "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser." */
+export function updateDetail(update) {
+  return `This is ${update.current}. Download opens ${update.file} in your browser.`;
+}

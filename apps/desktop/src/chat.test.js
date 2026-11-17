@@ -18,6 +18,10 @@ import {
   showsStartHint,
   STACK_STARTING,
   stackLine,
+  showsUpdate,
+  UPDATE_EVERY,
+  updateDetail,
+  updateLine,
   startLine,
   titleFrom,
   tokensPerSecond,
@@ -274,4 +278,34 @@ test("the footer shows a command to start the engine only where there is one", (
   assert.equal(showsStartHint({ startHint: "  " }, false), false);
   assert.equal(showsStartHint({}, false), false);
   assert.equal(showsStartHint(null, false), false);
+});
+
+// "when a new build is ready, the user is notified in app, and it gives them
+// the download"
+const update = {
+  version: "0.5.0",
+  current: "0.4.0",
+  file: "Rusty-Business-mac-arm64.dmg",
+  steps: "When it is downloaded, quit Rusty Business™, open the .dmg, and drag the app onto Applications to replace this one.",
+  command: null,
+  page: "github.com/Bmorrical/rusty-business/releases/tag/v0.5.0",
+};
+
+test("a new version is shown until Later is chosen for it", () => {
+  assert.equal(showsUpdate(update, ""), true);
+  assert.equal(showsUpdate(update, "0.5.0"), false);
+  // Later for one version does not hide the next.
+  assert.equal(showsUpdate({ ...update, version: "0.6.0" }, "0.5.0"), true);
+  assert.equal(showsUpdate(null, ""), false);
+  assert.equal(showsUpdate(undefined, ""), false);
+  assert.equal(showsUpdate({}, ""), false);
+});
+
+test("the notice says which version is ready and what Download opens", () => {
+  assert.equal(updateLine(update), "Rusty Business™ 0.5.0 is ready.");
+  assert.equal(updateDetail(update), "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser.");
+});
+
+test("the page asks once a day while it stays open", () => {
+  assert.equal(UPDATE_EVERY, 86_400_000);
 });
