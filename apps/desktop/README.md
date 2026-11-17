@@ -83,6 +83,7 @@ Which program serves the contract is the only thing that changes per system:
 | ------- | -------------------------------------------------- |
 | macOS   | `mlx_lm.server` (MLX, Apple silicon)               |
 | Windows | not chosen yet; any server with the same two calls |
+| Linux   | not chosen yet; any server with the same two calls |
 
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 `RUSTY_ENGINE_URL` to use another port on this computer.
@@ -183,6 +184,7 @@ cd src-tauri && RUSTY_DOWNLOAD_TO=<an empty folder> cargo test -- --ignored a_wh
 
 - macOS: `~/Library/Application Support/net.morrical.rusty-business/sessions`
 - Windows: `%APPDATA%\net.morrical.rusty-business\sessions`
+- Linux: `~/.local/share/net.morrical.rusty-business/sessions`
 
 ## Where the engine's log is kept
 

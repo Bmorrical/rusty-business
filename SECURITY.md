@@ -22,8 +22,8 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.2.0. Its downloads, for a Mac and for Windows, are
-on the newest release on GitHub, built from `main`. Fixes go into `main`,
+The app's version is 0.3.0. Its downloads, for a Mac, for Windows, and for
+Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
 
@@ -53,7 +53,7 @@ Please report these to their makers:
   what a model says.
 - The images the stack uses as they come: Postgres, Redis, MinIO, Mailpit,
   and Caddy.
-- Docker, macOS, and Windows.
+- Docker, macOS, Windows, and Linux, with the WebKitGTK it draws with there.
 
 One thing is known, so it needs no report: the installers are unsigned for
 now, so the computer warns before it opens one. Signing them is pin 1 on the

@@ -116,10 +116,13 @@ const TOKEN_LINES = new Map([
 const SIGN_IN =
   'run: printf \'%s\' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin';
 
-// The .dmg's name, as `make dmg` gives it, and the .exe's, as
-// scripts/windows-app.sh gives it.
+// The .dmg's name, as `make dmg` gives it, the .exe's, as
+// scripts/windows-app.sh gives it, and the Linux three, as
+// scripts/linux-app.sh gives them.
 const DMG = /^DMG=(\S+)$/m.exec(readFileSync(new URL('mac-app.sh', import.meta.url), 'utf8'))?.[1];
 const EXE = /^EXE=(\S+)$/m.exec(readFileSync(new URL('windows-app.sh', import.meta.url), 'utf8'))?.[1];
+const LINUX = readFileSync(new URL('linux-app.sh', import.meta.url), 'utf8');
+const [DEB, RPM, TGZ] = ['DEB', 'RPM', 'TGZ'].map((name) => new RegExp(`^${name}=(\\S+)$`, 'm').exec(LINUX)?.[1]);
 
 function workflow(name) {
   const found = workflows.find((each) => each.name === name);
@@ -326,27 +329,30 @@ test('a deploy or a release starts only on request, from main, and every job wai
 //
 // The roadmap: "An `.exe`, linked from the README beside the Mac's `.dmg`:
 // download, open, and go."
-test('Release builds the Mac app on a Mac and the Windows installer on Windows, each with the command a person runs, and only its last job publishes', () => {
+//
+// Brad, 2026-11-17, to a request for Linux downloads (.deb, .rpm, and
+// .tar.gz): "I got you in coming build". Release builds those three too.
+test('Release builds the Mac app on a Mac, the Windows installer on Windows, and the Linux packages on Linux, each with the command a person runs, and only its last job publishes', () => {
   const text = workflow('release.yml');
   assert.match(withoutComments(text), /^concurrency:\n {2}group: release\n {2}cancel-in-progress: false\n/m);
 
   const jobs = jobsOf(text);
   assert.deepEqual(
     jobs.map((job) => job.id),
-    ['gate', 'mac', 'windows', 'publish'],
+    ['gate', 'mac', 'windows', 'linux', 'publish'],
   );
-  const [, mac, windows, publish] = jobs;
+  const [, mac, windows, linux, publish] = jobs;
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
+  assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
 
-  /** The upload step's block, which must keep exactly the two files, and stop when either is missing. */
-  const keeps = (name, folder, file) =>
+  /** The upload step's block, which must keep exactly these files and their checksums, and stop when any is missing. */
+  const keeps = (name, folder, ...files) =>
     [
       '        with:',
       `          name: ${name}`,
       '          path: |',
-      `            ${folder}/${file}`,
-      `            ${folder}/${file}.sha256`,
+      ...files.flatMap((file) => [`            ${folder}/${file}`, `            ${folder}/${file}.sha256`]),
       '          if-no-files-found: error',
     ].join('\n');
 
@@ -370,15 +376,46 @@ test('Release builds the Mac app on a Mac and the Windows installer on Windows, 
     'the windows job does not keep exactly the .exe and its checksum, or goes on without them',
   );
 
-  assert.match(publish.body, /^ {4}needs: \[gate, mac, windows\]$/m);
+  // ubuntu-24.04 is a 64-bit Linux on an Intel or AMD processor, and the
+  // packages are built on it in Ubuntu 22.04's image, pinned by digest: a
+  // program built against a newer C library does not start on an older one,
+  // so a build on 24.04 would not start on Ubuntu 22.04 or Debian 12.
+  // WebKitGTK, OpenSSL, and a C compiler come from Ubuntu, as for a person,
+  // and the script checks they are there.
+  assert.match(linux.body, /^ {4}needs: gate$/m);
+  assert.match(linux.body, /^ {4}runs-on: ubuntu-24\.04$/m);
+  assert.match(linux.body, /^ {4}container: ubuntu:22\.04@sha256:[0-9a-f]{64}$/m, 'the Linux packages are not built in Ubuntu 22.04');
+  // The README and the release notes name that Ubuntu as the oldest the
+  // packages are for.
+  const oldest = /^ {4}container: ubuntu:(\d+\.\d+)@/m.exec(linux.body)?.[1];
+  for (const file of ['../README.md', 'release.sh']) {
+    assert.ok(
+      readFileSync(new URL(file, import.meta.url), 'utf8').includes(`Ubuntu ${oldest} or later`),
+      `${file.replace('../', '')} does not say the Linux packages are for Ubuntu ${oldest} or later`,
+    );
+  }
+  assert.deepEqual(
+    runsOf(linux.body),
+    [
+      'apt-get update && apt-get install --yes --no-install-recommends ca-certificates build-essential curl pkg-config libwebkit2gtk-4.1-dev libssl-dev',
+      'bash scripts/linux-app.sh',
+    ],
+    'the linux job runs anything but the packages it needs and the build script',
+  );
+  assert.ok(
+    linux.body.includes(keeps('linux-packages', 'apps/desktop/src-tauri/target/linux', DEB, RPM, TGZ)),
+    'the linux job does not keep exactly the three downloads and their checksums, or goes on without them',
+  );
+
+  assert.match(publish.body, /^ {4}needs: \[gate, mac, windows, linux\]$/m);
   assert.match(publish.body, /^ {4}runs-on: ubuntu-24\.04$/m);
-  for (const name of ['mac-dmg', 'windows-exe']) {
+  for (const name of ['mac-dmg', 'windows-exe', 'linux-packages']) {
     assert.ok(
       publish.body.includes(['        with:', `          name: ${name}`, '          path: dist\n'].join('\n')),
       `the publish job does not take ${name} into dist`,
     );
   }
-  assert.equal((publish.body.match(/download-artifact@/g) ?? []).length, 2, 'the publish job takes in more than the two builds');
+  assert.equal((publish.body.match(/download-artifact@/g) ?? []).length, 3, 'the publish job takes in more than the three builds');
   assert.deepEqual(runsOf(publish.body), ['scripts/release.sh publish dist'], 'the publish job runs anything but the release script');
 });
 

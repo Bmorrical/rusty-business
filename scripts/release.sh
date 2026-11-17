@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Puts the Mac app and the Windows installer on a GitHub release, where the
-# README's download links find them. The Release workflow runs it after a
-# green gate, with the .dmg from `make dmg`, the .exe from
-# scripts/windows-app.sh, and their checksums downloaded into one folder:
+# Puts the Mac app, the Windows installer, and the Linux packages on a GitHub
+# release, where the README's download links find them. The Release workflow
+# runs it after a green gate, with the .dmg from `make dmg`, the .exe from
+# scripts/windows-app.sh, the .deb, the .rpm, and the .tar.gz from
+# scripts/linux-app.sh, and their checksums downloaded into one folder:
 #
 #   scripts/release.sh publish dist
 #
 # It checks that the app's three version numbers agree, that the folder
-# holds the two downloads and their checksums and nothing else, and that each
+# holds the five downloads and their checksums and nothing else, and that each
 # checksum matches its download. It stops when the version's tag is already
 # on GitHub: a release that is out is never changed, so publishing again
 # needs a new version. Then it makes release v<version> at this commit, with
-# the four files, marked as the newest, which is the one the README links.
+# the ten files, marked as the newest, which is the one the README links.
 #
 # It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, and GH_TOKEN,
 # which the workflow passes on. Nothing here removes, edits, or replaces a
@@ -21,6 +22,11 @@ cd "$(dirname "$0")/.."
 
 DMG=Rusty-Business-mac-arm64.dmg
 EXE=Rusty-Business-windows-x64-setup.exe
+DEB=Rusty-Business-linux-x64.deb
+RPM=Rusty-Business-linux-x64.rpm
+TGZ=Rusty-Business-linux-x64.tar.gz
+# The five, in the order the release lists them.
+DOWNLOADS=("${DMG}" "${EXE}" "${DEB}" "${RPM}" "${TGZ}")
 USAGE="use: scripts/release.sh publish <folder>"
 
 fail() {
@@ -62,7 +68,7 @@ sha256_of() {
 notes_for() {
     local version="$1"
     cat <<NOTES
-Rusty Business™ ${version}, for a Mac and for Windows.
+Rusty Business™ ${version}, for a Mac, for Windows, and for Linux.
 
 On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:
 
@@ -74,6 +80,12 @@ On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the 
 1. Download ${EXE} and open it.
 2. It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.
 
+On 64-bit Linux on an Intel or AMD processor. The app has no model engine for Linux yet, so the window opens and says so.
+
+- On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}
+- On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}
+- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.
+
 To check a download first, put it and its .sha256 file in one folder. On a Mac, run:
 
     shasum -a 256 -c ${DMG}.sha256
@@ -82,25 +94,33 @@ On Windows, in PowerShell, run this, which prints True when the two match:
 
     (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]
 
+On Linux, run this, with the name of the file you downloaded:
+
+    sha256sum -c ${DEB}.sha256
+
 Built from https://github.com/${repository}/commit/${commit} by the Release workflow, after a green gate.
 NOTES
 }
 
 publish() {
-    local dir="$1" version tag listed name sum found
-    local -a sums=()
+    local dir="$1" version tag listed expected name sum found i
+    local -a sums=() files=()
     version="$(version_of_app)"
     tag="v${version}"
 
     [ -d "${dir}" ] || fail "${dir} is not a folder"
-    listed="$(cd "${dir}" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
-    [ "${listed}" = "${DMG} ${DMG}.sha256 ${EXE} ${EXE}.sha256 " ] ||
-        fail "${dir} should hold ${DMG}, ${EXE}, and their .sha256 files, and nothing else, and holds: ${listed}"
-    for name in "${DMG}" "${DMG}.sha256" "${EXE}" "${EXE}.sha256"; do
-        [ -f "${dir}/${name}" ] && [ ! -L "${dir}/${name}" ] && [ -s "${dir}/${name}" ] ||
-            fail "${dir}/${name} is not a plain file with something in it"
+    for name in "${DOWNLOADS[@]}"; do
+        files+=("${dir}/${name}" "${dir}/${name}.sha256")
     done
-    for name in "${DMG}" "${EXE}"; do
+    listed="$(cd "${dir}" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
+    expected="$(printf '%s\n' "${DOWNLOADS[@]}" "${DOWNLOADS[@]/%/.sha256}" | LC_ALL=C sort | tr '\n' ' ')"
+    [ "${listed}" = "${expected}" ] ||
+        fail "${dir} should hold ${DMG}, ${EXE}, ${DEB}, ${RPM}, ${TGZ}, and their .sha256 files, and nothing else, and holds: ${listed}"
+    for name in "${files[@]}"; do
+        [ -f "${name}" ] && [ ! -L "${name}" ] && [ -s "${name}" ] ||
+            fail "${name} is not a plain file with something in it"
+    done
+    for name in "${DOWNLOADS[@]}"; do
         sum="$(sha256_of "${dir}/${name}")"
         [[ "${sum}" =~ ^[0-9a-f]{64}$ ]] || fail "${name} gave no plain checksum: ${sum}"
         [ "$(cat "${dir}/${name}.sha256")" = "${sum}  ${name}" ] ||
@@ -122,11 +142,15 @@ publish() {
         --title "Rusty Business™ ${version}" \
         --notes "$(notes_for "${version}")" \
         --latest \
-        "${dir}/${DMG}" "${dir}/${DMG}.sha256" "${dir}/${EXE}" "${dir}/${EXE}.sha256"
+        "${files[@]}"
     echo "Released ${tag}: https://github.com/${repository}/releases/tag/${tag}"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-        printf '### Released %s\n\n- `%s`: `%s`\n- `%s`: `%s`\n' \
-            "${tag}" "${DMG}" "${sums[0]}" "${EXE}" "${sums[1]}" >>"${GITHUB_STEP_SUMMARY}"
+        {
+            printf '### Released %s\n\n' "${tag}"
+            for i in "${!DOWNLOADS[@]}"; do
+                printf -- '- `%s`: `%s`\n' "${DOWNLOADS[i]}" "${sums[i]}"
+            done
+        } >>"${GITHUB_STEP_SUMMARY}"
     fi
 }
 

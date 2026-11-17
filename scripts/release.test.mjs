@@ -5,6 +5,10 @@
 // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from read
 // me and install and go, one click ready." The README links the newest
 // release's .dmg and .exe, and this script is what puts them there.
+//
+// Brad, 2026-11-17, to a request for Linux downloads (.deb, .rpm, and
+// .tar.gz): "I got you in coming build". The same release carries those
+// three.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -35,6 +39,7 @@ const RECORD = '\u001e';
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
 const DMG = /^DMG=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
 const EXE = /^EXE=(\S+)$/m.exec(read('scripts/windows-app.sh'))?.[1];
+const [DEB, RPM, TGZ] = ['DEB', 'RPM', 'TGZ'].map((name) => new RegExp(`^${name}=(\\S+)$`, 'm').exec(read('scripts/linux-app.sh'))?.[1]);
 const { version: VERSION } = JSON.parse(read('apps/desktop/package.json'));
 const TAG = `v${VERSION}`;
 // A version after this one, for the tests that raise it.
@@ -59,17 +64,29 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+/** What stands in for each Linux download, unless a test gives its own. */
+const LINUX = { deb: 'not really a .deb\n', rpm: 'not really an .rpm\n', tgz: 'not really a .tar.gz\n' };
+
 /**
- * A folder like the one the Release workflow downloads: the .dmg and the .exe,
- * and their checksums, as `make dmg` and scripts/windows-app.sh write them.
+ * A folder like the one the Release workflow downloads: the .dmg, the .exe,
+ * the .deb, the .rpm, and the .tar.gz, and their checksums, as `make dmg`,
+ * scripts/windows-app.sh, and scripts/linux-app.sh write them.
  */
-function distIn(folder, { dmg = 'not really a disk image\n', checksum, exe = 'not really an installer\n', exeChecksum } = {}) {
+function distIn(
+  folder,
+  { dmg = 'not really a disk image\n', checksum, exe = 'not really an installer\n', exeChecksum, linux = {}, linuxChecksums = {} } = {},
+) {
   const dist = path.join(folder, 'dist');
   mkdirSync(dist);
   writeFileSync(path.join(dist, DMG), dmg);
   writeFileSync(path.join(dist, `${DMG}.sha256`), checksum ?? `${sha256(dmg)}  ${DMG}\n`);
   writeFileSync(path.join(dist, EXE), exe);
   writeFileSync(path.join(dist, `${EXE}.sha256`), exeChecksum ?? `${sha256(exe)}  ${EXE}\n`);
+  for (const [kind, name] of [['deb', DEB], ['rpm', RPM], ['tgz', TGZ]]) {
+    const bytes = linux[kind] ?? LINUX[kind];
+    writeFileSync(path.join(dist, name), bytes);
+    writeFileSync(path.join(dist, `${name}.sha256`), linuxChecksums[kind] ?? `${sha256(bytes)}  ${name}\n`);
+  }
   return dist;
 }
 
@@ -135,16 +152,14 @@ function createOf(tag, version, notes, dist) {
     '--notes',
     notes,
     '--latest',
-    path.join(dist, DMG),
-    path.join(dist, `${DMG}.sha256`),
-    path.join(dist, EXE),
-    path.join(dist, `${EXE}.sha256`),
+    ...[DMG, EXE, DEB, RPM, TGZ].flatMap((name) => [path.join(dist, name), path.join(dist, `${name}.sha256`)]),
   ];
 }
 
-test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg, the .exe, and their checksums, as the newest', () => {
+test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg, the .exe, the .deb, the .rpm, the .tar.gz, and their checksums, as the newest', () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
+  assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
   let dist;
   const dmg = 'not really a disk image\n';
   const exe = 'not really an installer\n';
@@ -162,7 +177,7 @@ test('a release asks once whether the tag is there, then makes it at this commit
   // "Until Windows has an engine, the window opens and says so. Unsigned at
   // first; see pin 1."
   for (const words of [
-    `Rusty Business™ ${VERSION}, for a Mac and for Windows.`,
+    `Rusty Business™ ${VERSION}, for a Mac, for Windows, and for Linux.`,
     'On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:',
     `Download ${DMG}, open it, and drag Rusty Business™ to Applications.`,
     'It is not signed yet, so macOS stops it',
@@ -172,6 +187,13 @@ test('a release asks once whether the tag is there, then makes it at this commit
     'It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.',
     `    shasum -a 256 -c ${DMG}.sha256`,
     `    (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]`,
+    // The roadmap, for Linux: "A `.deb`, an `.rpm`, and a `.tar.gz`, linked
+    // from the README beside the Mac's `.dmg` and the Windows `.exe`".
+    'On 64-bit Linux on an Intel or AMD processor. The app has no model engine for Linux yet, so the window opens and says so.',
+    `On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}`,
+    `On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}`,
+    `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.`,
+    `    sha256sum -c ${DEB}.sha256`,
     `https://github.com/${REPOSITORY}/commit/${COMMIT}`,
     'after a green gate',
   ]) {
@@ -186,7 +208,20 @@ test('a release asks once whether the tag is there, then makes it at this commit
   }
   assert.match(result.stdout, new RegExp(`^Released ${TAG}: https://github\\.com/${REPOSITORY}/releases/tag/${TAG}$`, 'm'));
   assert.ok(result.summary.includes(`\`${DMG}\`: \`${sha256(dmg)}\``), "the run summary does not give the .dmg's checksum");
-  assert.ok(result.summary.includes(`\`${EXE}\`: \`${sha256(exe)}\``), "the run summary does not give the .exe's checksum");
+  assert.equal(
+    result.summary,
+    [
+      `### Released ${TAG}`,
+      '',
+      `- \`${DMG}\`: \`${sha256(dmg)}\``,
+      `- \`${EXE}\`: \`${sha256(exe)}\``,
+      `- \`${DEB}\`: \`${sha256(LINUX.deb)}\``,
+      `- \`${RPM}\`: \`${sha256(LINUX.rpm)}\``,
+      `- \`${TGZ}\`: \`${sha256(LINUX.tgz)}\``,
+      '',
+    ].join('\n'),
+    'the run summary does not give the five checksums',
+  );
 });
 
 test('a version already tagged stops the run before anything is made', () => {
@@ -224,7 +259,7 @@ test('a check that fails stops the run, and so does a release that fails', () =>
   assert.equal(made.summary, '', 'a failed release wrote a summary');
 });
 
-test('a folder that does not hold exactly the .dmg, the .exe, and their matching checksums reaches no gh call', () => {
+test('a folder that does not hold exactly the five downloads and their matching checksums reaches no gh call', () => {
   const dmg = 'not really a disk image\n';
   const sum = sha256(dmg);
   const exeSum = sha256('not really an installer\n');
@@ -260,6 +295,21 @@ test('a folder that does not hold exactly the .dmg, the .exe, and their matching
     'no .exe checksum': without(`${EXE}.sha256`),
     'no .exe': without(EXE),
     'an .exe that is a link': linked(EXE),
+    'no .deb': without(DEB),
+    'no .rpm checksum': without(`${RPM}.sha256`),
+    'no .tar.gz': without(TGZ),
+    'an empty .rpm': (folder) => distIn(folder, { linux: { rpm: '' } }),
+    "the .deb's checksum beside the .rpm": (folder) =>
+      distIn(folder, { linuxChecksums: { rpm: `${sha256(LINUX.deb)}  ${RPM}\n` } }),
+    'a .tar.gz checksum that names the .deb': (folder) =>
+      distIn(folder, { linuxChecksums: { tgz: `${sha256(LINUX.tgz)}  ${DEB}\n` } }),
+    'a .deb checksum with a star': (folder) => distIn(folder, { linuxChecksums: { deb: `${sha256(LINUX.deb)} *${DEB}\n` } }),
+    'a .tar.gz that is a link': linked(TGZ),
+    'a .tgz beside the .tar.gz': (folder) => {
+      const dist = distIn(folder);
+      writeFileSync(path.join(dist, TGZ.replace(/\.tar\.gz$/, '.tgz')), LINUX.tgz);
+      return dist;
+    },
     'a file more': (folder) => {
       const dist = distIn(folder);
       writeFileSync(path.join(dist, 'notes.txt'), 'x');
@@ -405,13 +455,17 @@ test('the script asks gh for nothing but the check and the new release, and neve
   assert.match(code, /^ {8}--latest \\$/m, 'the release is not marked as the newest, so the README would not find it');
 });
 
-test("the README's download links name the .dmg that make dmg makes and the .exe that scripts/windows-app.sh makes, and so do the script and the workflow", () => {
+test("the README's download links name the files that make dmg, scripts/windows-app.sh, and scripts/linux-app.sh make, and so do the script and the workflow", () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
+  assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
   const workflow = read('.github/workflows/release.yml');
   for (const [file, maker, folder, name] of [
     [DMG, 'DMG', 'mac', '.dmg'],
     [EXE, 'EXE', 'windows', '.exe'],
+    [DEB, 'DEB', 'linux', '.deb'],
+    [RPM, 'RPM', 'linux', '.rpm'],
+    [TGZ, 'TGZ', 'linux', '.tar.gz'],
   ]) {
     const link = `https://github.com/${REPOSITORY}/releases/latest/download/${file}`;
     assert.ok(read('README.md').includes(`](${link})`), `the README does not link ${link}`);
@@ -422,10 +476,11 @@ test("the README's download links name the .dmg that make dmg makes and the .exe
     );
   }
   // Each build writes its checksum the way the script checks it: the
-  // checksum, two spaces, and the name. The Mac's is shasum's own line;
-  // Windows' is written out, since Git Bash's sha256sum puts a * before the
-  // name.
+  // checksum, two spaces, and the name. The Mac's is shasum's own line, and
+  // Linux's is sha256sum's; Windows' is written out, since Git Bash's
+  // sha256sum puts a * before the name.
   assert.match(read('scripts/mac-app.sh'), /^\(cd "\$WORK" && shasum -a 256 "\$DMG" >"\$DMG\.sha256"\)$/m);
+  assert.match(read('scripts/linux-app.sh'), /^for file in "\$DEB" "\$RPM" "\$TGZ"; do\n {2}\(cd "\$WORK" && sha256sum "\$file" >"\$file\.sha256"\)\ndone$/m);
   assert.match(
     read('scripts/windows-app.sh'),
     /^printf '%s  %s\\n' "\$\(sha256sum "\$WORK\/\$EXE" \| cut -c1-64\)" "\$EXE" >"\$WORK\/\$EXE\.sha256"$/m,

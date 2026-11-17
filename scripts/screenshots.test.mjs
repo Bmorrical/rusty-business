@@ -494,15 +494,19 @@ test('with the engine off, the app asks for one to be started, and says why when
   assert.ok(panel.includes('Starting the engine...'), 'the page says so while the engine is on its way up');
 });
 
-test('on Windows, the window says it has no engine yet and shows no command to start one', () => {
+test('on Windows and Linux, the window says it has no engine yet and shows no command to start one', () => {
   // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
-  // read me and install and go, one click ready." The roadmap, of the .exe:
-  // "Until Windows has an engine, the window opens and says so."
-  const said = 'The app has no engine for Windows yet, so it cannot start one.';
-  assert.ok(read(STARTER).includes(`"${said}"`), `${STARTER} no longer holds the Windows sentence`);
-  const windows = { ...engineOff(recorded().engine), startHint: '' };
-  assert.equal(startLine({ ...NOT_STARTED, reason: said }, windows), said, 'the footer shows it');
-  assert.equal(showsStartHint(windows, false), false, 'and no command to run');
+  // read me and install and go, one click ready." And 2026-11-17, of the
+  // Linux downloads: "I got you in coming build". The roadmap, of each:
+  // "Until Windows has an engine, the window opens and says so." and "Until
+  // Linux has an engine, the window opens and says so."
+  for (const system of ['Windows', 'Linux']) {
+    const said = `The app has no engine for ${system} yet, so it cannot start one.`;
+    assert.ok(read(STARTER).includes(`"${said}"`), `${STARTER} no longer holds the ${system} sentence`);
+    const off = { ...engineOff(recorded().engine), startHint: '' };
+    assert.equal(startLine({ ...NOT_STARTED, reason: said }, off), said, `the footer shows it on ${system}`);
+    assert.equal(showsStartHint(off, false), false, `and no command to run on ${system}`);
+  }
 
   // Both lines about starting the engine by hand wait on the same answer.
   const panel = offPanel();

@@ -18,8 +18,8 @@ Nothing is picked yet.
 
 ## Later
 
-- **An engine for Windows.** MLX runs on Apple silicon only, so Windows
-  needs an engine of its own. It is not chosen yet.
+- **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
+  Windows and Linux need an engine of their own. It is not chosen yet.
 
 ## Done
 
@@ -53,3 +53,8 @@ Nothing is picked yet.
   the Mac's `.dmg`: download, open, and go. The Release workflow builds it
   on Windows with `scripts/windows-app.sh`, after a green gate. Until Windows
   has an engine, the window opens and says so. Unsigned for now; see pin 1.
+- **Downloads for Linux.** A `.deb`, an `.rpm`, and a `.tar.gz`, linked
+  from the README beside the Mac's `.dmg` and the Windows `.exe`: download,
+  install, and go. The Release workflow builds them on Ubuntu with
+  `scripts/linux-app.sh`, after a green gate. Until Linux has an engine, the
+  window opens and says so.

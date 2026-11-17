@@ -273,12 +273,12 @@ pub fn sentence(why: Why, name: &str, port: u16) -> String {
 }
 
 /// Why no engine starts on `os`, one of Rust's names for a system. Taking
-/// the system lets the Mac's tests check what Windows says.
+/// the system lets the Mac's tests check what Windows and Linux say.
 fn no_engine_on(os: &str) -> &'static str {
-    if os == "windows" {
-        "The app has no engine for Windows yet, so it cannot start one."
-    } else {
-        "The app cannot start an engine on this system yet."
+    match os {
+        "windows" => "The app has no engine for Windows yet, so it cannot start one.",
+        "linux" => "The app has no engine for Linux yet, so it cannot start one.",
+        _ => "The app cannot start an engine on this system yet.",
     }
 }
 
@@ -509,14 +509,17 @@ mod tests {
     }
 
     #[test]
-    fn windows_says_it_has_no_engine_yet() {
+    fn windows_and_linux_say_they_have_no_engine_yet() {
         // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
         // from read me and install and go, one click ready." The roadmap, of
         // the .exe: "Until Windows has an engine, the window opens and says
-        // so." The Mac's tests check the words Windows gets.
+        // so." Brad, 2026-11-17, to a request for Linux downloads: "I got
+        // you in coming build". Linux says the same. The Mac's tests check
+        // the words both get.
         assert_eq!(no_engine_on("windows"), "The app has no engine for Windows yet, so it cannot start one.");
-        assert_eq!(no_engine_on("linux"), "The app cannot start an engine on this system yet.");
-        if cfg!(target_os = "windows") {
+        assert_eq!(no_engine_on("linux"), "The app has no engine for Linux yet, so it cannot start one.");
+        assert_eq!(no_engine_on("freebsd"), "The app cannot start an engine on this system yet.");
+        if !cfg!(target_os = "macos") {
             assert_eq!(program_name(), None, "nothing is looked for, so the plan says why");
         }
     }

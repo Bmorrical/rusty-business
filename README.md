@@ -6,10 +6,11 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
-**Status:** version 0.2.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.3.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
-command. Windows has [an installer](#run-the-chat-window-windows), and no
-model engine yet. What it cannot do yet is under [Limits](#limits).
+command. Windows has [an installer](#run-the-chat-window-windows), and Linux
+has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
+has a model engine yet. What it cannot do yet is under [Limits](#limits).
 
 ## Screenshots
 
@@ -60,9 +61,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 ### Why choose Ollama
 
 - **Install and go, anywhere.** Ollama installs on macOS, Windows, and Linux
-  with one download or one command. Rusty Business™ has two downloads, for a
-  Mac with Apple silicon and for Windows, and only the Mac's runs a model.
-  Neither is signed yet, so the computer warns once before it opens one.
+  with one download or one command. Rusty Business™ has downloads for a Mac
+  with Apple silicon, for Windows, and for Linux, and only the Mac's runs a
+  model. None is signed yet, so a Mac or a Windows computer warns once before
+  it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads one of its three models on a first run, when
   none of them is on the computer yet, and offers no others.
@@ -100,7 +102,7 @@ says what is in it.
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
-| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app and the Windows installer |
+| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app, the Windows installer, and the Linux packages |
 
 The chat window starts the stack when Docker is on the computer, and does not
 use it yet: it talks only to the model engine on this computer. The stack is
@@ -191,8 +193,8 @@ The window draws with Microsoft's WebView2, which Windows 10 and 11 usually
 have; where it is missing, the installer downloads it from Microsoft.
 
 The app has no model engine for Windows yet, so the window opens and says
-so. (On the roadmap: An engine for Windows.) The `.exe`'s checksum is beside
-it on the
+so. (On the roadmap: An engine for Windows and Linux.) The `.exe`'s checksum
+is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
 
 ### Or build it yourself
@@ -209,6 +211,47 @@ It fetches its own Rust and Node, each pinned by version and checksum, into
 installer there. It changes no setting of the computer's. The download above
 is that installer, built on GitHub's Windows computer by the Release workflow
 after a green gate.
+
+## Run the chat window (Linux)
+
+On 64-bit Linux, on an Intel or AMD processor:
+
+- On Ubuntu 22.04 or later, or Debian 12 or later, download
+  [Rusty-Business-linux-x64.deb](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb)
+  and run `sudo apt install ./Rusty-Business-linux-x64.deb`.
+- On Fedora, download
+  [Rusty-Business-linux-x64.rpm](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm)
+  and run `sudo dnf install ./Rusty-Business-linux-x64.rpm`.
+- Anywhere else, download
+  [Rusty-Business-linux-x64.tar.gz](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz),
+  unpack it, and run `Rusty-Business-linux-x64/bin/rusty-business`. It needs
+  WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.
+
+The window draws with WebKitGTK, and the program uses OpenSSL. The `.deb`
+and the `.rpm` bring both in when the system does not have them.
+
+The app has no model engine for Linux yet, so the window opens and says so.
+(On the roadmap: An engine for Windows and Linux.) Each file's checksum is
+beside it on the
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+
+### Or build it yourself
+
+On 64-bit Linux, this one line builds the same three files:
+
+```bash
+git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && scripts/linux-app.sh
+```
+
+It needs WebKitGTK, OpenSSL, and a C compiler from the system. When one is
+missing, it stops and gives the line that installs them on Ubuntu or Debian.
+It fetches its own Rust and Node, each pinned by version and checksum, into
+`apps/desktop/src-tauri/target/linux`, which git ignores, and leaves the
+three files there. It installs nothing and changes no setting of the
+computer's. The downloads above are those files, built in Ubuntu 22.04 on
+GitHub's computer by the Release workflow after a green gate. A program built
+against a newer glibc does not start on an older one, so they are built on
+the oldest system they are for.
 
 ## Run the stack
 
@@ -274,9 +317,9 @@ pull requests, so run `make test` and `make e2e` before you push. More in
 What Rusty Business™ cannot do yet. The [roadmap](ROADMAP.md) says what comes
 next.
 
-- **Chats need a Mac.** Only the Mac app has a model engine. The Windows app
-  opens and says it has none yet, and there is no app for Linux. (On the
-  roadmap: An engine for Windows.)
+- **Chats need a Mac.** Only the Mac app has a model engine. The Windows and
+  Linux apps open and say they have none yet. (On the roadmap: An engine for
+  Windows and Linux.)
 - **Not signed yet.** macOS stops the downloaded app the first time it
   opens, until you choose Open Anyway in System Settings. Windows may stop
   the installer until you choose More info, then Run anyway. (On the
