@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the Mac app's own Info.plist when it is built. The menu bar,
+     the Dock, and the app switcher show these names; the app's file name
+     stays plain. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Rusty Business™</string>
+  <key>CFBundleDisplayName</key>
+  <string>Rusty Business™</string>
+</dict>
+</plist>

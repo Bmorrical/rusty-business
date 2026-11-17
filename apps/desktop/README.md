@@ -87,12 +87,15 @@ Which program serves the contract is the only thing that changes per system:
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 `RUSTY_ENGINE_URL` to use another port on this computer.
 
-The app does not install the engine. It looks for the engine's program in
-each folder on `PATH`, then in `~/.local/bin`, `/opt/homebrew/bin`,
-`/usr/local/bin`, and `~/Library/Python/<version>/bin`. An app opened from
-the Finder gets a short `PATH`, which is why the usual folders are looked in
-as well. When the program is somewhere else, set `RUSTY_ENGINE_PROGRAM` to
-its full path, and that program is the only one tried.
+The Mac app that `make app` and `make dmg` build carries its engine inside
+it, in `Contents/Resources/engine`, and looks there first. How it is built
+is in [engine](engine). Run any other way, the app does not install the
+engine: it looks for the engine's program in each folder on `PATH`, then in
+`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, and
+`~/Library/Python/<version>/bin`. An app opened from the Finder gets a short
+`PATH`, which is why the usual folders are looked in as well. When the
+program is somewhere else, set `RUSTY_ENGINE_PROGRAM` to its full path, and
+that program is the only one tried, even in an app that carries its own.
 
 ## What is in this folder
 
@@ -100,13 +103,28 @@ its full path, and that program is the only one tried.
 | ---------------------- | ------------------------------------------------------- |
 | [src](src)             | The page: one Vue component and its helpers             |
 | [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the stack's start, saved chats |
+| [engine](engine)       | The engine the Mac app carries: the one package asked for, and every package under it, pinned by hash |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |
 | `package.json`         | The page's packages and the `npm` commands below        |
 
 ## Run it (macOS)
 
-You need Rust, Node 20 or later, Xcode's command line tools, and the engine,
+From the repository's root, one command builds the app with its engine
+inside, and opens it:
+
+```bash
+make app
+```
+
+It needs a Mac with Apple silicon, macOS 14 or later, and Apple's command
+line tools. It fetches its own Rust, Node, and Python into
+`src-tauri/target/mac`, which git ignores, and installs nothing anywhere
+else. `make dmg` packs the same app as a `.dmg`, with its checksum beside
+it, in that folder. Both run [scripts/mac-app.sh](../../scripts/mac-app.sh).
+
+To work on the app, with the page reloading as you edit it, you need Rust,
+Node 20 or later, Xcode's command line tools, and the engine,
 `mlx_lm.server`. The stack also needs Docker; the chat works without it.
 
 From this folder:

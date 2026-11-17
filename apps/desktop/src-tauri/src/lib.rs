@@ -9,6 +9,12 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The name the app gives itself, as in its About window and the Mac's app
+    // menu, carries its mark. Its file name and the folder its data is kept in
+    // do not change.
+    let mut context = tauri::generate_context!();
+    context.package_info_mut().name = "Rusty Business™".to_string();
+
     let app = tauri::Builder::default()
         .manage(engine::Chats::default())
         .setup(|app| {
@@ -35,7 +41,7 @@ pub fn run() {
             sessions::save_session,
             sessions::trash_session,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
     // When the app quits, it stops the engine and the stack it started. One

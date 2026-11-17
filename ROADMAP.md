@@ -45,3 +45,7 @@ In this order:
   starts the Docker stack too, opening Docker Desktop when it is not running.
   The API and the worker come from GitHub's container registry, pinned by
   digest. When the app quits, it stops the stack it started.
+- **One command for the Mac app.** `make app` builds the app with the model
+  engine inside and opens it, from a fresh copy of this repository, with
+  nothing to install first but Apple's command line tools. `make dmg` packs
+  the same app as a `.dmg`.
