@@ -13,6 +13,10 @@ root:
 docker build --file infra/docker/service.Dockerfile --build-arg SERVICE=api --tag rusty-business/api:dev .
 ```
 
+Deploy builds the same two from this recipe, on an Intel and an Arm
+computer, and publishes them on GitHub's container registry:
+[.github/workflows](../../.github/workflows) says how.
+
 How the recipe works:
 
 - **Two stages.** The first compiles with the Rust toolchain. The second is

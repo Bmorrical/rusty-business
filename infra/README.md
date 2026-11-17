@@ -66,6 +66,14 @@ make down
 Edit the `PORT_` line in `infra/.env`, then `make up`. The scripts and the
 tests read the same file, so they follow.
 
+## The published images
+
+Deploy builds the API and the worker from the same recipe and puts them on
+GitHub's container registry, for the desktop app to pull when it starts the
+stack. This stack does not use them: `make up` builds its own, as
+`rusty-business/api:dev` and `rusty-business/worker:dev`. How and when they
+are published is in [.github/workflows](../.github/workflows).
+
 ## Notes
 
 - MinIO's own images are no longer published on Docker Hub, so the stack

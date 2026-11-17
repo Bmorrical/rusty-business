@@ -1,8 +1,11 @@
-# Deploy. A stub: there is nothing to deploy yet.
+# Deploy. It runs only on request, only from main, and its first job is the
+# gate. Every other job needs the gate, so a red gate stops the run before
+# anything goes out.
 #
-# What is real is the order. This workflow runs only on request, only from
-# main, and its first job is the gate. Every other job needs the gate, so a
-# red gate stops the run before anything goes out.
+# What goes out: the API and worker images, to GitHub's container registry,
+# for the desktop app to pull when it starts the stack. Each kind of computer
+# builds its own, so nothing is emulated, and the last job joins the two
+# under one tag per service and prints the digests to pin.
 name: Deploy
 
 on:
@@ -21,11 +24,51 @@ jobs:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/gate.yml
 
-  deploy:
-    name: Deploy (nothing yet)
+  build:
+    name: Build the images (${{ matrix.arch }})
     needs: gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    # The only jobs that may write anything, and only packages: they push.
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
-      - name: Nothing to deploy yet
-        run: echo "The gate is green. There is nothing to deploy yet."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sign in to GitHub's container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+      - name: Build and push the API and the worker
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: scripts/publish-images.sh build "${ARCH}"
+
+  publish:
+    name: Publish the images
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sign in to GitHub's container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+      - name: Join each service's two images, and print the digests to pin
+        run: scripts/publish-images.sh join
