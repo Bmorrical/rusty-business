@@ -8,6 +8,7 @@ Helpers the Makefile calls, and the repository's own checks.
 | `up.sh`            | Builds and starts the stack, waits until every part is healthy, then makes sure the storage bucket exists | `make up` |
 | `stack-env.sh`     | Runs any command with the stack's addresses in its environment, read from `infra/.env` | `make test-live`, `make e2e` |
 | `readmes.test.mjs` | Fails when a folder in this repository has no README                | `make test-repo`  |
+| `license.test.mjs` | Fails when the MIT license, the trademark page, or the banner is missing or changed, or when a package does not say MIT | `make test-repo`  |
 
 `stack-env.sh` is how a program on this computer finds the stack:
 

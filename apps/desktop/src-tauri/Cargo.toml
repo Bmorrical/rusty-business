@@ -3,6 +3,9 @@ name = "rusty-business"
 version = "0.1.0"
 description = "A desktop window for models that run on this computer"
 edition = "2024"
+license = "MIT"
+homepage = "https://rusty.business"
+repository = "https://github.com/Bmorrical/rusty-business"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

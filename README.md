@@ -1,5 +1,7 @@
 # Rusty Business
 
+![Rusty Business: a person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails on the ground below](docs/rusty-business.svg)
+
 A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
@@ -96,3 +98,11 @@ database migration, a job travelling from the queue to the worker, file
 storage, and mail.
 
 `make` alone lists every command.
+
+## License
+
+Rusty Business is open source under the [MIT License](LICENSE).
+
+Rusty Business™ is a trademark of Brad Morrical. The license covers the code,
+not the name: [TRADEMARKS.md](TRADEMARKS.md) says how the name and the artwork
+may be used.

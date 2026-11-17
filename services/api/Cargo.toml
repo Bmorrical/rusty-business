@@ -3,6 +3,9 @@ name = "rusty-api"
 description = "The API: says who it is and whether Postgres and Redis answer"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [dependencies]

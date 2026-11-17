@@ -10,6 +10,9 @@ exclude = ["apps/desktop/src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+homepage = "https://rusty.business"
+repository = "https://github.com/Bmorrical/rusty-business"
 publish = false
 
 [workspace.dependencies]

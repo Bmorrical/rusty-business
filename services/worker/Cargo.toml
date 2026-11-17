@@ -3,6 +3,9 @@ name = "rusty-worker"
 description = "The worker: waits on the job queue and does nothing with a job yet"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [dependencies]
