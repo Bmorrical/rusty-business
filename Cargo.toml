@@ -1,0 +1,19 @@
+# The server workspace: the API, the worker, and the code they share.
+#
+# The desktop app (apps/desktop/src-tauri) is left out on purpose. It keeps
+# its own lock file, so building a service never needs the app's tree.
+[workspace]
+resolver = "3"
+members = ["packages/shared", "services/api", "services/worker"]
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+rusty-shared = { path = "packages/shared" }
+
+[profile.release]
+strip = true

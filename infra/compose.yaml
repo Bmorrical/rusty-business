@@ -1,0 +1,181 @@
+# The whole stack on one computer. `make bootstrap` starts it the first time,
+# `make up` after that; both read infra/.env, which bootstrap writes.
+#
+# Every published port binds to 127.0.0.1, so nothing here can be reached
+# from another machine. The model engine is not in this file: it needs the
+# computer's own GPU and runs outside Docker.
+
+name: rusty-business
+
+# The two programs this repository builds get the tightest box: a read-only
+# file system, no Linux capabilities, and no way to gain any.
+x-own-service: &own-service
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-check-timing: &check-timing
+  interval: 10s
+  timeout: 5s
+  retries: 6
+  start_period: 30s
+  start_interval: 1s
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?missing in infra/.env, run make bootstrap}
+      POSTGRES_USER: ${POSTGRES_USER:?missing in infra/.env, run make bootstrap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in infra/.env, run make bootstrap}
+    ports:
+      - "127.0.0.1:${PORT_POSTGRES:-4732}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # Asked over TCP on purpose: while the image is still setting the
+      # database up, it answers on its socket file only.
+      test: ["CMD-SHELL", "pg_isready --host 127.0.0.1 --username \"$${POSTGRES_USER}\" --dbname \"$${POSTGRES_DB}\""]
+      <<: *check-timing
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?missing in infra/.env, run make bootstrap}", "--appendonly", "yes"]
+    environment:
+      # Read by redis-cli, for the health check below.
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:${PORT_REDIS:-4779}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      <<: *check-timing
+
+  # File storage that speaks the S3 protocol.
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?missing in infra/.env, run make bootstrap}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?missing in infra/.env, run make bootstrap}
+      # Lets the mc tool inside this container reach the server as "local".
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000
+    ports:
+      - "127.0.0.1:${PORT_MINIO:-4790}:9000"
+      - "127.0.0.1:${PORT_MINIO_CONSOLE:-4791}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      <<: *check-timing
+
+  # A one-off job, not part of `up`: makes the bucket if it is not there
+  # yet, then exits. scripts/up.sh runs it once the stack is healthy. It sits
+  # behind a profile because `up --wait` counts any container that exits,
+  # even cleanly, as a failure.
+  minio-bucket:
+    profiles: [setup]
+    image: cgr.dev/chainguard/minio:latest
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["mc", "mb", "--ignore-existing"]
+    command: ["local/${MINIO_BUCKET:-rusty-business}"]
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # Catches every email the stack sends and shows it on a web page. Nothing
+  # leaves this computer.
+  mailpit:
+    image: axllent/mailpit:v1.33
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:${PORT_MAILPIT_SMTP:-4725}:1025"
+      - "127.0.0.1:${PORT_MAILPIT_UI:-4726}:8025"
+
+  api:
+    <<: *own-service
+    image: rusty-business/api:dev
+    build:
+      context: ..
+      dockerfile: infra/docker/service.Dockerfile
+      args:
+        SERVICE: api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Inside its container the API listens on every address; the port line
+      # below is what keeps it on this computer.
+      API_BIND: 0.0.0.0
+      API_PORT: "8000"
+    ports:
+      - "127.0.0.1:${PORT_API:-4701}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/service", "healthcheck"]
+      <<: *check-timing
+
+  worker:
+    <<: *own-service
+    image: rusty-business/worker:dev
+    build:
+      context: ..
+      dockerfile: infra/docker/service.Dockerfile
+      args:
+        SERVICE: worker
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/service", "healthcheck"]
+      <<: *check-timing
+
+  # The front door: the one address a browser or the desktop app would use.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "10001:10001"
+    environment:
+      # Caddy keeps its own files here; both are throwaway.
+      XDG_DATA_HOME: /tmp/caddy/data
+      XDG_CONFIG_HOME: /tmp/caddy/config
+    tmpfs:
+      - /tmp:mode=1777
+    ports:
+      - "127.0.0.1:${PORT_FRONT_DOOR:-4700}:8080"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/front-door"]
+      <<: *check-timing
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

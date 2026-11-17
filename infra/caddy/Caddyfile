@@ -1,0 +1,14 @@
+# The front door. Plain HTTP on purpose: it is published on 127.0.0.1 only,
+# so there is no network between the browser and Caddy to protect.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	# Answered by Caddy itself, so the front door can be checked without
+	# the API behind it.
+	respond /front-door "ok" 200
+
+	reverse_proxy api:8000
+}
