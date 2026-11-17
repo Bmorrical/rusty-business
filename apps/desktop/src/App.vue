@@ -10,6 +10,8 @@ import {
   onDiskLine,
   requestMessages,
   savedTurn,
+  shouldStart,
+  startLine,
   titleFrom,
   tokensPerSecond,
   tokensUsed,
@@ -20,6 +22,8 @@ const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 const engine = ref(null);
 const checking = ref(false);
+const starting = ref(false);
+const startNote = ref("");
 const modelId = ref("");
 const sessions = ref([]);
 const current = ref(blankSession());
@@ -75,10 +79,21 @@ async function checkEngine() {
   checking.value = true;
   try {
     engine.value = await invoke("engine_status");
+    if (shouldStart(engine.value)) {
+      // No engine answers, so the app starts one. Rust starts only what is
+      // missing, so asking again while one is on its way up changes nothing.
+      starting.value = true;
+      const start = await invoke("start_engine");
+      if (start.answering) engine.value = await invoke("engine_status");
+      startNote.value = startLine(start, engine.value);
+    } else {
+      startNote.value = "";
+    }
     pickModel(current.value.model);
   } catch (error) {
     problem.value = String(error);
   } finally {
+    starting.value = false;
     checking.value = false;
   }
 }
@@ -321,9 +336,11 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
         <template v-else>
           <p><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
           <p class="quiet small">{{ onDiskLine(engine.onDisk) }}</p>
-          <p class="quiet small">Start it with:</p>
-          <code class="hint">{{ engine.startHint }}</code>
-          <button class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>
+          <p v-if="starting" class="quiet small">Starting the engine...</p>
+          <p v-if="!starting && startNote" class="small">{{ startNote }}</p>
+          <p v-if="!starting" class="quiet small">To start it yourself:</p>
+          <code v-if="!starting" class="hint">{{ engine.startHint }}</code>
+          <button v-if="!starting" class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>
         </template>
         <p class="quiet small">Nothing you type leaves this computer.</p>
       </footer>

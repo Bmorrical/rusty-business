@@ -75,6 +75,25 @@ export function onDiskLine(models) {
   return `On this computer: ${names.slice(0, -1).join(", ")}, and ${names.at(-1)}.`;
 }
 
+/**
+ * True when the app's report says no engine answers, which is when the app
+ * starts one. An engine that answers is never started again.
+ */
+export function shouldStart(engine) {
+  return Boolean(engine) && engine.reachable === false;
+}
+
+/**
+ * The line under the engine's own after the app tried to start one: why it
+ * could not, in the app's words. Nothing when an engine answers, when no
+ * reason came back, or when the reason is the line already shown above it.
+ */
+export function startLine(start, engine) {
+  const reason = (start?.reason ?? "").trim();
+  if (!reason || start?.answering || engine?.reachable || reason === engine?.error) return "";
+  return reason;
+}
+
 /** Tokens a second for one reply, or null when it cannot be worked out. */
 export function tokensPerSecond(turn) {
   if (!turn?.completionTokens || !turn?.seconds || turn.seconds < 0.05) return null;

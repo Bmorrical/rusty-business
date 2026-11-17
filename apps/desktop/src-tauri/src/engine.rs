@@ -156,7 +156,7 @@ struct ModelRow {
     id: String,
 }
 
-async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
+pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
     let response = client()?
         .get(format!("{base}/models"))
         .timeout(Duration::from_secs(10))

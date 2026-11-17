@@ -16,12 +16,10 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 In this order:
 
-- **The app finds its models.** It looks for the models already on the
-  computer and starts the model engine by itself, with nothing to type in a
-  terminal first. MLX on Apple silicon comes first.
 - **A first-run picker.** On a computer with no models, the app lists the
   models it knows with their download sizes, and points to a small one to
-  get talking quickly.
+  get talking quickly. On a computer with no engine, it installs the engine
+  too.
 - **The app starts the stack.** When Docker is installed, the app brings the
   Docker stack up too.
 - **Installers.** A `.dmg` and an `.exe`, linked from the README: download,
@@ -41,3 +39,6 @@ In this order:
 - **Open source.** The MIT license, and a page on how the name may be used.
 - **The test gate.** Every test runs on GitHub on each push to `main`.
   Nothing is released or deployed unless that run is green.
+- **The app finds its models.** It names the models already on the computer,
+  and it starts the model engine by itself when the engine's program is
+  installed, with nothing to type in a terminal first. MLX on Apple silicon.

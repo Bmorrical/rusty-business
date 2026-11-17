@@ -29,11 +29,12 @@ light or dark setting; this is light.
 
 ## No engine answering
 
-[![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the command that starts the engine, a Try again button, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
+[![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
 
-What the app shows when nothing answers at the engine's address: which of its
-models are already on this computer, the command that starts the engine, and
-a button to try again.
+What the app shows when nothing answers at the engine's address and it could
+not start an engine itself: which of its models are already on this computer,
+why it did not start the engine, the command that starts one by hand, and a
+button to try again.
 
 ## How these were made
 
@@ -53,7 +54,8 @@ These are pictures of the app's page, not captures of the app's window:
   [chats.json](chats.json): what the app reported about the engine on one
   Mac, and replies the three models gave there, recorded once. The words,
   token counts, and speeds are real. Nothing is sent to a model while the
-  pictures are made.
+  pictures are made, and no engine is started: in the last picture, the page
+  is told what the app says when it does not find the engine's program.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 

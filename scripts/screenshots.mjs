@@ -7,7 +7,7 @@
 // Rust is not running here, so the page's calls to it are answered from
 // docs/screenshots/chats.json: what the app reported about the engine on one
 // computer, and replies the three models gave there, recorded once. Nothing
-// is sent to a model while the pictures are made.
+// is sent to a model while the pictures are made, and no engine is started.
 //
 // Needs Google Chrome or Chromium (CHROME names the binary when it is not in
 // a usual place) and the page built first. `make screenshots` does both.
@@ -82,15 +82,28 @@ export function engineOff(engine) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the three
- * calls the pictures need and refuses the rest.
+ * What the app reports when it went to start the engine and could not find
+ * the engine's program. The sentence is the app's own, from starter.rs.
+ */
+export const NOT_STARTED = {
+  answering: false,
+  started: false,
+  reason: 'The app looked for mlx_lm.server on this computer and did not find it.',
+};
+
+/**
+ * The script that stands in for Rust inside the page. It answers the four
+ * calls the pictures need and refuses the rest. Asked to start the engine, it
+ * starts nothing and says the engine's program was not found.
  */
 export function standIn(engine, sessions) {
   return `(() => {
     const engine = ${JSON.stringify(engine)};
     const sessions = ${JSON.stringify(sessions)};
+    const notStarted = ${JSON.stringify(NOT_STARTED)};
     const answers = {
       engine_status: () => engine,
+      start_engine: () => notStarted,
       list_sessions: () =>
         sessions.map((entry) => ({
           id: entry.id,
@@ -241,6 +254,11 @@ async function takePicture(send, address, scene, engine, sessions) {
   );
   await send('Page.navigate', { url: address }, tab);
   await until(send, tab, `document.querySelector('.engine .dot') !== null`, 'the engine line');
+  if (scene.engine === 'off') {
+    // With no engine answering, the page asks for one to be started. The
+    // picture is of the page once it has its answer, not of the wait.
+    await until(send, tab, `document.querySelector('.engine button.wide') !== null`, 'the Try again button');
+  }
 
   if (scene.open) {
     const row = sessions.findIndex((entry) => entry.id === scene.open);
