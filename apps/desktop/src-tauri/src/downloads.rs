@@ -280,6 +280,7 @@ fn what_is_there(folder: &Path) -> There {
 }
 
 /// The nearest folder that is there, at `folder` or above it.
+#[cfg(unix)]
 fn nearest(folder: &Path) -> Option<&Path> {
     folder.ancestors().find(|above| above.exists())
 }

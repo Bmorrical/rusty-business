@@ -15,6 +15,7 @@ import {
   requestMessages,
   savedTurn,
   shouldStart,
+  showsStartHint,
   STACK_STARTING,
   stackLine,
   startLine,
@@ -259,4 +260,18 @@ test("the stack's line says it is starting, where it answers, or why it is not r
   // Before the app has asked, there is nothing to say.
   assert.equal(stackLine(null, false), "");
   assert.equal(stackLine(undefined, false), "");
+});
+
+test("the footer shows a command to start the engine only where there is one", () => {
+  // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
+  // read me and install and go, one click ready." The roadmap, of the .exe:
+  // "Until Windows has an engine, the window opens and says so." So Windows
+  // gets no command to run, and the footer shows none.
+  const mac = { startHint: "mlx_lm.server --port 8080" };
+  assert.equal(showsStartHint(mac, false), true);
+  assert.equal(showsStartHint(mac, true), false, "not while the app starts the engine");
+  assert.equal(showsStartHint({ startHint: "" }, false), false, "Windows");
+  assert.equal(showsStartHint({ startHint: "  " }, false), false);
+  assert.equal(showsStartHint({}, false), false);
+  assert.equal(showsStartHint(null, false), false);
 });

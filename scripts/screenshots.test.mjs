@@ -25,6 +25,7 @@ import {
   onDiskLine,
   quickest,
   shouldStart,
+  showsStartHint,
   stackLine,
   startLine,
   titleFrom,
@@ -491,6 +492,24 @@ test('with the engine off, the app asks for one to be started, and says why when
   assert.ok(reason > panel.indexOf('{{ onDiskLine(engine.onDisk) }}'), 'the reason comes after the models on this computer');
   assert.ok(reason < panel.indexOf('{{ engine.startHint }}'), 'and before the command that starts the engine');
   assert.ok(panel.includes('Starting the engine...'), 'the page says so while the engine is on its way up');
+});
+
+test('on Windows, the window says it has no engine yet and shows no command to start one', () => {
+  // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
+  // read me and install and go, one click ready." The roadmap, of the .exe:
+  // "Until Windows has an engine, the window opens and says so."
+  const said = 'The app has no engine for Windows yet, so it cannot start one.';
+  assert.ok(read(STARTER).includes(`"${said}"`), `${STARTER} no longer holds the Windows sentence`);
+  const windows = { ...engineOff(recorded().engine), startHint: '' };
+  assert.equal(startLine({ ...NOT_STARTED, reason: said }, windows), said, 'the footer shows it');
+  assert.equal(showsStartHint(windows, false), false, 'and no command to run');
+
+  // Both lines about starting the engine by hand wait on the same answer.
+  const panel = offPanel();
+  assert.ok(panel, 'the page has a panel for an engine that is not answering');
+  assert.match(panel, /<p v-if="handStart" class="quiet small">To start it yourself:<\/p>/);
+  assert.match(panel, /<code v-if="handStart" class="hint">\{\{ engine\.startHint \}\}<\/code>/);
+  assert.match(read('apps/desktop/src/App.vue'), /const handStart = computed\(\(\) => showsStartHint\(engine\.value, starting\.value\)\);/);
 });
 
 test('with the window open, the app asks for the stack to be started, and says why when it cannot', () => {

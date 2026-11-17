@@ -116,8 +116,10 @@ const TOKEN_LINES = new Map([
 const SIGN_IN =
   'run: printf \'%s\' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin';
 
-// The .dmg's name, as `make dmg` gives it.
+// The .dmg's name, as `make dmg` gives it, and the .exe's, as
+// scripts/windows-app.sh gives it.
 const DMG = /^DMG=(\S+)$/m.exec(readFileSync(new URL('mac-app.sh', import.meta.url), 'utf8'))?.[1];
+const EXE = /^EXE=(\S+)$/m.exec(readFileSync(new URL('windows-app.sh', import.meta.url), 'utf8'))?.[1];
 
 function workflow(name) {
   const found = workflows.find((each) => each.name === name);
@@ -319,45 +321,64 @@ test('a deploy or a release starts only on request, from main, and every job wai
 });
 
 // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
-// read me and install and go, one click ready." Release puts the .dmg where
-// the README's link finds it, after a green gate.
-test('Release builds the Mac app on a Mac with the command a person runs, and only its last job publishes', () => {
+// read me and install and go, one click ready." Release puts the .dmg and the
+// .exe where the README's links find them, after a green gate.
+//
+// The roadmap: "An `.exe`, linked from the README beside the Mac's `.dmg`:
+// download, open, and go."
+test('Release builds the Mac app on a Mac and the Windows installer on Windows, each with the command a person runs, and only its last job publishes', () => {
   const text = workflow('release.yml');
   assert.match(withoutComments(text), /^concurrency:\n {2}group: release\n {2}cancel-in-progress: false\n/m);
 
   const jobs = jobsOf(text);
   assert.deepEqual(
     jobs.map((job) => job.id),
-    ['gate', 'build', 'publish'],
+    ['gate', 'mac', 'windows', 'publish'],
   );
-  const [, build, publish] = jobs;
+  const [, mac, windows, publish] = jobs;
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
+  assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
 
-  // macos-15 is GitHub's Mac with Apple silicon, the only kind the app is for.
-  assert.match(build.body, /^ {4}needs: gate$/m);
-  assert.match(build.body, /^ {4}runs-on: macos-15$/m);
-  assert.deepEqual(runsOf(build.body), ['make dmg'], 'the build job runs anything but make dmg');
-  const folder = 'apps/desktop/src-tauri/target/mac';
+  /** The upload step's block, which must keep exactly the two files, and stop when either is missing. */
+  const keeps = (name, folder, file) =>
+    [
+      '        with:',
+      `          name: ${name}`,
+      '          path: |',
+      `            ${folder}/${file}`,
+      `            ${folder}/${file}.sha256`,
+      '          if-no-files-found: error',
+    ].join('\n');
+
+  // macos-15 is GitHub's Mac with Apple silicon, the only kind the Mac app is for.
+  assert.match(mac.body, /^ {4}needs: gate$/m);
+  assert.match(mac.body, /^ {4}runs-on: macos-15$/m);
+  assert.deepEqual(runsOf(mac.body), ['make dmg'], 'the mac job runs anything but make dmg');
   assert.ok(
-    build.body.includes(
-      [
-        '        with:',
-        '          name: mac-dmg',
-        '          path: |',
-        `            ${folder}/${DMG}`,
-        `            ${folder}/${DMG}.sha256`,
-        '          if-no-files-found: error',
-      ].join('\n'),
-    ),
-    'the build job does not keep exactly the .dmg and its checksum, or goes on without them',
+    mac.body.includes(keeps('mac-dmg', 'apps/desktop/src-tauri/target/mac', DMG)),
+    'the mac job does not keep exactly the .dmg and its checksum, or goes on without them',
   );
 
-  assert.match(publish.body, /^ {4}needs: \[gate, build\]$/m);
+  // windows-2025 is a 64-bit Windows with Microsoft's C++ build tools, which
+  // Rust needs there. The script runs in Git Bash, as it does for a person.
+  assert.match(windows.body, /^ {4}needs: gate$/m);
+  assert.match(windows.body, /^ {4}runs-on: windows-2025$/m);
+  assert.deepEqual(runsOf(windows.body), ['bash scripts/windows-app.sh'], 'the windows job runs anything but the build script');
+  assert.match(windows.body, /^ {8}shell: bash\n {8}run: bash scripts\/windows-app\.sh$/m, 'the build script does not run in Git Bash');
+  assert.ok(
+    windows.body.includes(keeps('windows-exe', 'apps/desktop/src-tauri/target/windows', EXE)),
+    'the windows job does not keep exactly the .exe and its checksum, or goes on without them',
+  );
+
+  assert.match(publish.body, /^ {4}needs: \[gate, mac, windows\]$/m);
   assert.match(publish.body, /^ {4}runs-on: ubuntu-24\.04$/m);
-  assert.ok(
-    publish.body.includes(['        with:', '          name: mac-dmg', '          path: dist\n'].join('\n')),
-    'the publish job does not take the build job\'s files into dist',
-  );
+  for (const name of ['mac-dmg', 'windows-exe']) {
+    assert.ok(
+      publish.body.includes(['        with:', `          name: ${name}`, '          path: dist\n'].join('\n')),
+      `the publish job does not take ${name} into dist`,
+    );
+  }
+  assert.equal((publish.body.match(/download-artifact@/g) ?? []).length, 2, 'the publish job takes in more than the two builds');
   assert.deepEqual(runsOf(publish.body), ['scripts/release.sh publish dist'], 'the publish job runs anything but the release script');
 });
 

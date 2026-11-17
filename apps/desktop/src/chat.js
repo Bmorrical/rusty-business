@@ -94,6 +94,15 @@ export function startLine(start, engine) {
   return reason;
 }
 
+/**
+ * True when the footer should show the command that starts the engine by
+ * hand. Not while the app starts one, and not where there is no such
+ * command: Windows has no engine yet, so the app sends no command for it.
+ */
+export function showsStartHint(engine, starting) {
+  return !starting && Boolean((engine?.startHint ?? "").trim());
+}
+
 /** What the footer says while the app starts the stack. */
 export const STACK_STARTING = "Starting the stack. The first start downloads it, which takes a few minutes.";
 

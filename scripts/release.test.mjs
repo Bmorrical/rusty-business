@@ -4,7 +4,7 @@
 //
 // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from read
 // me and install and go, one click ready." The README links the newest
-// release's .dmg, and this script is what puts it there.
+// release's .dmg and .exe, and this script is what puts them there.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -34,8 +34,11 @@ const RECORD = '\u001e';
 
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
 const DMG = /^DMG=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
+const EXE = /^EXE=(\S+)$/m.exec(read('scripts/windows-app.sh'))?.[1];
 const { version: VERSION } = JSON.parse(read('apps/desktop/package.json'));
 const TAG = `v${VERSION}`;
+// A version after this one, for the tests that raise it.
+const NEXT = VERSION.replace(/^(\d+)\.(\d+)\.\d+$/, (_, major, minor) => `${major}.${Number(minor) + 1}.0`);
 
 // The stand-in. It writes the token it was given, then each word of the
 // command, separated by WORD, and ends the record with RECORD, since the
@@ -56,12 +59,17 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** A folder like the one the Release workflow downloads: the .dmg and its checksum, as `make dmg` writes them. */
-function distIn(folder, { dmg = 'not really a disk image\n', checksum } = {}) {
+/**
+ * A folder like the one the Release workflow downloads: the .dmg and the .exe,
+ * and their checksums, as `make dmg` and scripts/windows-app.sh write them.
+ */
+function distIn(folder, { dmg = 'not really a disk image\n', checksum, exe = 'not really an installer\n', exeChecksum } = {}) {
   const dist = path.join(folder, 'dist');
   mkdirSync(dist);
   writeFileSync(path.join(dist, DMG), dmg);
   writeFileSync(path.join(dist, `${DMG}.sha256`), checksum ?? `${sha256(dmg)}  ${DMG}\n`);
+  writeFileSync(path.join(dist, EXE), exe);
+  writeFileSync(path.join(dist, `${EXE}.sha256`), exeChecksum ?? `${sha256(exe)}  ${EXE}\n`);
   return dist;
 }
 
@@ -129,16 +137,20 @@ function createOf(tag, version, notes, dist) {
     '--latest',
     path.join(dist, DMG),
     path.join(dist, `${DMG}.sha256`),
+    path.join(dist, EXE),
+    path.join(dist, `${EXE}.sha256`),
   ];
 }
 
-test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg and its checksum, as the newest', () => {
+test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg, the .exe, and their checksums, as the newest', () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
+  assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
   let dist;
   const dmg = 'not really a disk image\n';
+  const exe = 'not really an installer\n';
   const result = run((folder) => [
     'publish',
-    (dist = distIn(folder, { dmg })),
+    (dist = distIn(folder, { dmg, exe })),
   ]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.calls.length, 2, 'expected two calls: the check and the release');
@@ -146,13 +158,20 @@ test('a release asks once whether the tag is there, then makes it at this commit
   const notes = result.calls[1][10];
   assert.deepEqual(result.calls[1], createOf(TAG, VERSION, notes, dist));
 
-  // What a person reads on the release page.
+  // What a person reads on the release page. The roadmap, for Windows:
+  // "Until Windows has an engine, the window opens and says so. Unsigned at
+  // first; see pin 1."
   for (const words of [
-    `Rusty Business™ ${VERSION} for a Mac with Apple silicon and macOS 14 or later`,
+    `Rusty Business™ ${VERSION}, for a Mac and for Windows.`,
+    'On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:',
     `Download ${DMG}, open it, and drag Rusty Business™ to Applications.`,
-    'It is not signed yet',
+    'It is not signed yet, so macOS stops it',
     'Privacy & Security, and choose Open Anyway.',
+    'On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the window opens and says so.',
+    `Download ${EXE} and open it.`,
+    'It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.',
     `    shasum -a 256 -c ${DMG}.sha256`,
+    `    (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]`,
     `https://github.com/${REPOSITORY}/commit/${COMMIT}`,
     'after a green gate',
   ]) {
@@ -166,7 +185,8 @@ test('a release asks once whether the tag is there, then makes it at this commit
     }
   }
   assert.match(result.stdout, new RegExp(`^Released ${TAG}: https://github\\.com/${REPOSITORY}/releases/tag/${TAG}$`, 'm'));
-  assert.ok(result.summary.includes(`\`${DMG}\`: \`${sha256(dmg)}\``), 'the run summary does not give the checksum');
+  assert.ok(result.summary.includes(`\`${DMG}\`: \`${sha256(dmg)}\``), "the run summary does not give the .dmg's checksum");
+  assert.ok(result.summary.includes(`\`${EXE}\`: \`${sha256(exe)}\``), "the run summary does not give the .exe's checksum");
 });
 
 test('a version already tagged stops the run before anything is made', () => {
@@ -204,9 +224,24 @@ test('a check that fails stops the run, and so does a release that fails', () =>
   assert.equal(made.summary, '', 'a failed release wrote a summary');
 });
 
-test('a folder that does not hold exactly the .dmg and its matching checksum reaches no gh call', () => {
+test('a folder that does not hold exactly the .dmg, the .exe, and their matching checksums reaches no gh call', () => {
   const dmg = 'not really a disk image\n';
   const sum = sha256(dmg);
+  const exeSum = sha256('not really an installer\n');
+  /** A folder with one of its files taken out, or made a link to a copy outside it. */
+  const without = (name) => (folder) => {
+    const dist = distIn(folder);
+    rmSync(path.join(dist, name));
+    return dist;
+  };
+  const linked = (name) => (folder) => {
+    const dist = distIn(folder);
+    const real = path.join(folder, `real-${name}`);
+    copyFileSync(path.join(dist, name), real);
+    rmSync(path.join(dist, name));
+    symlinkSync(real, path.join(dist, name));
+    return dist;
+  };
   const cases = {
     'a checksum of something else': (folder) => distIn(folder, { checksum: `${sha256('other')}  ${DMG}\n` }),
     'a checksum that names another file': (folder) => distIn(folder, { checksum: `${sum}  other.dmg\n` }),
@@ -214,16 +249,17 @@ test('a folder that does not hold exactly the .dmg and its matching checksum rea
     'a checksum with one space': (folder) => distIn(folder, { checksum: `${sum} ${DMG}\n` }),
     'a checksum with more after it': (folder) => distIn(folder, { checksum: `${sum}  ${DMG}\n${sum}  ${DMG}\n` }),
     'an empty .dmg': (folder) => distIn(folder, { dmg: '' }),
-    'no checksum': (folder) => {
-      const dist = distIn(folder);
-      rmSync(path.join(dist, `${DMG}.sha256`));
-      return dist;
-    },
-    'no .dmg': (folder) => {
-      const dist = distIn(folder);
-      rmSync(path.join(dist, DMG));
-      return dist;
-    },
+    'no checksum': without(`${DMG}.sha256`),
+    'no .dmg': without(DMG),
+    "a checksum of something else for the .exe": (folder) => distIn(folder, { exeChecksum: `${sha256('other')}  ${EXE}\n` }),
+    "the .dmg's checksum beside the .exe": (folder) => distIn(folder, { exeChecksum: `${sum}  ${EXE}\n` }),
+    "an .exe checksum that names the .dmg": (folder) => distIn(folder, { exeChecksum: `${exeSum}  ${DMG}\n` }),
+    "an .exe checksum with Git Bash's star": (folder) => distIn(folder, { exeChecksum: `${exeSum} *${EXE}\n` }),
+    "an .exe checksum with Windows line endings": (folder) => distIn(folder, { exeChecksum: `${exeSum}  ${EXE}\r\n` }),
+    'an empty .exe': (folder) => distIn(folder, { exe: '' }),
+    'no .exe checksum': without(`${EXE}.sha256`),
+    'no .exe': without(EXE),
+    'an .exe that is a link': linked(EXE),
     'a file more': (folder) => {
       const dist = distIn(folder);
       writeFileSync(path.join(dist, 'notes.txt'), 'x');
@@ -234,14 +270,7 @@ test('a folder that does not hold exactly the .dmg and its matching checksum rea
       writeFileSync(path.join(dist, '.DS_Store'), 'x');
       return dist;
     },
-    'a .dmg that is a link': (folder) => {
-      const dist = distIn(folder);
-      const real = path.join(folder, 'real.dmg');
-      copyFileSync(path.join(dist, DMG), real);
-      rmSync(path.join(dist, DMG));
-      symlinkSync(real, path.join(dist, DMG));
-      return dist;
-    },
+    'a .dmg that is a link': linked(DMG),
     'no folder': (folder) => path.join(folder, 'missing'),
     'a file, not a folder': (folder) => {
       writeFileSync(path.join(folder, 'dist'), 'x');
@@ -320,10 +349,10 @@ test("the app's three version numbers must agree, and the release is named for t
   }
 
   for (const versions of [
-    { package: '0.2.0' },
-    { tauri: '0.2.0' },
-    { cargo: '0.2.0' },
-    { package: '0.2.0', tauri: '0.2.0' },
+    { package: NEXT },
+    { tauri: NEXT },
+    { cargo: NEXT },
+    { package: NEXT, tauri: NEXT },
   ]) {
     const result = withVersions(versions);
     assert.notEqual(result.status, 0, `${JSON.stringify(versions)}: the run went on`);
@@ -338,15 +367,27 @@ test("the app's three version numbers must agree, and the release is named for t
     assert.deepEqual(result.calls, []);
   }
 
-  const raised = withVersions({ package: '0.2.0', tauri: '0.2.0', cargo: '0.2.0' });
+  assert.notEqual(NEXT, VERSION, 'the next version is worked out wrong');
+  const raised = withVersions({ package: NEXT, tauri: NEXT, cargo: NEXT });
   assert.equal(raised.status, 0, raised.stderr);
-  assert.deepEqual(raised.calls[0], ASK('v0.2.0'));
-  assert.deepEqual(raised.calls[1].slice(0, 9), createOf('v0.2.0', '0.2.0', '', '').slice(0, 9));
+  assert.deepEqual(raised.calls[0], ASK(`v${NEXT}`));
+  assert.deepEqual(raised.calls[1].slice(0, 9), createOf(`v${NEXT}`, NEXT, '', '').slice(0, 9));
 
   // Only the version under [package] is the app's.
   const other = withVersions({}, { cargoAfter: '\n[workspace.package]\nversion = "9.9.9"\n' });
   assert.equal(other.status, 0, other.stderr);
   assert.deepEqual(other.calls[0], ASK(TAG));
+});
+
+test("the lockfiles, the README, and SECURITY.md give the app's version too", () => {
+  const lock = JSON.parse(read('apps/desktop/package-lock.json'));
+  assert.equal(lock.version, VERSION, 'apps/desktop/package-lock.json gives another version');
+  assert.equal(lock.packages?.['']?.version, VERSION, 'apps/desktop/package-lock.json gives the app another version');
+  const { name } = /^name = "(?<name>[^"]+)"$/m.exec(read('apps/desktop/src-tauri/Cargo.toml')).groups;
+  const entry = new RegExp(`^name = "${name}"\\nversion = "([^"]*)"$`, 'm').exec(read('apps/desktop/src-tauri/Cargo.lock'));
+  assert.equal(entry?.[1], VERSION, 'apps/desktop/src-tauri/Cargo.lock gives the app another version');
+  assert.match(read('README.md'), new RegExp(`^\\*\\*Status:\\*\\* version ${VERSION.replaceAll('.', '\\.')},`, 'm'));
+  assert.match(read('SECURITY.md'), new RegExp(`^The app's version is ${VERSION.replaceAll('.', '\\.')}\\.`, 'm'));
 });
 
 test('the script asks gh for nothing but the check and the new release, and never removes, edits, or replaces one', () => {
@@ -364,13 +405,29 @@ test('the script asks gh for nothing but the check and the new release, and neve
   assert.match(code, /^ {8}--latest \\$/m, 'the release is not marked as the newest, so the README would not find it');
 });
 
-test("the README's download link names the .dmg that make dmg makes, and so do the script and the workflow", () => {
+test("the README's download links name the .dmg that make dmg makes and the .exe that scripts/windows-app.sh makes, and so do the script and the workflow", () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
-  const link = `https://github.com/${REPOSITORY}/releases/latest/download/${DMG}`;
-  assert.ok(read('README.md').includes(`](${link})`), `the README does not link ${link}`);
-  assert.equal(/^DMG=(\S+)$/m.exec(read('scripts/release.sh'))?.[1], DMG, 'release.sh names another .dmg');
+  assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
   const workflow = read('.github/workflows/release.yml');
-  assert.ok(workflow.includes(`target/mac/${DMG}\n`) && workflow.includes(`target/mac/${DMG}.sha256\n`), 'release.yml keeps another .dmg');
-  // make dmg writes the checksum the way the script checks it: shasum's own line.
+  for (const [file, maker, folder, name] of [
+    [DMG, 'DMG', 'mac', '.dmg'],
+    [EXE, 'EXE', 'windows', '.exe'],
+  ]) {
+    const link = `https://github.com/${REPOSITORY}/releases/latest/download/${file}`;
+    assert.ok(read('README.md').includes(`](${link})`), `the README does not link ${link}`);
+    assert.equal(new RegExp(`^${maker}=(\\S+)$`, 'm').exec(read('scripts/release.sh'))?.[1], file, `release.sh names another ${name}`);
+    assert.ok(
+      workflow.includes(`target/${folder}/${file}\n`) && workflow.includes(`target/${folder}/${file}.sha256\n`),
+      `release.yml keeps another ${name}`,
+    );
+  }
+  // Each build writes its checksum the way the script checks it: the
+  // checksum, two spaces, and the name. The Mac's is shasum's own line;
+  // Windows' is written out, since Git Bash's sha256sum puts a * before the
+  // name.
   assert.match(read('scripts/mac-app.sh'), /^\(cd "\$WORK" && shasum -a 256 "\$DMG" >"\$DMG\.sha256"\)$/m);
+  assert.match(
+    read('scripts/windows-app.sh'),
+    /^printf '%s  %s\\n' "\$\(sha256sum "\$WORK\/\$EXE" \| cut -c1-64\)" "\$EXE" >"\$WORK\/\$EXE\.sha256"$/m,
+  );
 });
