@@ -72,8 +72,9 @@ Five more live in `update.rs`, each with tests:
   `.deb`, the `.rpm`, or the `.tar.gz`, by where the program is installed.
 - The page names only the download or the notes, never an address. Rust
   opens only this repository's releases on github.com, in the browser.
-- A check that fails shows nothing and keeps what the last one found. The
-  app downloads and installs nothing itself.
+- A check that fails keeps what the last one found. Check for updates says
+  why it failed; the checks at open and once a day show nothing. The app
+  downloads and installs nothing itself.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts

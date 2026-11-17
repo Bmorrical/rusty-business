@@ -1,11 +1,14 @@
 // The notice of a new version, checked on every test run.
 //
 // It answers the ask that started it: "when a new build is ready, the user is
-// notified in app, and it gives them the download".
+// notified in app, and it gives them the download". Then a button to ask now:
+// "is the user able to click a refresh button? If not, I want that.", and
+// "check for updates I imply".
 //
 // So these fail when the window stops asking for a new version when it opens
 // and once a day, when the notice loses its Download button or the steps
-// that follow it, or when the check reaches further than it says: past GitHub's API, past this
+// that follow it, when the Check for updates button stops asking now or
+// saying what it found, or when the check reaches further than it says: past GitHub's API, past this
 // repository's newest release, through a proxy or a redirect, with an
 // account, a token, or a cookie. They also fail when the app starts writing,
 // downloading, or installing anything itself, when the page gains an address
@@ -42,7 +45,8 @@ const KEPT_BY = [
   'a_redirect_is_never_followed',
   'an_answer_is_read_up_to_its_size_and_no_further',
   'only_this_repositorys_releases_are_opened',
-  'a_check_that_fails_keeps_what_the_last_one_found',
+  'a_check_that_fails_says_why_and_keeps_what_the_last_one_found',
+  'too_many_checks_are_said_plainly',
 ];
 
 /** What would let the check carry an account, or write or install anything. */
@@ -108,6 +112,28 @@ test('the notice gives the download, how to install it, the notes, and a way to 
   assert.doesNotMatch(app, /github\.com/i, `${APP} names an address on GitHub, where only Rust should`);
 });
 
+test('"check for updates": a button asks now and says what it found', () => {
+  const app = read(APP);
+  // The button, which waits while a check is under way.
+  assert.ok(
+    app.includes('<button class="wide" type="button" :disabled="updateChecking" @click="checkNow">\n          {{ updateChecking ? "Checking..." : "Check for updates" }}\n        </button>'),
+    `${APP} has no Check for updates button`,
+  );
+  assert.match(app, /async function checkNow\(\) \{\n  if \(!inApp \|\| updateChecking\.value\) return;\n  updateChecking\.value = true;/, `${APP} asks again while a check is under way`);
+  assert.match(app, /\} finally \{\n    updateChecking\.value = false;\n  \}\n\}/, `${APP} leaves the button waiting after a check`);
+  // What it found: a new version, which comes back even after Later, that
+  // this is the newest, or why the check failed.
+  const checkNow = app.slice(app.indexOf('async function checkNow()'), app.indexOf('async function openUpdate('));
+  assert.ok(checkNow.includes('    update.value = await invoke("check_update");\n    updateLater.value = "";\n'), `${APP} keeps a notice hidden by Later after Check for updates finds it`);
+  assert.ok(checkNow.includes('updateChecked.value = checkedLine(update.value, await getVersion());'), `${APP} no longer says what Check for updates found`);
+  assert.ok(checkNow.includes('    updateChecked.value = String(error);\n'), `${APP} no longer says why Check for updates failed`);
+  assert.ok(app.includes('<p v-if="updateChecked" class="small">{{ updateChecked }}</p>'), `${APP} no longer shows what Check for updates found`);
+  assert.ok(app.includes('import { getVersion } from "@tauri-apps/api/app";'), `${APP} no longer reads this version from the app`);
+  // A failed check answers why, and the button is the only one that shows it.
+  assert.ok(codeOf(read(UPDATE)).includes('    updates.keep(checked)\n}'), `${UPDATE} no longer answers why a check failed`);
+  assert.match(app, /async function checkUpdate\(\) \{\n  if \(!inApp\) return;\n  try \{\n    update\.value = await invoke\("check_update"\);\n  \} catch \{/, `${APP} shows a failed daily check`);
+});
+
 test('the two commands are on the list the page may call, with what the last check found', () => {
   const lib = read(LIB);
   assert.match(lib, /^mod update;$/m);
@@ -157,11 +183,13 @@ test('each rule of the notice is kept by a test in the Rust', () => {
     assert.match(rust, new RegExp(`#\\[test\\]\\s+fn ${name}\\(`), `${UPDATE} has lost the test ${name}`);
   }
   assert.ok(rust.includes('"when a new build is ready, the user is\n// notified in app, and it gives them the download"'), `${UPDATE} no longer quotes the ask`);
+  assert.ok(rust.includes('("is the user able to click a refresh button? If not, I want that.",\n// then "check for updates I imply")'), `${UPDATE} no longer quotes the ask for the button`);
 });
 
 test('the README, the security policy, and the roadmap say what the check does', () => {
   const readme = read('README.md');
-  assert.match(readme, /once a day while it stays open, the app asks GitHub\s+whether a new version is out\./, 'the README no longer says when the app asks GitHub');
+  assert.match(readme, /once a day while it stays open, and when you click Check\s+for updates, the app asks GitHub\s+whether a new version is out\./, 'the README no longer says when the app asks GitHub');
+  assert.match(readme, /Check for updates,\s+under the saved chats, asks at any time\./, "the README's limits no longer name Check for updates");
   assert.match(readme, /^- \*\*A new version is a download\.\*\*/m, "the README's limits no longer say a new version is a download");
   assert.match(readme, /There\s+is\s+no\s+switch\s+to\s+turn\s+the\s+check\s+off\./, 'the README no longer says the check has no switch');
   const security = read('SECURITY.md').replace(/\s+/g, ' ');

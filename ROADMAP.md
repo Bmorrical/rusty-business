@@ -61,4 +61,5 @@ Nothing is picked yet.
 - **A notice of each new version.** When a new version is released, the
   window says so, and Download opens this system's file in the browser: the
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
-  GitHub when the window opens and once a day, and installs nothing itself.
+  GitHub when the window opens, once a day, and when you click Check for
+  updates. It installs nothing itself.
