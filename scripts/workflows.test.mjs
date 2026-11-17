@@ -54,6 +54,55 @@ export function triggersOf(text) {
   return triggers.sort();
 }
 
+/** The permissions a job sets for itself, one "name: level" each, or null when it sets none. */
+export function jobPermissions(body) {
+  const lines = body.split('\n');
+  const start = lines.findIndex((line) => /^ {4}permissions:/.test(line));
+  if (start === -1) return null;
+  const inline = /^ {4}permissions:\s*(\S.*?)\s*$/.exec(lines[start]);
+  if (inline) return [inline[1]];
+  const found = [];
+  for (const line of lines.slice(start + 1)) {
+    const entry = /^ {6}([a-z-]+):\s*(\S+)\s*$/.exec(line);
+    if (!entry) break;
+    found.push(`${entry[1]}: ${entry[2]}`);
+  }
+  return found;
+}
+
+/**
+ * The text of every `run:` in a workflow, a block of several lines included.
+ * Read with comments left in: GitHub fills in an expression even inside a
+ * shell comment.
+ */
+export function runsOf(text) {
+  const lines = text.split('\n');
+  const runs = [];
+  for (let at = 0; at < lines.length; at += 1) {
+    const step = /^(\s*)(?:- )?run:\s*(.*)$/.exec(lines[at]);
+    if (!step) continue;
+    let body = step[2];
+    if (/^[|>][-+]?\s*$/.test(body)) {
+      body = '';
+      while (at + 1 < lines.length && (lines[at + 1].trim() === '' || lines[at + 1].search(/\S/) > step[1].length)) {
+        at += 1;
+        body += `${lines[at]}\n`;
+      }
+    }
+    runs.push(body);
+  }
+  return runs;
+}
+
+// Deploy's two image jobs may also write packages: they push the images. No
+// other job, in any workflow, sets permissions of its own.
+const WRITERS = new Map([['deploy.yml', ['build', 'publish']]]);
+
+// The one line that signs in to the registry, word for word. The token
+// reaches Docker on its standard input, never on a command line.
+const SIGN_IN =
+  'run: printf \'%s\' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin';
+
 function workflow(name) {
   const found = workflows.find((each) => each.name === name);
   assert.ok(found, `${name} is missing from .github/workflows`);
@@ -80,17 +129,119 @@ test('every action is pinned to a full commit', () => {
   }
 });
 
-test('every workflow can only read the repository', () => {
+test('every workflow can only read the repository, and only the image jobs write, and only packages', () => {
   for (const { name, text } of workflows) {
     const plain = withoutComments(text);
     assert.match(plain, /^permissions:\n {2}contents: read\n(?! )/m, `${name}: top-level permissions`);
-    assert.doesNotMatch(plain, /:\s*write\b/, `${name}: something is given write access`);
+
+    const writers = WRITERS.get(name) ?? [];
+    const setting = jobsOf(text).filter((job) => jobPermissions(job.body) !== null);
+    assert.deepEqual(
+      setting.map((job) => job.id),
+      writers,
+      `${name}: the jobs that set their own permissions`,
+    );
+    for (const job of setting) {
+      assert.deepEqual(
+        jobPermissions(job.body),
+        ['contents: read', 'packages: write'],
+        `${name}: the ${job.id} job's permissions`,
+      );
+    }
     assert.equal(
       plain.match(/^\s*permissions:/gm).length,
-      1,
-      `${name}: a job sets its own permissions`,
+      1 + writers.length,
+      `${name}: permissions set somewhere other than the top and the image jobs`,
+    );
+    assert.equal(
+      (plain.match(/write/g) ?? []).length,
+      writers.length,
+      `${name}: write access given anywhere but packages in the image jobs`,
     );
   }
+});
+
+test('no expression is written into a command', () => {
+  // A value reaches a command through env:, so it is never read as shell.
+  for (const { name, text } of workflows) {
+    const runs = runsOf(text);
+    assert.ok(runs.length > 0, `${name} runs nothing, which looks wrong`);
+    for (const run of runs) {
+      assert.doesNotMatch(run, /\$\{\{/, `${name}: an expression inside run: ${run.trim()}`);
+    }
+  }
+});
+
+test('every checkout keeps no credentials behind', () => {
+  for (const { name, text } of workflows) {
+    const lines = withoutComments(text).split('\n');
+    const checkouts = lines.flatMap((line, at) => (/uses: actions\/checkout@/.test(line) ? [at] : []));
+    assert.ok(checkouts.length > 0, `${name} checks nothing out, which looks wrong`);
+    for (const at of checkouts) {
+      assert.match(lines[at + 1], /^\s+with:$/, `${name}: the checkout on line ${at + 1} has no with:`);
+      assert.match(
+        lines[at + 2],
+        /^\s+persist-credentials: false$/,
+        `${name}: the checkout on line ${at + 1} keeps its credentials`,
+      );
+    }
+  }
+});
+
+test('the registry token reaches Docker only on its standard input', () => {
+  for (const { name, text } of workflows) {
+    const plain = withoutComments(text);
+    for (const [line] of plain.matchAll(/^.*secrets\..*$/gm)) {
+      assert.match(
+        line,
+        /^ {10}REGISTRY_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/,
+        `${name}: a secret used anywhere but the registry sign-in: ${line.trim()}`,
+      );
+    }
+    assert.doesNotMatch(plain, /--password(?!-stdin)|\s-p\s/, `${name}: a password on a command line`);
+    assert.doesNotMatch(plain, /^\s+REGISTRY:/m, `${name}: the images sent to a registry other than GitHub's`);
+
+    for (const id of WRITERS.get(name) ?? []) {
+      const job = jobsOf(text).find((each) => each.id === id);
+      const signIn = job.body.indexOf(SIGN_IN);
+      assert.ok(signIn > 0, `${name}: the ${id} job does not sign in the one way allowed`);
+      assert.match(
+        job.body.slice(job.body.lastIndexOf('- name:', signIn)),
+        /^- name: .*\n {8}env:\n {10}REGISTRY_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}\n {8}run: printf/,
+        `${name}: the ${id} job's sign-in does not read the token from its own env`,
+      );
+      assert.ok(
+        signIn < job.body.indexOf('scripts/publish-images.sh'),
+        `${name}: the ${id} job pushes before it signs in`,
+      );
+    }
+  }
+});
+
+test('Deploy builds each kind of image on its own kind of computer, then joins them', () => {
+  const jobs = jobsOf(workflow('deploy.yml'));
+  assert.deepEqual(
+    jobs.map((job) => job.id),
+    ['gate', 'build', 'publish'],
+  );
+  const [, build, publish] = jobs;
+
+  assert.match(build.body, /^ {4}runs-on: \$\{\{ matrix\.runner \}\}$/m);
+  assert.match(build.body, /^ {6}fail-fast: true$/m);
+  assert.match(
+    build.body,
+    / {8}include:\n {10}- arch: amd64\n {12}runner: ubuntu-24\.04\n {10}- arch: arm64\n {12}runner: ubuntu-24\.04-arm\n {4}steps:/,
+  );
+  assert.match(build.body, / {10}ARCH: \$\{\{ matrix\.arch \}\}\n {8}run: scripts\/publish-images\.sh build "\$\{ARCH\}"\n/);
+
+  assert.match(publish.body, /^ {4}needs: \[gate, build\]$/m);
+  assert.match(publish.body, /^ {4}runs-on: ubuntu-24\.04$/m);
+  assert.match(publish.body, /^ {8}run: scripts\/publish-images\.sh join$/m);
+  assert.equal(
+    (publish.body.match(/publish-images\.sh/g) ?? []).length,
+    1,
+    'the publish job runs the script once',
+  );
 });
 
 test('no workflow runs on a pull request', () => {
@@ -160,4 +311,25 @@ test('jobs and triggers are read from the text, and comments are ignored', () =>
     ['one', 'three'],
   );
   assert.match(jobsOf(text)[1].body, /needs: one/);
+});
+
+test('permissions and run lines are read from the text', () => {
+  assert.equal(jobPermissions('    runs-on: x\n'), null);
+  assert.deepEqual(jobPermissions('    permissions: write-all\n'), ['write-all']);
+  assert.deepEqual(jobPermissions('    permissions:\n      contents: read\n      packages: write\n    steps:\n'), [
+    'contents: read',
+    'packages: write',
+  ]);
+
+  const text = [
+    '      - run: echo one',
+    '      - name: two',
+    '        run: |',
+    '          echo two',
+    '          # ${{ hidden }}',
+    '        env:',
+    '  # run: not a step',
+    '',
+  ].join('\n');
+  assert.deepEqual(runsOf(text), ['echo one', '          echo two\n          # ${{ hidden }}\n']);
 });

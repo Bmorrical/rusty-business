@@ -97,7 +97,7 @@ says what is in it.
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
-| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy is a stub with nothing to deploy yet |
+| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy publishes the API and worker images |
 
 The chat window does not use the stack yet. It talks only to the model engine
 on this computer. The stack is the ground the next features stand on.
