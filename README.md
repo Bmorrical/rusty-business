@@ -2,6 +2,19 @@
 
 ![Rusty Business™: a person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails on the ground below](docs/rusty-business.svg)
 
+| Download | For | First time |
+| -------- | --- | ---------- |
+| [**Mac**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-mac-arm64.dmg) (`.dmg`) | Apple silicon, macOS 14 or later | [How to open it](#run-the-chat-window-macos) |
+| [**Windows**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-windows-x64-setup.exe) (`.exe`) | 64-bit Windows 10 or 11, no model engine yet | [How to open it](#run-the-chat-window-windows) |
+| **Linux:** [**.deb**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb), [**.rpm**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm), or [**.tar.gz**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz) | 64-bit, on Intel or AMD, no model engine yet | [Which one, and how](#run-the-chat-window-linux) |
+
+**On this page:** [Screenshots](#screenshots) ·
+[Rusty Business™ or Ollama?](#rusty-business-or-ollama) ·
+[What is here](#what-is-here) · [Mac](#run-the-chat-window-macos) ·
+[Windows](#run-the-chat-window-windows) · [Linux](#run-the-chat-window-linux) ·
+[Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
+[Roadmap](#roadmap) · [Security](#security) · [License](#license)
+
 A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
