@@ -1,4 +1,5 @@
 mod engine;
+mod models;
 mod sessions;
 
 use tauri::Manager;

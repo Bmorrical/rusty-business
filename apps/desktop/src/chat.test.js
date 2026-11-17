@@ -6,6 +6,7 @@ import {
   formatCount,
   formatWindow,
   fullness,
+  onDiskLine,
   requestMessages,
   savedTurn,
   titleFrom,
@@ -112,4 +113,37 @@ test("a saved turn drops window-only and empty fields", () => {
 test("a reply that ran into the length limit is saved that way", () => {
   const saved = savedTurn({ role: "assistant", content: "One, two", cutShort: true, stopped: false });
   assert.deepEqual(saved, { role: "assistant", content: "One, two", cutShort: true });
+});
+
+// Brad, on what the app does by itself: "it should search and up the local
+// models and stack." With the engine off, the app says which of its models it
+// found on the disk.
+test("the models on this computer are named in one sentence", () => {
+  const phi = { id: "mlx-community/phi-4-4bit", name: "Phi-4" };
+  const gptOss = { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B" };
+  const nemotron = { id: "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", name: "Nemotron 3.5 Lightning" };
+
+  assert.equal(onDiskLine([phi]), "On this computer: Phi-4.");
+  assert.equal(onDiskLine([phi, gptOss]), "On this computer: Phi-4 and gpt-oss 20B.");
+  assert.equal(
+    onDiskLine([phi, gptOss, nemotron]),
+    "On this computer: Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning.",
+  );
+});
+
+test("a model kept in two sizes is named once", () => {
+  const models = [
+    { id: "mlx-community/phi-4-4bit", name: "Phi-4" },
+    { id: "mlx-community/phi-4-8bit", name: "Phi-4" },
+    { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B" },
+  ];
+  assert.equal(onDiskLine(models), "On this computer: Phi-4 and gpt-oss 20B.");
+});
+
+test("with none of its models on the disk, the app says so", () => {
+  const none = "None of this app's models is on this computer yet.";
+  assert.equal(onDiskLine([]), none);
+  // An older report has no list at all.
+  assert.equal(onDiskLine(undefined), none);
+  assert.equal(onDiskLine(null), none);
 });

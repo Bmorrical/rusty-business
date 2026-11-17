@@ -138,6 +138,9 @@ pub struct EngineStatus {
     pub models: Vec<ModelInfo>,
     /// Models the engine holds that are not on the list.
     pub hidden: usize,
+    /// Models on the list that are on this computer's disk, whether or not
+    /// the engine is answering.
+    pub on_disk: Vec<ModelInfo>,
     pub error: Option<String>,
     pub start_hint: String,
 }
@@ -178,6 +181,7 @@ pub async fn engine_status() -> Result<EngineStatus, String> {
         reachable: false,
         models: Vec::new(),
         hidden: 0,
+        on_disk: crate::models::on_disk(),
         error: None,
         start_hint: start_hint().to_string(),
     };

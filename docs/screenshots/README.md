@@ -29,10 +29,11 @@ light or dark setting; this is light.
 
 ## No engine answering
 
-[![The app in the light theme with no engine answering: a red dot, the command that starts the engine, a Try again button, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
+[![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the command that starts the engine, a Try again button, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
 
-What the app shows when nothing answers at the engine's address: the command
-that starts the engine, and a button to try again.
+What the app shows when nothing answers at the engine's address: which of its
+models are already on this computer, the command that starts the engine, and
+a button to try again.
 
 ## How these were made
 
