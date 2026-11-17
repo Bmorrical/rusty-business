@@ -22,6 +22,7 @@ const read = (file) => readFileSync(new URL(file, `file://${REPO}`), 'utf8');
 // The sections a link from outside the repository points to, by address.
 // Rewording one of these headings breaks those links, so it fails here first.
 const LINKED_FROM_OUTSIDE = {
+  'rusty-business-ollama-or-colibri': 'Rusty Business™, Ollama, or Colibri?',
   'run-the-chat-window-macos': 'Run the chat window (macOS)',
   'run-the-chat-window-windows': 'Run the chat window (Windows)',
   'run-the-chat-window-linux': 'Run the chat window (Linux)',
