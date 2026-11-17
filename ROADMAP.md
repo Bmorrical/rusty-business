@@ -7,8 +7,8 @@ here: a thing ships when its tests are green.
 
 Decided, and parked until it is picked up again. A pin keeps its number.
 
-1. **Signed installers.** The first installers will ship unsigned, so macOS
-   and Windows will both warn before they open one. Signing and notarizing
+1. **Signed installers.** The installers ship unsigned at first, so macOS
+   and Windows both warn before they open one. Signing and notarizing
    the macOS app with an Apple Developer ID, then signing the Windows
    installer, takes the warnings away.
 
@@ -16,9 +16,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 In this order:
 
-- **Installers.** A `.dmg` and an `.exe`, linked from the README: download,
-  open, and go. The Mac's carries the model engine inside, so there is
-  nothing else to install. Unsigned at first; see pin 1.
+- **An installer for Windows.** An `.exe`, linked from the README beside the
+  Mac's `.dmg`: download, open, and go. Until Windows has an engine, the
+  window opens and says so. Unsigned at first; see pin 1.
 
 ## Later
 
@@ -49,3 +49,7 @@ In this order:
   engine inside and opens it, from a fresh copy of this repository, with
   nothing to install first but Apple's command line tools. `make dmg` packs
   the same app as a `.dmg`.
+- **A download for the Mac.** The README links the newest `.dmg`, with the
+  model engine inside: download, open, and go. The Release workflow builds
+  it on a Mac with `make dmg`, after a green gate, and a release that is out
+  is never changed. Unsigned for now; see pin 1.

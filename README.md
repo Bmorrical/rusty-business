@@ -6,9 +6,9 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
-**Status:** version 0.1.0, and early. It runs on a Mac with Apple silicon, and
-you build it from source with one command. What it cannot do yet is under
-[Limits](#limits).
+**Status:** version 0.1.0, and early. It runs on a Mac with Apple silicon:
+[download it](#run-the-chat-window-macos), or build it from source with one
+command. What it cannot do yet is under [Limits](#limits).
 
 ## Screenshots
 
@@ -58,9 +58,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 
 ### Why choose Ollama
 
-- **Install and go, today.** Ollama installs on macOS, Windows, and Linux with
-  one download or one command. Rusty Business™ has no download yet: you build
-  it with one command, on a Mac with Apple silicon only.
+- **Install and go, anywhere.** Ollama installs on macOS, Windows, and Linux
+  with one download or one command. Rusty Business™ has one download, for a
+  Mac with Apple silicon, and it is not signed yet, so macOS stops it once
+  before it opens.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads one of its three models on a first run, when
   none of them is on the computer yet, and offers no others.
@@ -98,7 +99,7 @@ says what is in it.
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
-| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy publishes the API and worker images |
+| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app |
 
 The chat window starts the stack when Docker is on the computer, and does not
 use it yet: it talks only to the model engine on this computer. The stack is
@@ -106,8 +107,24 @@ the ground the next features stand on.
 
 ## Run the chat window (macOS)
 
-On a Mac with Apple silicon and macOS 14 or later, this one line builds the
-app with its model engine inside, and opens it:
+On a Mac with Apple silicon and macOS 14 or later:
+
+1. Download
+   [Rusty-Business-mac-arm64.dmg](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-mac-arm64.dmg),
+   open it, and drag Rusty Business™ to Applications.
+2. Open the app. It is not signed yet, so macOS stops it the first time:
+   open System Settings, then Privacy & Security, and choose Open Anyway.
+   See pin 1 on the [roadmap](ROADMAP.md).
+
+The model engine is inside the app, so there is nothing else to install. The
+`.dmg`'s checksum is beside it on the
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest),
+for checking the download first.
+
+### Or build it yourself
+
+This one line builds the same app, with its model engine inside, and opens
+it:
 
 ```bash
 git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && make app
@@ -123,8 +140,8 @@ since it fetches and builds everything once; later runs keep what still
 matches its pins.
 
 `make dmg` builds the same app and packs it as a `.dmg`, with its checksum
-beside it, in that folder. The app is not signed yet; see pin 1 on the
-[roadmap](ROADMAP.md).
+beside it, in that folder. The download above is that `.dmg`, built on
+GitHub's Mac by the Release workflow after a green gate.
 
 On a first run, with none of its models on the computer, the app lists them
 with their download sizes. Download brings the one you pick from Hugging
@@ -224,8 +241,9 @@ next.
 
 - **One kind of computer.** It runs on a Mac with Apple silicon. Windows has
   no engine chosen yet. (On the roadmap: An engine for Windows.)
-- **No download yet.** You build it from source, with one command:
-  `make app`. (On the roadmap: Installers.)
+- **Not signed yet.** macOS stops the downloaded app the first time it
+  opens, until you choose Open Anyway in System Settings. (On the roadmap:
+  Signed installers.)
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer. It does not put Docker there. The chat does not need the
   stack yet.
