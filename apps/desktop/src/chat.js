@@ -205,3 +205,12 @@ export function updateLine(update) {
 export function updateDetail(update) {
   return `This is ${update.current}. Download opens ${update.file} in your browser.`;
 }
+
+/**
+ * What the Check for updates button found: the new version, or that this one,
+ * `current`, is the newest.
+ */
+export function checkedLine(update, current) {
+  if (update?.version) return updateLine(update);
+  return current ? `Rusty Business™ ${current} is the newest version.` : "This is the newest version.";
+}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  checkedLine,
   dayLabel,
   downloaded,
   downloadLine,
@@ -304,6 +305,15 @@ test("a new version is shown until Later is chosen for it", () => {
 test("the notice says which version is ready and what Download opens", () => {
   assert.equal(updateLine(update), "Rusty Business™ 0.5.0 is ready.");
   assert.equal(updateDetail(update), "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser.");
+});
+
+// "is the user able to click a refresh button? If not, I want that.", then
+// "check for updates I imply"
+test("Check for updates says what it found", () => {
+  assert.equal(checkedLine(update, "0.4.0"), "Rusty Business™ 0.5.0 is ready.");
+  assert.equal(checkedLine(null, "0.4.0"), "Rusty Business™ 0.4.0 is the newest version.");
+  assert.equal(checkedLine({}, "0.4.0"), "Rusty Business™ 0.4.0 is the newest version.");
+  assert.equal(checkedLine(null, ""), "This is the newest version.");
 });
 
 test("the page asks once a day while it stays open", () => {

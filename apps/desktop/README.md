@@ -38,12 +38,14 @@ Select the picture to open it full size. The rest of the set is in
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
 - **A context meter** that shows how full the model's window is.
-- **A notice of each new version.** When the window opens, and once a day
-  while it stays open, the app asks GitHub for the newest release. When it is
+- **A notice of each new version.** When the window opens, once a day while
+  it stays open, and when you click Check for updates under the saved chats,
+  the app asks GitHub for the newest release. When it is
   newer than this copy and holds this system's file, a notice above the chat
   says so. Download opens that file in the browser and then says how to
   install it; What changed opens the release's notes; Later hides the notice
-  until the app opens again or a newer version is out.
+  until the app opens again, a newer version is out, or you click Check for
+  updates. Check for updates says what it found, or why the check failed.
 
 ## How it is put together
 
@@ -51,7 +53,7 @@ Select the picture to open it full size. The rest of the set is in
 page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
                       Rust  --https, on Download only-->   Hugging Face
                       Rust  --Docker, when the stack is not answering-->  the stack
-                      Rust  --https, at open and once a day-->  GitHub's API
+                      Rust  --https, at open, once a day, and on Check for updates-->  GitHub's API
 ```
 
 The page never talks to the network. Rust owns seven things:

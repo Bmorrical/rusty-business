@@ -1,8 +1,10 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
+  checkedLine,
   dayLabel,
   downloaded,
   downloadLine,
@@ -54,6 +56,8 @@ const update = ref(null);
 const updateLater = ref("");
 const updateOpened = ref("");
 const updateProblem = ref("");
+const updateChecking = ref(false);
+const updateChecked = ref("");
 let updateTimer = 0;
 
 let chatId = "";
@@ -164,6 +168,27 @@ async function checkUpdate() {
     update.value = await invoke("check_update");
   } catch {
     // Nothing to show; the notice stays as it was.
+  }
+}
+
+/**
+ * "is the user able to click a refresh button? If not, I want that.", then
+ * "check for updates I imply". The Check for updates button asks now and says
+ * what it found: the new version, which brings back a notice put off with
+ * Later, that this is the newest, or why the check failed.
+ */
+async function checkNow() {
+  if (!inApp || updateChecking.value) return;
+  updateChecking.value = true;
+  updateChecked.value = "";
+  try {
+    update.value = await invoke("check_update");
+    updateLater.value = "";
+    updateChecked.value = checkedLine(update.value, await getVersion());
+  } catch (error) {
+    updateChecked.value = String(error);
+  } finally {
+    updateChecking.value = false;
   }
 }
 
@@ -478,6 +503,10 @@ onBeforeUnmount(() => {
           <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
           <button class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
+        <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
+          {{ updateChecking ? "Checking..." : "Check for updates" }}
+        </button>
+        <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
         <p class="quiet small">Nothing you type leaves this computer.</p>
       </footer>
     </aside>

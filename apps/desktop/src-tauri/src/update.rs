@@ -2,7 +2,9 @@
 //
 // It answers the ask that started it: "when a new build is ready, the user is
 // notified in app, and it gives them the download". When the window opens,
-// and once a day while it stays open, the page asks for `check_update`. Rust
+// once a day while it stays open, and when the person clicks Check for
+// updates ("is the user able to click a refresh button? If not, I want that.",
+// then "check for updates I imply"), the page asks for `check_update`. Rust
 // asks GitHub for this repository's newest release. When that release is
 // newer than this app and holds this system's download, the page shows a
 // notice, and its Download button opens that file in the browser, which
@@ -19,7 +21,9 @@
 // - The page gives no address. It asks for the download or the notes of the
 //   version Rust found, and Rust opens only this repository's releases on
 //   github.com.
-// - A check that fails says nothing, and the next one tries again.
+// - A check that fails keeps what the last one found, and says why. The
+//   Check for updates button shows why; the other checks let it pass, and
+//   the next one tries again.
 // - The app downloads and installs nothing itself. The browser downloads the
 //   file, and the person installs it, as the first time.
 
@@ -286,6 +290,16 @@ async fn read_capped(chunks: impl Stream<Item = Result<Vec<u8>, String>>, most: 
     Ok(answer)
 }
 
+/// Why a check failed, from the status GitHub answered with. GitHub lets a
+/// network ask 60 times an hour without an account, and answers 403 or 429
+/// past that.
+fn status_problem(status: u16) -> String {
+    match status {
+        403 | 429 => "GitHub has had too many checks from this network for now. Try again later.".to_string(),
+        _ => format!("GitHub answered {status}."),
+    }
+}
+
 /// GitHub's answer for the newest release.
 async fn ask(client: reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     let response = client
@@ -301,7 +315,7 @@ async fn ask(client: reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
         return Err("GitHub answered from somewhere else.".to_string());
     }
     if !response.status().is_success() {
-        return Err(format!("GitHub answered {}.", response.status().as_u16()));
+        return Err(status_problem(response.status().as_u16()));
     }
     let chunks = response
         .bytes_stream()
@@ -316,13 +330,12 @@ pub struct Updates(Mutex<Option<Update>>);
 
 impl Updates {
     /// Keeps what a check found. A check that failed keeps what the last one
-    /// found.
-    fn keep(&self, checked: Result<Option<Update>, String>) -> Option<Update> {
+    /// found, and gives back why it failed.
+    fn keep(&self, checked: Result<Option<Update>, String>) -> Result<Option<Update>, String> {
+        let update = checked?;
         let mut found = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Ok(update) = checked {
-            *found = update;
-        }
-        found.clone()
+        *found = update.clone();
+        Ok(update)
     }
 
     fn found(&self) -> Option<Update> {
@@ -330,8 +343,9 @@ impl Updates {
     }
 }
 
-/// Asks GitHub whether a new version is out. A check that fails is not an
-/// error for the page: the next one tries again.
+/// Asks GitHub whether a new version is out. A check that fails keeps what
+/// the last one found and answers why, which the Check for updates button
+/// shows and the other checks let pass.
 #[tauri::command]
 pub async fn check_update(updates: tauri::State<'_, Updates>) -> Result<Option<Update>, String> {
     let Some(download) = this_download() else {
@@ -343,7 +357,7 @@ pub async fn check_update(updates: tauri::State<'_, Updates>) -> Result<Option<U
             .map(|answer| update_from(env!("CARGO_PKG_VERSION"), &answer, download)),
         Err(error) => Err(error),
     };
-    Ok(updates.keep(checked))
+    updates.keep(checked)
 }
 
 // ---------------------------------------------------------------------------
@@ -657,15 +671,29 @@ mod tests {
     }
 
     #[test]
-    fn a_check_that_fails_keeps_what_the_last_one_found() {
+    fn a_check_that_fails_says_why_and_keeps_what_the_last_one_found() {
         let updates = Updates::default();
         let found = update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Mac);
-        assert_eq!(updates.keep(Ok(found.clone())), found);
-        assert_eq!(updates.keep(Err("The app could not reach GitHub.".into())), found);
+        assert!(found.is_some());
+        assert_eq!(updates.keep(Ok(found.clone())), Ok(found.clone()));
+        // The Check for updates button shows why a check failed.
+        assert_eq!(
+            updates.keep(Err("The app could not reach GitHub.".into())),
+            Err("The app could not reach GitHub.".to_string())
+        );
         assert_eq!(updates.found(), found);
         // A check that finds nothing new clears it.
-        assert_eq!(updates.keep(Ok(None)), None);
+        assert_eq!(updates.keep(Ok(None)), Ok(None));
         assert_eq!(updates.found(), None);
+    }
+
+    #[test]
+    fn too_many_checks_are_said_plainly() {
+        let busy = "GitHub has had too many checks from this network for now. Try again later.";
+        assert_eq!(status_problem(403), busy);
+        assert_eq!(status_problem(429), busy);
+        assert_eq!(status_problem(404), "GitHub answered 404.");
+        assert_eq!(status_problem(500), "GitHub answered 500.");
     }
 
     #[test]

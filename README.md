@@ -61,7 +61,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   itself reaches out in three places. On a first run, Download brings the
   model you pick from Hugging Face, over https and from nowhere else. The
   first time it starts the stack, Docker downloads the stack's images. When
-  the window opens, and once a day while it stays open, the app asks GitHub
+  the window opens, once a day while it stays open, and when you click Check
+  for updates, the app asks GitHub
   whether a new version is out. Nothing you type goes with any of them. There
   is no account, no sign-in,
   and nothing in the cloud. Ollama keeps your prompts on your computer too
@@ -363,7 +364,8 @@ next.
   roadmap: Signed installers.)
 - **A new version is a download.** When one is out, the window says so, and
   Download opens this system's file from the release in your browser. The
-  app does not install it: you do, as the first time. There is no switch to
+  app does not install it: you do, as the first time. Check for updates,
+  under the saved chats, asks at any time. There is no switch to
   turn the check off.
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer. It does not put Docker there. The chat does not need the
