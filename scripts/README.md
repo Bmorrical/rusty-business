@@ -8,7 +8,7 @@ Helpers the Makefile calls, and the repository's own checks.
 | `up.sh`            | Builds and starts the stack, waits until every part is healthy, then makes sure the storage bucket exists | `make up` |
 | `stack-env.sh`     | Runs any command with the stack's addresses in its environment, read from `infra/.env` | `make test-live`, `make e2e` |
 | `readmes.test.mjs` | Fails when a folder in this repository has no README                | `make test-repo`  |
-| `license.test.mjs` | Fails when the MIT license, the trademark page, or the banner is missing or changed, or when a package does not say MIT | `make test-repo`  |
+| `license.test.mjs` | Fails when the MIT license, the trademark page, or the banner is missing or changed, when a nail in the banner turns its point away from the ladder, or when a package does not say MIT | `make test-repo`  |
 | `workflows.test.mjs` | Fails when a GitHub workflow breaks a rule: an action not pinned to a commit, more than read access, a run on a pull request, or a deploy that does not wait for the gate | `make test-repo`  |
 | `roadmap.test.mjs` | Fails when the roadmap loses a section, a pin loses its number, a date is promised, or the README stops linking the roadmap | `make test-repo`  |
 | `screenshots.mjs`  | Remakes the pictures in [docs/screenshots](../docs/screenshots): opens the app's built page in Google Chrome with no window on screen, and answers the page from recorded chats | `make screenshots` |
