@@ -10,6 +10,7 @@
 
 **On this page:** [Screenshots](#screenshots) ·
 [Rusty Business™ or Ollama?](#rusty-business-or-ollama) ·
+[Rusty Business™, Ollama, or Colibri?](#rusty-business-ollama-or-colibri) ·
 [What is here](#what-is-here) · [Mac](#run-the-chat-window-macos) ·
 [Windows](#run-the-chat-window-windows) · [Linux](#run-the-chat-window-linux) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
@@ -99,6 +100,27 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 What this says of Ollama was read from Ollama's own pages, and they are where
 to check it. Ollama is a trademark of its owner. Rusty Business™ is not
 affiliated with Ollama, and Ollama does not endorse it.
+
+## Rusty Business™, Ollama, or Colibri?
+
+[Colibri](https://github.com/JustVugg/colibri) is another open-source way to
+run models on your own computer. Here are the three side by side.
+
+| | Rusty Business™ | Ollama | Colibri |
+| --- | --- | --- | --- |
+| License | MIT | MIT | Apache 2.0 |
+| Runs a model on | A Mac with Apple silicon; Windows and Linux get the window, with no engine yet | macOS, Windows, and Linux | macOS, Windows, and Linux |
+| How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
+| What does the work | Apple silicon's GPU, through MLX | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
+| Models | Three, on a fixed list; any other is refused | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
+| A model too big for memory | Not run; it runs only what your computer can | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
+| Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
+| For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
+| Pictures and files | Words only | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
+
+What this says of Ollama and Colibri was read from their own pages, and they
+are where to check it. Ollama and Colibri are trademarks of their owners.
+Rusty Business™ is not affiliated with either, and neither endorses it.
 
 ## What is here
 

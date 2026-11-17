@@ -129,7 +129,7 @@ export function roadmapPointers(text) {
 const readme = read('README.md');
 const sections = sectionsOf(readme);
 const comparisons = sections.filter(
-  (each) => each.heading.includes('Rusty Business™') && each.heading.includes('Ollama'),
+  (each) => each.heading.includes('Rusty Business™') && each.heading.includes('Ollama') && !each.heading.includes('Colibri'),
 );
 const comparison = comparisons[0] ?? { heading: '', body: '' };
 const parts = sectionsOf(comparison.body, '###');
@@ -347,5 +347,101 @@ test('sections, reasons, addresses, and policies are read from the text', () => 
   assert.deepEqual(
     ["'self'", 'ipc:', 'http://ipc.localhost', 'ws://127.0.0.1:1420', 'https://example.com', '*', 'https:', 'http://localhost.example.com', 'ws://example.com:1420'].map(onThisComputer),
     [true, true, true, true, false, false, false, false, false],
+  );
+});
+
+// Brad, 2026-11-17: "put a 2nd comparison up on the readme in this next
+// build.  Rusty Business™ , ollama, Colibri". So a second section sets the
+// three side by side in one table, held to the rules of the first: what it
+// says of Rusty Business™ is what the code and the downloads hold, it links
+// only to the other two projects' own pages, it says whose names they are,
+// and it promises no dates.
+const NAMES = ['Rusty Business™', 'Ollama', 'Colibri'];
+const COLIBRI = ['https://github.com/JustVugg/colibri', 'https://justvugg.github.io/colibri'];
+const threeWays = sections.filter((each) => NAMES.every((name) => each.heading.includes(name)));
+const threeWay = threeWays[0] ?? { heading: '', body: '' };
+
+/** True for Colibri's own repository and site, and for nothing that only looks like them. */
+export function isColibri(address) {
+  return COLIBRI.some((home) => address === home || address.startsWith(`${home}/`));
+}
+
+/** The first Markdown table in a text: its heading cells, and each row's cells, the line under the headings left out. */
+export function tableIn(body) {
+  const lines = [];
+  for (const line of body.split('\n')) {
+    if (line.startsWith('|')) lines.push(line);
+    else if (lines.length) break;
+  }
+  const cells = (line) => line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim());
+  const [head = null, , ...rows] = lines.map(cells);
+  return { head, rows };
+}
+
+const table = tableIn(threeWay.body);
+const rowOf = (name) => table.rows.find(([label]) => label === name) ?? [];
+
+test('a second comparison sets Rusty Business™, Ollama, and Colibri side by side, right after the first', () => {
+  assert.equal(threeWays.length, 1, 'README.md needs one "## " section that names Rusty Business™, Ollama, and Colibri');
+  assert.equal(sections.indexOf(threeWay), sections.indexOf(comparison) + 1, 'the three-way comparison comes right after the first');
+  assert.deepEqual(table.head, ['', ...NAMES], 'the table has a column for each of the three, in that order');
+  assert.ok(table.rows.length >= 5, `the table compares the three in ${table.rows.length} ways; it needs at least 5`);
+  for (const row of table.rows) {
+    assert.equal(row.length, 4, `this row does not have a cell for each of the three: ${row.join(' | ')}`);
+    assert.ok(row.every((cell) => cell.length > 0), `this row leaves a cell empty: ${row.join(' | ')}`);
+  }
+});
+
+test('what the three-way table says of Rusty Business™ is what the code and the downloads hold', () => {
+  assert.match(read('LICENSE'), /^MIT License/, 'the repository is no longer under the MIT license');
+  assert.equal(rowOf('License')[1], 'MIT', 'the License row gives Rusty Business™ the MIT license');
+
+  const makers = makersIn(read(ENGINE));
+  const models = rowOf('Models')[1] ?? '';
+  assert.match(
+    models,
+    new RegExp(`^${COUNTS[makers.length]}\\b`, 'i'),
+    `the app's list holds ${COUNTS[makers.length]} models, and the Models row has to say so`,
+  );
+  assert.match(models, /\brefused\b/, 'the Models row says a model off the list is refused');
+
+  const files = [...readme.matchAll(/releases\/latest\/download\/Rusty-Business-[\w-]+?(\.tar\.gz|\.\w+)\)/g)].map((match) => match[1]);
+  assert.ok(files.length >= 5, 'the README links fewer downloads than this test expects');
+  const getIt = rowOf('How you get it')[1] ?? '';
+  for (const file of new Set(files)) {
+    assert.ok(getIt.includes(`\`${file}\``), `the "How you get it" row does not name the ${file} the README links`);
+  }
+  assert.match(getIt, /\bnone signed yet\b/, 'the "How you get it" row says the downloads are not signed yet');
+});
+
+test("the three-way comparison links only to Ollama's and Colibri's own pages and to this repository", () => {
+  const addresses = addressesIn(threeWay.body);
+  assert.ok(addresses.some(isColibri), 'the three-way comparison links Colibri');
+  for (const address of addresses) {
+    assert.ok(isOllama(address) || isColibri(address) || staysHere(address), `the three-way comparison points to ${address}`);
+  }
+});
+
+test('the three-way comparison says whose names Ollama and Colibri are, that the three are not connected, and no dates', () => {
+  const text = threeWay.body.replace(/\s+/g, ' ');
+  assert.match(text, /Ollama and Colibri are trademarks of their owners\./);
+  assert.match(text, /Rusty Business™ is not affiliated with either, and neither endorses it\./);
+  assert.deepEqual(datesIn(threeWay.body), []);
+});
+
+test('tables and Colibri addresses are read from the text', () => {
+  const body = ['Words.', '', '| | A | B |', '| --- | --- | --- |', '| One | x | y |', '| Two | `z` | |', '', '| Other | table |'].join('\n');
+  assert.deepEqual(tableIn(body), { head: ['', 'A', 'B'], rows: [['One', 'x', 'y'], ['Two', '`z`', '']] });
+  assert.deepEqual(tableIn('no table'), { head: null, rows: [] });
+  assert.deepEqual(
+    [
+      'https://github.com/JustVugg/colibri',
+      'https://github.com/JustVugg/colibri/releases',
+      'https://justvugg.github.io/colibri/',
+      'https://github.com/JustVugg/colibri-copy',
+      'https://github.com/someone/colibri',
+      'http://github.com/JustVugg/colibri',
+    ].map(isColibri),
+    [true, true, true, false, false, false],
   );
 });
