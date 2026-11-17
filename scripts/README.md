@@ -13,6 +13,7 @@ Helpers the Makefile calls, and the repository's own checks.
 | `roadmap.test.mjs` | Fails when the roadmap loses a section, a pin loses its number, a date is promised, or the README stops linking the roadmap | `make test-repo`  |
 | `screenshots.mjs`  | Remakes the pictures in [docs/screenshots](../docs/screenshots): opens the app's built page in Google Chrome with no window on screen, and answers the page from recorded chats | `make screenshots` |
 | `screenshots.test.mjs` | Fails when a picture stops opening full size, is too small to read, or is missing from the set, when the first wide picture is shown outside the gallery, or when the recorded chats name a model the app does not allow | `make test-repo`  |
+| `comparison.test.mjs` | Fails when the README's comparison with Ollama is missing or gives fewer than three reasons either way, leaves out a maker on the app's list of models, or links anywhere but Ollama's own site, when the README stops listing what the app cannot do yet, or when the chat window gains a way to reach past this computer | `make test-repo`  |
 
 `stack-env.sh` is how a program on this computer finds the stack:
 
