@@ -4,6 +4,7 @@ mod models;
 mod sessions;
 mod stack;
 mod starter;
+mod update;
 
 use tauri::Manager;
 
@@ -17,6 +18,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(engine::Chats::default())
+        .manage(update::Updates::default())
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             app.manage(sessions::Store::new(data.join("sessions")));
@@ -40,6 +42,8 @@ pub fn run() {
             sessions::load_session,
             sessions::save_session,
             sessions::trash_session,
+            update::check_update,
+            update::open_update,
         ])
         .build(context)
         .expect("error while building tauri application");

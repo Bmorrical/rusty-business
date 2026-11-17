@@ -455,7 +455,7 @@ test('the script asks gh for nothing but the check and the new release, and neve
   assert.match(code, /^ {8}--latest \\$/m, 'the release is not marked as the newest, so the README would not find it');
 });
 
-test("the README's download links name the files that make dmg, scripts/windows-app.sh, and scripts/linux-app.sh make, and so do the script and the workflow", () => {
+test("the README's download links name the files that make dmg, scripts/windows-app.sh, and scripts/linux-app.sh make, and so do the script, the workflow, and the notice of a new version", () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
   assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
@@ -474,6 +474,7 @@ test("the README's download links name the files that make dmg, scripts/windows-
       workflow.includes(`target/${folder}/${file}\n`) && workflow.includes(`target/${folder}/${file}.sha256\n`),
       `release.yml keeps another ${name}`,
     );
+    assert.ok(read('apps/desktop/src-tauri/src/update.rs').includes(`=> "${file}",`), `the notice of a new version opens another ${name}`);
   }
   // Each build writes its checksum the way the script checks it: the
   // checksum, two spaces, and the name. The Mac's is shasum's own line, and

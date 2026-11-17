@@ -12,6 +12,7 @@ The desktop app's Rust code.
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each. Trash moves a file; nothing deletes |
+| `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
 
 Three rules live in `engine.rs`, each with tests:
 
@@ -58,6 +59,21 @@ Four more live in `stack.rs`, each with tests:
 - The app stops only a stack it started, and only when the app quits.
   Stopping keeps every container and its data. Nothing removes a volume or
   an image, and Docker Desktop is left running.
+
+Five more live in `update.rs`, each with tests:
+
+- Only GitHub's API is asked, over https, and only for this repository's
+  newest release. No redirect is followed, no proxy, account, token, or
+  cookie is used, and the answer is read up to a size and no further.
+- A release is a new version only when its tag is a plain version newer than
+  the app's, it is neither a draft nor a pre-release, and it holds this
+  system's file.
+- Each system gets its own file: the `.dmg`, the `.exe`, or, on Linux, the
+  `.deb`, the `.rpm`, or the `.tar.gz`, by where the program is installed.
+- The page names only the download or the notes, never an address. Rust
+  opens only this repository's releases on github.com, in the browser.
+- A check that fails shows nothing and keeps what the last one found. The
+  app downloads and installs nothing itself.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts

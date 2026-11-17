@@ -20,7 +20,7 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
-**Status:** version 0.3.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.4.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
 command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -58,10 +58,12 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   not a setting. The page has no way to call out, and the Rust behind it
   refuses an engine address that is not on this computer. An engine the app
   starts listens on this computer only, and is told to stay offline. The app
-  itself reaches out in two places. On a first run, Download brings the model
-  you pick from Hugging Face, over https and from nowhere else. The first time
-  it starts the stack, Docker downloads the stack's images. Nothing you type
-  goes with either. There is no account, no sign-in,
+  itself reaches out in three places. On a first run, Download brings the
+  model you pick from Hugging Face, over https and from nowhere else. The
+  first time it starts the stack, Docker downloads the stack's images. When
+  the window opens, and once a day while it stays open, the app asks GitHub
+  whether a new version is out. Nothing you type goes with any of them. There
+  is no account, no sign-in,
   and nothing in the cloud. Ollama keeps your prompts on your computer too
   when a model runs there. It also offers models that run in its cloud, with
   a switch that turns them off.
@@ -359,6 +361,10 @@ next.
   opens, until you choose Open Anyway in System Settings. Windows may stop
   the installer until you choose More info, then Run anyway. (On the
   roadmap: Signed installers.)
+- **A new version is a download.** When one is out, the window says so, and
+  Download opens this system's file from the release in your browser. The
+  app does not install it: you do, as the first time. There is no switch to
+  turn the check off.
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer. It does not put Docker there. The chat does not need the
   stack yet.
