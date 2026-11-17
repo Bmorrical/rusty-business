@@ -23,6 +23,7 @@ says what is in it.
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
 | [docs](docs)                         | Pictures the READMEs show                                     |                                                               |
+| [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy is a stub with nothing to deploy yet |
 
 The chat window does not use the stack yet. It talks only to the model engine
 on this computer. The stack is the ground the next features stand on.
@@ -96,6 +97,11 @@ The first runs the API's tests against the real Postgres and Redis. The second
 checks every part of the stack from outside: the front door, the API, the
 database migration, a job travelling from the queue to the worker, file
 storage, and mail.
+
+On GitHub, the gate runs all of the above once on each push to `main`. Nothing
+is released or deployed unless the gate is green. The gate does not run on
+pull requests, so run `make test` and `make e2e` before you push. More in
+[.github/workflows](.github/workflows).
 
 `make` alone lists every command.
 

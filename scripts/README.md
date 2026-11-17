@@ -9,6 +9,7 @@ Helpers the Makefile calls, and the repository's own checks.
 | `stack-env.sh`     | Runs any command with the stack's addresses in its environment, read from `infra/.env` | `make test-live`, `make e2e` |
 | `readmes.test.mjs` | Fails when a folder in this repository has no README                | `make test-repo`  |
 | `license.test.mjs` | Fails when the MIT license, the trademark page, or the banner is missing or changed, or when a package does not say MIT | `make test-repo`  |
+| `workflows.test.mjs` | Fails when a GitHub workflow breaks a rule: an action not pinned to a commit, more than read access, a run on a pull request, or a deploy that does not wait for the gate | `make test-repo`  |
 
 `stack-env.sh` is how a program on this computer finds the stack:
 

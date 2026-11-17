@@ -1,0 +1,105 @@
+# The gate. Nothing is released or deployed unless this run is green.
+#
+# It runs once on each push to main, on request (Run workflow), and when
+# another workflow calls it. It never runs on a pull request push: a change
+# is tested on the author's computer before it is pushed (`make test`, then
+# `make e2e`), and this run judges what actually landed.
+name: Gate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  services:
+    name: Services (format, lint, unit tests) and repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy && rustup default stable
+      - name: Format, lint, and unit tests
+        run: make test-services
+      - name: Repository checks
+        run: make test-repo
+
+  desktop:
+    name: Desktop app (page tests, build, Rust tests)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Page tests, page build, and Rust tests
+        run: make test-desktop
+
+  e2e:
+    name: End to end (the whole stack in Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Start the stack
+        run: scripts/bootstrap.sh
+      - name: API tests against the real Postgres and Redis
+        run: make test-live
+      - name: End-to-end suite
+        run: make e2e
+      - name: Container logs
+        if: failure()
+        run: docker compose --env-file infra/.env --file infra/compose.yaml logs --no-color --tail 200
+      - name: Stop the stack
+        if: always()
+        run: make down
+
+  # The one result to look at, and the one a deploy waits for.
+  gate:
+    name: Gate
+    if: always()
+    needs: [services, desktop, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every part must be green
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            if [ "${result}" != "success" ]; then
+              echo "The gate is red."
+              exit 1
+            fi
+          done
+          echo "The gate is green."
