@@ -1,0 +1,122 @@
+{
+  "engine": {
+    "name": "MLX",
+    "url": "http://127.0.0.1:8080/v1",
+    "reachable": true,
+    "models": [
+      {
+        "id": "mlx-community/phi-4-4bit",
+        "name": "Phi-4",
+        "maker": "Microsoft",
+        "context": 16384
+      },
+      {
+        "id": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+        "name": "gpt-oss 20B",
+        "maker": "OpenAI",
+        "context": 131072
+      },
+      {
+        "id": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+        "name": "Nemotron 3.5 Lightning",
+        "maker": "NVIDIA",
+        "context": 262144
+      }
+    ],
+    "hidden": 2,
+    "error": null,
+    "startHint": "mlx_lm.server --port 8080"
+  },
+  "chats": [
+    {
+      "id": "nails",
+      "model": "mlx-community/phi-4-4bit",
+      "daysAgo": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Why do iron nails rust? Three plain sentences."
+        },
+        {
+          "role": "assistant",
+          "content": "Iron nails rust due to a chemical reaction called oxidation, where iron reacts with oxygen and moisture in the air to form iron oxide, commonly known as rust. This process is accelerated in the presence of water, which acts as an electrolyte, facilitating the transfer of electrons. Rusting weakens the iron over time, as the iron oxide formed is flaky and porous, leading to the deterioration of the metal's structural integrity.",
+          "model": "mlx-community/phi-4-4bit",
+          "promptTokens": 17,
+          "completionTokens": 86,
+          "seconds": 1.435
+        },
+        {
+          "role": "user",
+          "content": "How do I keep them from rusting? Two plain sentences."
+        },
+        {
+          "role": "assistant",
+          "content": "To prevent iron nails from rusting, you can apply a protective coating such as paint, oil, or a layer of zinc through a process called galvanization. Additionally, storing them in a dry environment and using desiccants can help minimize exposure to moisture, further reducing the risk of rust.",
+          "model": "mlx-community/phi-4-4bit",
+          "promptTokens": 123,
+          "completionTokens": 61,
+          "seconds": 1.005
+        }
+      ]
+    },
+    {
+      "id": "ladder",
+      "model": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "daysAgo": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Is it safe to stand on the top step of a stepladder? Two sentences."
+        },
+        {
+          "role": "assistant",
+          "content": "Most stepladders are not designed to support weight on the top step, so standing there can cause the ladder to tip or collapse. Only ladders with a built‑in platform or a top step rated for weight should be used for standing, and even then the ladder must be on a stable surface and fully locked.",
+          "thinking": "The user asks: \"Is it safe to stand on the top step of a stepladder? Two sentences.\" They want a short answer: two sentences. So we need to answer concisely. The answer: It's generally not recommended to stand on the top step because it's not designed for weight, can tip. But some stepladders have a top step that is a platform. So answer: It's safe only if the ladder is rated for that and the top step is designed as a platform; otherwise, it's unsafe. Provide two sentences. Let's craft: \"Most stepladders are not designed to support weight on the top step, so standing there can cause the ladder to tip or collapse. Only ladders with a built‑in platform or a top step rated for weight should be used for standing, and even then the ladder must be on a stable surface and fully locked.\" That's two sentences. Ensure it's exactly two sentences. Count: Sentence 1: \"Most stepladders are not designed to support weight on the top step, so standing there can cause the ladder to tip or collapse.\" Sentence 2: \"Only ladders with a built‑in platform or a top step rated for weight should be used for standing, and even then the ladder must be on a stable surface and fully locked.\" That's two. Good.",
+          "model": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+          "promptTokens": 85,
+          "completionTokens": 347,
+          "seconds": 3.031
+        }
+      ]
+    },
+    {
+      "id": "haiku",
+      "model": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+      "daysAgo": 1,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Write a haiku about a wobbly ladder."
+        },
+        {
+          "role": "assistant",
+          "content": "The ladder wobbles  \nShakes with every gentle step  \nFeet slip on the rung",
+          "thinking": "Here's a thinking process:\n\n1.  **Analyze the Request:**\n   - User wants a haiku about a \"wobbly ladder\".\n   - Haiku structure: 5 syllables, 7 syllables, 5 syllables (total 3 lines).\n   - Topic: wobbly ladder.\n\n2.  **Deconstruct the Topic:**\n   - \"Wobbly\" suggests instability, shaking, maybe fear or gentle movement.\n   - \"Ladder\" suggests height, steps, climbing, rungs.\n   - Need to capture the essence in 3 lines with the specific syllable count.\n\n3.  **Brainstorming Syllables:**\n   - Line 1 (5 syllables): Need 5 syllables. Options: \"The ladder wobbles\" (5: the-lad-der-wob-bles). Or \"It shakes and wobbles\" (5: it-shakes-and-wob-bles). Or \"Wobbly steps sway\" (4, no). Let's count carefully.\n   - Line 2 (7 syllables): Needs 7. Options: \"My heart begins to race\" (5, no). \"It feels unsteady now\" (5, no). \"The rungs shift side to side\" (6, no). \"It wobbles with each step\" (5, no). Let's count: \"It wobbles with each step\" = it(1) wob-bles(2) with(3) each(4) step(5) -> 5. Need 7. How about \"It wobbles side to side\" = it(1) wob-bles(2) side(3) to(4) side(5) -> 5. \"The ladder shakes and moves\" = the(1) lad-der(2) shakes(3) and(4) moves(5) -> 5. Hmm.\n   - Line 3 (5 syllables): Similar to line 1.\n\n   Let me systematically think of words and their syllable counts:\n   - Wob-bly (2)\n   - lad-der (2)\n   - rung (1)\n   - shake (1)\n   - sway (1)\n   - high (1)\n   - up (1)\n   - down (1)\n\n   Let's try to make line 1: \"Wobbly ladder leans\" -> wob-bly(2) lad-der(2) leans(1) = 5. Good!\n   Line 2: \"Shifts with every breath\" -> shifts(1) with(1) ev-ery(2) breath(1) = 5. Need 7. How about \"Shifts with every gentle breath\" -> shifts(1) with(1) ev-ery(2) gen-tle(2) breath(1) = 7. Yes!\n   Line 3: \"Feet grip the cold rail\" -> feet(1) grip(1) the(1) cold(1) rail(1) = 5. But \"cold rail\" might not fit wobbly ladder theme as well. Let's try: \"My hands hold on tight\" -> my(1) hands(1) hold(1) on(1) tight(1) = 5. Good.\n\n   Let's check the whole haiku:\n   Wobbly ladder leans (5)\n   Shifts with every gentle breath (7)\n   My hands hold on tight (5)\n\n   Does it make sense? A wobbly ladder leans, shifts with every gentle breath, hands hold on tight. Yes, imagery works.\n\n   Let me try another variation to see if I can get something more poetic/concise:\n   Wobble in every step (5) - no, that's 3 syllables? Wob-ble(2) in(1) ev-ery(2) step(1) = 6. Actually: wob-ble(2) in(1) ev-ery(2) step(1) = 6. Wait: wobble = 2, in = 1, every = 2, step = 1 -> total 6. Not 5.\n\n   Let's stick with my first one, but refine it.\n\n   Option A:\n   Wobbly ladder leans (5)\n   Shifts with every gentle breath (7)\n   Hands grip the cold rail (5)\n\n   Check syllable counts carefully:\n   Wob-bly(2) lad-der(2) leans(1) = 5 ✓\n   Shifts(1) with(1) ev-ery(2) gen-tle(2) breath(1) = 7 ✓\n   Hands(1) grip(1) the(1) cold(1) rail(1) = 5 ✓\n\n   Theme: wobbly ladder. Good.\n\n   Option B:\n   It wobbles on its feet (5) - it(1) wob-bles(2) on(1) its(1) feet(1) = 6. No.\n   Let's count: it(1) wob-bles(2) on(1) its(1) feet(1) = 6. Actually, \"it wobbles\" is 3? it(1) wob-bles(2) = 3. Plus on(1) its(1) feet(1) = 6. Yes.\n\n   Option C:\n   The ladder wobbles (5) - the(1) lad-der(2) wob-bles(2) = 5. Wait: the(1) lad-der(2) = 3, wob-bles(2) = 5. Yes! \"The ladder wobbles\" = 5 syllables.\n   Then line 2 needs 7: \"And shakes with every move\" -> and(1) shakes(1) with(1) ev-ery(2) move(1) = 6. Need 7. \"And shakes with every gentle move\" -> and(1) shakes(1) with(1) ev-ery(2) gen-tle(2) move(1) = 8. Too many. \"It shakes with every step\" -> it(1) shakes(1) with(1) ev-ery(2) step(1) = 6. \"Shakes with every step now\" -> shakes(1) with(1) ev-ery(2) step(1) now(1) = 7. Yes! \"Shakes with every step now\" = 7.\n   Line 3 needs 5: \"Feet slip on the rung\" -> feet(1) slip(1) on(1) the(1) rung(1) = 5. Or \"My grip grows weak\" -> my(1) grip(1) grows(1) weak(1) = 4. No. \"Hold on tightly\" -> hold(1) on(1) ti-ghtly(2) = 4. No.\n\n   Let's redo with \"The ladder wobbles\" as line 1 (5):\n   The ladder wobbles (5)\n   Shakes with every step now (7)\n   Feet slip on the rung (5)\n\n   Check: The(1) lad-der(2) wob-bles(2) = 5 ✓\n   Shakes(1) with(1) ev-ery(2) step(1) now(1) = 7 ✓\n   Feet(1) slip(1) on(1) the(1) rung(1) = 5 ✓\n\n   Theme: wobbly ladder. This works well.\n\n   Option D (more concise/visual):\n   Wobbly steps sway (4) no.\n   Let's try: Wob-bly(2) steps(1) sway(1) = 4. Need 5. \"Wob-bly steps sway\" = 4. Add \"softly\" -> wob-bly(2) steps(1) sway(1) soft-ly(2) = 7. No.\n\n   I think Option C is solid. Let me just verify syllable counts one more time mentally, maybe even aloud.\n\n   \"The ladder wobbles\" \n   The (1)\n   lad-der (2) -> actually \"ladder\" is 2 syllables: lad-der. So The(1) + lad-der(2) = 3. wob-bles(2) = 5. Yes.\n\n   \"Shakes with every step now\"\n   Shakes(1)\n   with(1) -> 2\n   ev-ery(2) -> 4\n   step(1) -> 5\n   now(1) -> 6. Wait, that's 6! Let me recount: Shakes(1) with(2) every(4) step(5) now(6). Yes, 6 syllables. I need 7. How about \"Shakes with every single step\" -> shakes(1) with(1) ev-ery(2) sin-gle(2) step(1) = 7. Yes! Or \"Shakes with every step now\" if I count \"now\" as extra but it's 6. Let me strictly count: \n   Shakes = 1\n   with = 1 (total 2)\n   every = 2 (total 4)\n   step = 1 (total 5)\n   now = 1 (total 6). \n   So I need one more syllable. \"Shakes with every long step\" -> shakes(1) with(1) ev-ery(2) long(1) step(1) = 6. Still 6. \"Shakes with every quick step now\" -> shakes(1) with(1) ev-ery(2) quick(1) step(1) now(1) = 7. Yes! But that's 5 words after \"shakes\". Let's try: \"Shakes with every step now\" is 6. I'll just use \"Shakes with every step\" = 5, need 7. \"Shakes with every gentle step\" -> shakes(1) with(1) ev-ery(2) gen-tle(2) step(1) = 7. Perfect!\n\n   Line 3: \"Feet slip on the rung\" = 5. Or \"Hands lose their hold\" = hands(1) lose(1) their(1) hold(1) = 4. No. \"My feet slip down\" = my(1) feet(1) slip(1) down(1) = 4. No.\n\n   Let me restructure cleanly:\n\n   The ladder wobbles (5)\n   Shakes with every gentle step (7) \n   Feet slip on the rung (5)\n\n   Check line 2: Shakes(1) with(1) ev-ery(2) gen-tle(2) step(1) = 7. Yes.\n   Line 1: The(1) lad-der(2) wob-bles(2) = 5. Yes.\n   Line 3: Feet(1) slip(1) on(1) the(1) rung(1) = 5. Yes.\n\n   This haiku is:\n   The ladder wobbles\n   Shakes with every gentle step\n   Feet slip on the rung\n\n   Imagery: wobbly ladder, instability, feet slipping. Fits perfectly.\n\n   I'll output this one. I could also offer a couple variations, but the prompt says \"Write a haiku about a wobbly ladder.\" I'll give one solid haiku. I'll make sure syllable count is exact.\n\n   Let me double-check with a different approach. Sometimes \"ladder\" is pronounced \"lad-der\" (2), \"wobbles\" \"wob-bles\" (2). \"The\" (1). Total 5. Good.\n   \"Shakes\" (1), \"with\" (1), \"every\" (2), \"gentle\" (2), \"step\" (1). Total 7. Good.\n   \"Feet\" (1), \"slip\" (1), \"on\" (1), \"the\" (1), \"rung\" (1). Total 5. Good.\n\n   All good. I'll output it.✅",
+          "model": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+          "promptTokens": 27,
+          "completionTokens": 2683,
+          "seconds": 20.248
+        }
+      ]
+    },
+    {
+      "id": "sum",
+      "model": "mlx-community/phi-4-4bit",
+      "daysAgo": 1,
+      "messages": [
+        {
+          "role": "user",
+          "content": "What is 2+2? One short sentence."
+        },
+        {
+          "role": "assistant",
+          "content": "2 + 2 equals 4.",
+          "model": "mlx-community/phi-4-4bit",
+          "promptTokens": 18,
+          "completionTokens": 9,
+          "seconds": 0.123
+        }
+      ]
+    }
+  ]
+}

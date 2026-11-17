@@ -4,7 +4,7 @@ COMPOSE := docker compose --env-file infra/.env --file infra/compose.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap up down logs ps health \
-        test test-services test-repo test-desktop test-live e2e
+        test test-services test-repo test-desktop test-live e2e screenshots
 
 help: ## List these commands
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) \
@@ -47,3 +47,7 @@ test-live: ## The API's tests against the running stack
 
 e2e: ## End to end: every part of the running stack, from outside
 	scripts/stack-env.sh node --test e2e/*.test.mjs
+
+screenshots: ## Remake the pictures in docs/screenshots (needs Google Chrome)
+	cd apps/desktop && { [ -d node_modules ] || npm ci; } && npm run build
+	node scripts/screenshots.mjs

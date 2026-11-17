@@ -1,0 +1,369 @@
+// The screenshots' rules, checked on every test run.
+//
+// The README once featured one wide capture of the window. Brad, on that
+// picture: "give me a better screenshot collection, this is fine but it
+// shouldn't be featured, I can't blow it up, too small to read".
+//
+// So there is a set of pictures made large enough to read, each one a link
+// that opens the picture by itself at full size, and the first picture is
+// kept but shown only in the gallery.
+//
+// The checks read the files as text, and the first bytes of each picture.
+// They start no browser: `make screenshots` is what remakes the pictures.
+
+import assert from 'node:assert/strict';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
+
+import { dayLabel, titleFrom } from '../apps/desktop/src/chat.js';
+import { HEIGHT, SCALE, SCENES, WIDTH, engineOff, sessionsFrom, standIn } from './screenshots.mjs';
+
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+const BANNER = 'docs/rusty-business.svg';
+const FIRST_PICTURE = 'docs/chat-window.webp';
+const FOLDER = 'docs/screenshots';
+const GALLERY = `${FOLDER}/README.md`;
+
+// The pages that show the app's pictures.
+const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
+
+// Folders that hold other people's files or build output, never this
+// repository's own pages.
+const NOT_OURS = new Set(['.git', '.claude', '.vite', 'dist', 'node_modules', 'target']);
+
+function read(file) {
+  return readFileSync(path.join(REPO, file), 'utf8');
+}
+
+function recorded() {
+  return JSON.parse(read(`${FOLDER}/chats.json`));
+}
+
+/** The same value with nothing left but what JSON carries. */
+function plain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * Every picture a Markdown page shows: its alt text, its file as written,
+ * and the address the picture links to (null when it is not a link).
+ */
+function shownIn(markdown) {
+  const pictures = [];
+  const pattern = /(\[)?!\[([^\]]*)\]\(([^)\s]+)\)(?:\]\(([^)\s]+)\))?/g;
+  for (const [, opened, alt, src, link] of markdown.matchAll(pattern)) {
+    pictures.push({ alt, src, link: opened && link ? link : null });
+  }
+  return pictures;
+}
+
+/** A file named on a page, as a path from the repository's root. */
+function fromRoot(page, file) {
+  return path.posix.normalize(path.posix.join(path.posix.dirname(page), file));
+}
+
+/** The text under a `## ` heading, up to the next one; null when it is not there. */
+function sectionOf(markdown, heading) {
+  const lines = markdown.split('\n');
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start < 0) return null;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith('## '));
+  return rest.slice(0, end < 0 ? rest.length : end).join('\n');
+}
+
+/** A PNG's width and height in pixels, from its first bytes; null when it is not a PNG. */
+function pngSize(bytes) {
+  const isPng =
+    bytes.length >= 24 &&
+    bytes.subarray(0, 8).toString('hex') === '89504e470d0a1a0a' &&
+    bytes.subarray(12, 16).toString('latin1') === 'IHDR';
+  return isPng ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) } : null;
+}
+
+/** Every Markdown page in the repository, as paths from its root. */
+function markdownPages(folder = '') {
+  const pages = [];
+  for (const entry of readdirSync(path.join(REPO, folder), { withFileTypes: true })) {
+    const here = folder ? `${folder}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (!NOT_OURS.has(entry.name)) pages.push(...markdownPages(here));
+    } else if (entry.name.endsWith('.md')) {
+      pages.push(here);
+    }
+  }
+  return pages;
+}
+
+/** The app's allow-list, read from the Rust source. */
+function catalog() {
+  const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", context: ([\d_]+) \}/g;
+  return [...read('apps/desktop/src-tauri/src/engine.rs').matchAll(entry)].map(
+    ([, needle, name, maker, context]) => ({ needle, name, maker, context: Number(context.replaceAll('_', '')) }),
+  );
+}
+
+test('the first, wide picture is kept, and shown only in the gallery', () => {
+  // "this is fine but it shouldn't be featured"
+  assert.ok(existsSync(path.join(REPO, FIRST_PICTURE)), `${FIRST_PICTURE} is kept`);
+
+  const showing = markdownPages().filter((page) =>
+    shownIn(read(page)).some((picture) => fromRoot(page, picture.src) === FIRST_PICTURE),
+  );
+  assert.deepEqual(showing, [GALLERY]);
+});
+
+test('the README shows the whole set, in order, before anything else it explains', () => {
+  // "give me a better screenshot collection"
+  const readme = read('README.md');
+  const headings = readme.split('\n').filter((line) => line.startsWith('## '));
+  assert.equal(headings[0], '## Screenshots', 'Screenshots is the first section');
+
+  const section = sectionOf(readme, 'Screenshots');
+  assert.deepEqual(
+    shownIn(section).map((picture) => picture.src),
+    SCENES.map((scene) => `${FOLDER}/${scene.file}`),
+  );
+  assert.match(section, /\]\(docs\/screenshots\)/, 'the section links to the gallery');
+  assert.match(section, /full size/, 'the section says a picture opens full size');
+
+  const above = readme.slice(0, readme.indexOf('## Screenshots'));
+  assert.deepEqual(
+    shownIn(above).map((picture) => picture.src),
+    [BANNER],
+    'the banner is the only picture above the set',
+  );
+});
+
+test('every picture opens by itself at full size, and has words for it', () => {
+  // "I can't blow it up". On GitHub a link that ends in ?raw=true opens the
+  // picture alone, where the browser can enlarge it. A plain link opens the
+  // file's page, with the picture fitted to it.
+  let checked = 0;
+  for (const page of PAGES) {
+    for (const picture of shownIn(read(page))) {
+      if (fromRoot(page, picture.src) === BANNER) continue;
+      const where = `${page}: ${picture.src}`;
+      assert.equal(picture.link, `${picture.src}?raw=true`, `${where} links to itself with ?raw=true`);
+      assert.ok(existsSync(path.join(REPO, fromRoot(page, picture.src))), `${where} is a file`);
+      assert.ok(picture.alt.length >= 40, `${where} has alt text that says what the picture shows`);
+      assert.doesNotMatch(picture.alt, /\|/, `${where} has alt text that fits in a table`);
+      checked += 1;
+    }
+  }
+  // Four in the README, one for the desktop app, and five in the gallery.
+  assert.equal(checked, SCENES.length * 2 + 2);
+});
+
+test('the pictures are large enough to read', () => {
+  // "too small to read". A README's column is under 1,000 points wide, so a
+  // picture of a wider window is shrunk to fit and its words shrink with it.
+  // Twice the pixels keeps the words sharp once the picture is opened.
+  assert.ok(WIDTH <= 1000, `a window ${WIDTH} points wide is shrunk in a README`);
+  assert.ok(SCALE >= 2, 'at least two pixels for each point');
+
+  for (const scene of SCENES) {
+    const size = pngSize(readFileSync(path.join(REPO, FOLDER, scene.file)));
+    assert.deepEqual(
+      size,
+      { width: WIDTH * SCALE, height: HEIGHT * SCALE },
+      `${scene.file} is the size the script makes. Run \`make screenshots\`.`,
+    );
+  }
+});
+
+test('the folder holds the set, the chats behind it, and its README, and nothing else', () => {
+  const files = readdirSync(path.join(REPO, FOLDER))
+    .filter((name) => !name.startsWith('.'))
+    .sort();
+  const expected = [...SCENES.map((scene) => scene.file), 'README.md', 'chats.json'].sort();
+  assert.deepEqual(files, expected);
+
+  const gallery = read(GALLERY);
+  const shown = shownIn(gallery).map((picture) => picture.src);
+  assert.deepEqual(shown.slice(0, SCENES.length), SCENES.map((scene) => scene.file), 'the gallery shows the set, in order');
+  for (const scene of SCENES) {
+    assert.ok(gallery.includes(`\`${scene.file}\``), `the gallery's table lists ${scene.file}`);
+  }
+});
+
+test('the gallery says how the pictures are made, and that they are not captures of the window', () => {
+  const made = sectionOf(read(GALLERY), 'How these were made');
+  assert.ok(made, 'the gallery has a section on how the pictures were made');
+  assert.match(made, /make screenshots/);
+  assert.match(made, /not captures of the app's window/);
+  assert.match(made, /\]\(chats\.json\)/);
+  assert.match(made, /Nothing is sent to a model/);
+});
+
+test('each scene is a picture the script can make', () => {
+  const { chats } = recorded();
+  const ids = chats.map((chat) => chat.id);
+
+  assert.equal(new Set(SCENES.map((scene) => scene.file)).size, SCENES.length, 'no file is made twice');
+  for (const scene of SCENES) {
+    assert.match(scene.file, /^[a-z-]+\.png$/, `${scene.file} is a PNG with a plain name`);
+    assert.ok(['light', 'dark'].includes(scene.scheme), `${scene.file} is light or dark`);
+    assert.ok(['on', 'off'].includes(scene.engine), `${scene.file} has the engine on or off`);
+    if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
+    if (scene.thinking) {
+      const chat = chats.find((entry) => entry.id === scene.open);
+      assert.ok(
+        chat?.messages.some((message) => message.thinking),
+        `${scene.file} opens a chat that has thinking to show`,
+      );
+    }
+  }
+});
+
+test('the recorded engine offers only models on the app\'s list', () => {
+  // Brad, on which models this project runs: "I want us only models, not
+  // meta or google". The pictures show a model picker, so what was recorded
+  // has to match the allow-list in the Rust code.
+  const { engine, chats } = recorded();
+  const allowed = catalog();
+  assert.ok(allowed.length > 0, 'the allow-list was read from engine.rs');
+
+  for (const model of engine.models) {
+    const entry = allowed.find((candidate) => model.id.toLowerCase().includes(candidate.needle));
+    assert.ok(entry, `${model.id} is on the app's list`);
+    assert.deepEqual(
+      { name: model.name, maker: model.maker, context: model.context },
+      { name: entry.name, maker: entry.maker, context: entry.context },
+      `${model.id} is described as the app describes it`,
+    );
+  }
+
+  const offered = engine.models.map((model) => model.id);
+  for (const chat of chats) {
+    assert.ok(offered.includes(chat.model), `the chat "${chat.id}" uses a model the engine offers`);
+    for (const message of chat.messages) {
+      if (message.role === 'assistant') {
+        assert.equal(message.model, chat.model, `every answer in "${chat.id}" names the chat's model`);
+      }
+    }
+  }
+
+  assert.doesNotMatch(read(`${FOLDER}/chats.json`), /\b(meta|google|llama|gemma|gemini)\b/i);
+});
+
+test('the saved chats are listed newest first, and read "Today" and "Yesterday" at any hour', () => {
+  const { chats } = recorded();
+  for (const now of [new Date(2026, 0, 15, 0, 5), new Date(2026, 0, 15, 12, 0), new Date(2026, 0, 15, 23, 55)]) {
+    const sessions = sessionsFrom(chats, now);
+    assert.deepEqual(
+      sessions.map((entry) => entry.id),
+      chats.map((chat) => chat.id),
+    );
+    sessions.forEach((entry, index) => {
+      const chat = chats[index];
+      assert.equal(entry.title, titleFrom(chat.messages[0].content));
+      assert.equal(entry.model, chat.model);
+      assert.deepEqual(entry.messages, chat.messages);
+      if (index > 0) {
+        assert.ok(entry.updatedAt < sessions[index - 1].updatedAt, `"${entry.id}" is older than the chat above it`);
+      }
+      const label = ['Today', 'Yesterday'][chat.daysAgo];
+      if (label) assert.equal(dayLabel(entry.updatedAt, now.getTime()), label, `"${entry.id}" at ${now.toTimeString()}`);
+    });
+  }
+});
+
+test('with the engine off, the app is told nothing answers', () => {
+  const { engine } = recorded();
+  const before = plain(engine);
+  const off = engineOff(engine);
+
+  assert.equal(off.reachable, false);
+  assert.deepEqual(off.models, []);
+  assert.equal(off.hidden, 0);
+  assert.equal(off.error, 'The engine is not answering.');
+  assert.equal(off.name, engine.name);
+  assert.equal(off.url, engine.url);
+  assert.equal(off.startHint, engine.startHint);
+  assert.deepEqual(plain(engine), before, 'the recorded engine is left as it was');
+});
+
+test('the stand-in answers the three calls the pictures need, and refuses the rest', async () => {
+  const { engine, chats } = recorded();
+  const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
+
+  let cleared = 0;
+  const window = { localStorage: { clear: () => (cleared += 1) } };
+  vm.runInNewContext(standIn(engine, sessions), { window, structuredClone });
+  const { invoke } = window.__TAURI_INTERNALS__;
+
+  assert.equal(cleared, 1, 'what the page kept from an earlier picture is cleared');
+  assert.deepEqual(plain(await invoke('engine_status')), plain(engine));
+  assert.deepEqual(
+    plain(await invoke('list_sessions')),
+    sessions.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      model: entry.model,
+      updatedAt: entry.updatedAt,
+      turns: entry.messages.length,
+    })),
+  );
+  assert.deepEqual(plain(await invoke('load_session', { id: sessions[1].id })), plain(sessions[1]));
+
+  // A call that would send, save, or trash has no place in a picture.
+  for (const command of ['send_message', 'save_session', 'trash_session']) {
+    await assert.rejects(invoke(command, {}), /is not part of the pictures/);
+  }
+
+  // A page with no storage (a blank one) still gets the stand-in.
+  const blank = {
+    get localStorage() {
+      throw new Error('no storage here');
+    },
+  };
+  vm.runInNewContext(standIn(engine, sessions), { window: blank, structuredClone });
+  assert.equal(typeof blank.__TAURI_INTERNALS__.invoke, 'function');
+});
+
+test('`make screenshots` builds the page, then makes the pictures', () => {
+  const makefile = read('Makefile');
+  const target = /^screenshots:.*## .+\n((?:\t.+\n)+)/m.exec(makefile);
+  assert.ok(target, 'the Makefile has a screenshots command that `make` lists');
+
+  const steps = target[1];
+  assert.ok(
+    steps.indexOf('npm run build') >= 0 && steps.indexOf('npm run build') < steps.indexOf('node scripts/screenshots.mjs'),
+    'the page is built before the script runs',
+  );
+
+  const phony = /^\.PHONY:((?:.*\\\n)*.*)$/m.exec(makefile);
+  assert.match(phony[1], /\bscreenshots\b/, 'screenshots is in .PHONY');
+});
+
+test('the helpers read pictures from a page, and sizes from a PNG', () => {
+  const page = [
+    '![Plain](a.png)',
+    '[![Linked](b.png)](b.png?raw=true)',
+    '| [![In a table](c/d.png)](elsewhere) | [a link](e.png) |',
+  ].join('\n');
+  assert.deepEqual(shownIn(page), [
+    { alt: 'Plain', src: 'a.png', link: null },
+    { alt: 'Linked', src: 'b.png', link: 'b.png?raw=true' },
+    { alt: 'In a table', src: 'c/d.png', link: 'elsewhere' },
+  ]);
+
+  assert.equal(fromRoot('docs/screenshots/README.md', '../chat-window.webp'), 'docs/chat-window.webp');
+  assert.equal(fromRoot('README.md', 'docs/screenshots/chat.png'), 'docs/screenshots/chat.png');
+  assert.equal(sectionOf('# A\n\n## One\nfirst\n\n## Two\nsecond\n', 'One'), 'first\n');
+  assert.equal(sectionOf('# A\n\n## One\nfirst\n', 'Three'), null);
+
+  const png = Buffer.alloc(24);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png, 0);
+  png.writeUInt32BE(13, 8);
+  png.write('IHDR', 12, 'latin1');
+  png.writeUInt32BE(1840, 16);
+  png.writeUInt32BE(1280, 20);
+  assert.deepEqual(pngSize(png), { width: 1840, height: 1280 });
+  assert.equal(pngSize(Buffer.from('RIFF....WEBPVP8 ........')), null);
+  assert.equal(pngSize(Buffer.alloc(4)), null);
+});

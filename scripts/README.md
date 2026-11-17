@@ -11,6 +11,8 @@ Helpers the Makefile calls, and the repository's own checks.
 | `license.test.mjs` | Fails when the MIT license, the trademark page, or the banner is missing or changed, or when a package does not say MIT | `make test-repo`  |
 | `workflows.test.mjs` | Fails when a GitHub workflow breaks a rule: an action not pinned to a commit, more than read access, a run on a pull request, or a deploy that does not wait for the gate | `make test-repo`  |
 | `roadmap.test.mjs` | Fails when the roadmap loses a section, a pin loses its number, a date is promised, or the README stops linking the roadmap | `make test-repo`  |
+| `screenshots.mjs`  | Remakes the pictures in [docs/screenshots](../docs/screenshots): opens the app's built page in Google Chrome with no window on screen, and answers the page from recorded chats | `make screenshots` |
+| `screenshots.test.mjs` | Fails when a picture stops opening full size, is too small to read, or is missing from the set, when the first wide picture is shown outside the gallery, or when the recorded chats name a model the app does not allow | `make test-repo`  |
 
 `stack-env.sh` is how a program on this computer finds the stack:
 
@@ -23,3 +25,5 @@ the end-to-end suite uses. It reads `infra/.env` as text and never runs it.
 
 Scripts here are Bash or plain Node with no packages to install, start by
 moving to the repository's root, and stop at the first error.
+`screenshots.mjs` is the one that needs something more: Google Chrome or
+Chromium on the computer. No test starts the browser.

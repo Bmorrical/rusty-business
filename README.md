@@ -6,7 +6,18 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
 machine.
 
-![The Rusty Business window: saved chats on the left, a question and Phi-4's answer in the middle, the model picker at the top right, and a token meter under the message box](docs/chat-window.webp)
+## Screenshots
+
+Select a picture to open it full size.
+
+[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](docs/screenshots/chat.png)](docs/screenshots/chat.png?raw=true)
+
+| A model's thinking, apart from its answer | A new chat | No engine answering |
+| ----------------------------------------- | ---------- | ------------------- |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the command that starts the engine, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
+
+What each picture shows, and how they are made, is in
+[docs/screenshots](docs/screenshots).
 
 ## What is here
 
@@ -22,7 +33,7 @@ says what is in it.
 | [infra](infra)                       | The Docker stack: Postgres, Redis, MinIO, Mailpit, and Caddy  | Works                                                         |
 | [e2e](e2e)                           | End-to-end tests against the running stack                    | Works                                                         |
 | [scripts](scripts)                   | Bootstrap, helpers, and the repository's own checks           | Works                                                         |
-| [docs](docs)                         | Pictures the READMEs show                                     |                                                               |
+| [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
 | [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy is a stub with nothing to deploy yet |
 
 The chat window does not use the stack yet. It talks only to the model engine
