@@ -9,6 +9,8 @@ import {
   onDiskLine,
   requestMessages,
   savedTurn,
+  shouldStart,
+  startLine,
   titleFrom,
   tokensPerSecond,
   tokensUsed,
@@ -146,4 +148,40 @@ test("with none of its models on the disk, the app says so", () => {
   // An older report has no list at all.
   assert.equal(onDiskLine(undefined), none);
   assert.equal(onDiskLine(null), none);
+});
+
+// Brad, on what the app does by itself: "it should search and up the local
+// models and stack." and "install and go, one click ready". The page asks for
+// the engine to be started only when no engine answers.
+test("the engine is asked for only when none answers", () => {
+  assert.equal(shouldStart({ reachable: false, error: "The engine is not answering." }), true);
+  // One that answers is left alone.
+  assert.equal(shouldStart({ reachable: true }), false);
+  // Before the first report there is nothing to go on.
+  assert.equal(shouldStart(null), false);
+  assert.equal(shouldStart(undefined), false);
+  // A report that does not say is not a reason to start anything.
+  assert.equal(shouldStart({}), false);
+});
+
+test("when the app cannot start the engine, it says why, once", () => {
+  const off = { reachable: false, error: "The engine is not answering." };
+  const notFound = "The app looked for mlx_lm.server on this computer and did not find it.";
+
+  assert.equal(startLine({ answering: false, started: false, reason: notFound }, off), notFound);
+  assert.equal(startLine({ answering: false, started: true, reason: ` ${notFound}\n` }, off), notFound);
+
+  // An engine that answers leaves nothing to explain.
+  assert.equal(startLine({ answering: true, started: true, reason: null }, { reachable: true }), "");
+  assert.equal(startLine({ answering: true, started: false, reason: notFound }, off), "");
+  assert.equal(startLine({ answering: false, started: false, reason: notFound }, { reachable: true }), "");
+
+  // No reason, or no report at all.
+  assert.equal(startLine({ answering: false, started: false, reason: null }, off), "");
+  assert.equal(startLine({ answering: false, started: false }, off), "");
+  assert.equal(startLine(undefined, off), "");
+
+  // The same sentence is not said twice, one line under the other.
+  const badAddress = "The engine address must be on this computer (for example http://127.0.0.1:8080/v1).";
+  assert.equal(startLine({ answering: false, started: false, reason: badAddress }, { reachable: false, error: badAddress }), "");
 });

@@ -19,6 +19,11 @@ Select the picture to open it full size. The rest of the set is in
   The app looks in the Hugging Face cache folder, where the engine keeps the
   models it has downloaded. It only reads there, it keeps no list of its own,
   and a download that stopped part way is not counted.
+- **The engine, started by the app.** When no engine is answering, the app
+  starts one and waits for it. It starts only what is missing: an engine that
+  is already running is used as it is, and asking twice changes nothing. When
+  the app quits, it stops the engine it started and no other. When it cannot
+  start one, it says why in one sentence.
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
 - **A context meter** that shows how full the model's window is.
@@ -29,7 +34,7 @@ Select the picture to open it full size. The rest of the set is in
 page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
 ```
 
-The page never talks to the network. Rust owns three things:
+The page never talks to the network. Rust owns four things:
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
@@ -40,6 +45,11 @@ The page never talks to the network. Rust owns three things:
 - [src-tauri/src/models.rs](src-tauri/src/models.rs), the search for the
   app's models on the disk. It works with the engine off, and it changes
   nothing in the folder it reads.
+- [src-tauri/src/starter.rs](src-tauri/src/starter.rs), the engine's start.
+  It checks the whole plan before anything starts: the engine's program, a
+  model for it to serve, the port, and a place for its log. The engine it
+  starts listens on this computer only, and is told to stay offline, so it
+  downloads nothing.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 
 Which program serves the contract is the only thing that changes per system:
@@ -51,6 +61,13 @@ Which program serves the contract is the only thing that changes per system:
 
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 `RUSTY_ENGINE_URL` to use another port on this computer.
+
+The app does not install the engine. It looks for the engine's program in
+each folder on `PATH`, then in `~/.local/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin`, and `~/Library/Python/<version>/bin`. An app opened from
+the Finder gets a short `PATH`, which is why the usual folders are looked in
+as well. When the program is somewhere else, set `RUSTY_ENGINE_PROGRAM` to
+its full path, and that program is the only one tried.
 
 ## What is in this folder
 
@@ -64,15 +81,10 @@ The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 
 ## Run it (macOS)
 
-You need Rust, Node 20 or later, and Xcode's command line tools.
+You need Rust, Node 20 or later, Xcode's command line tools, and the engine,
+`mlx_lm.server`.
 
-Start the engine in one terminal:
-
-```bash
-mlx_lm.server --port 8080
-```
-
-Start the app in another, from this folder:
+From this folder:
 
 ```bash
 npm install
@@ -80,6 +92,13 @@ npm install
 
 ```bash
 npm run tauri dev
+```
+
+When no engine is answering, the app starts one. To start one yourself, in
+another terminal:
+
+```bash
+mlx_lm.server --port 8080
 ```
 
 ## Tests
@@ -101,8 +120,9 @@ cd src-tauri && cargo test
 The page is built before the Rust tests because Tauri reads the built page
 (`dist`) when it compiles.
 
-Two more tests are run by hand. One asks the running engine for 2+2, and one
-looks for the app's models on this computer:
+Three more tests are run by hand. One asks the running engine for 2+2, one
+looks for the app's models on this computer, and one starts a second engine
+on a free port and stops it again:
 
 ```bash
 cd src-tauri && cargo test -- --ignored
@@ -112,3 +132,9 @@ cd src-tauri && cargo test -- --ignored
 
 - macOS: `~/Library/Application Support/net.morrical.rusty-business/sessions`
 - Windows: `%APPDATA%\net.morrical.rusty-business\sessions`
+
+## Where the engine's log is kept
+
+An engine the app starts writes its log to `engine.log`, beside the
+`sessions` folder. The file holds the latest start only, and only this
+computer's user can read it. The engine is never asked to log what is typed.

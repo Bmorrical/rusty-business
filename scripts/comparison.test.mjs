@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const SESSIONS = 'apps/desktop/src-tauri/src/sessions.rs';
+const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 const TAURI = 'apps/desktop/src-tauri/tauri.conf.json';
 const PAGE = 'apps/desktop/src';
 const OLLAMA = 'https://ollama.com';
@@ -32,6 +33,8 @@ const KEPT_BY = [
   { file: ENGINE, test: 'only_listed_models_are_offered' },
   { file: ENGINE, test: 'a_model_off_the_list_is_refused' },
   { file: ENGINE, test: 'the_engine_address_stays_on_this_computer' },
+  { file: STARTER, test: 'an_engine_is_never_started_where_another_computer_could_reach_it' },
+  { file: STARTER, test: 'the_engine_the_app_starts_stays_offline' },
   { file: SESSIONS, test: 'trash_moves_the_file_and_deletes_nothing' },
 ];
 

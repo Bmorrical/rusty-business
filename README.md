@@ -17,7 +17,7 @@ Select a picture to open it full size.
 
 | A model's thinking, apart from its answer | A new chat | No engine answering |
 | ----------------------------------------- | ---------- | ------------------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the command that starts the engine, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -35,10 +35,11 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   open to models from many makers.
 - **A window that cannot reach past your computer.** That is how it is built,
   not a setting. The page has no way to call out, and the Rust behind it
-  refuses an engine address that is not on this computer. There is no account,
-  no sign-in, and nothing in the cloud. Ollama keeps your prompts on your
-  computer too when a model runs there. It also offers models that run in its
-  cloud, with a switch that turns them off.
+  refuses an engine address that is not on this computer. An engine the app
+  starts listens on this computer only, and is told to stay offline. There is
+  no account, no sign-in, and nothing in the cloud. Ollama keeps your prompts
+  on your computer too when a model runs there. It also offers models that run
+  in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
   can open, copy, and back up. The trash is a folder too, so nothing is
   deleted.
@@ -52,8 +53,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   one download or one command. Rusty Business has no installer yet, and runs
   on a Mac with Apple silicon only.
 - **Any model, one command away.** Ollama downloads a model when you ask for
-  it. Rusty Business does not download models yet, and you start its engine
-  yourself.
+  it. Rusty Business does not download models yet, and its engine is a
+  separate program that you install yourself.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business is a window for a person, and gives other programs no way to reach
   a model.
@@ -95,21 +96,23 @@ on this computer. The stack is the ground the next features stand on.
 
 ## Run the chat window (macOS)
 
-You need Rust, Node 20 or later, and Xcode's command line tools.
-
-Start the model engine in one terminal:
-
-```bash
-mlx_lm.server --port 8080
-```
-
-Start the app in another:
+You need Rust, Node 20 or later, Xcode's command line tools, and the model
+engine, `mlx_lm.server`.
 
 ```bash
 cd apps/desktop && npm install && npm run tauri dev
 ```
 
-More in [apps/desktop](apps/desktop).
+When no engine is answering, the app starts one and stops it again when the
+app quits. An engine that is already running is used as it is and left
+running. To start one yourself, in another terminal:
+
+```bash
+mlx_lm.server --port 8080
+```
+
+More in [apps/desktop](apps/desktop), including where the app looks for the
+engine.
 
 ## Run the stack
 
@@ -178,8 +181,9 @@ next.
 - **One kind of computer.** It runs on a Mac with Apple silicon. Windows has
   no engine chosen yet. (On the roadmap: An engine for Windows.)
 - **No installer.** You build it from source. (On the roadmap: Installers.)
-- **It does not start its engine.** You start `mlx_lm.server` in a terminal
-  first. (On the roadmap: The app finds its models.)
+- **It does not install its engine.** The app starts `mlx_lm.server` when
+  that program is already on the computer. It does not put it there. (On the
+  roadmap: A first-run picker.)
 - **It does not download models.** The models have to be on the computer
   already. (On the roadmap: A first-run picker.)
 - **Words only.** It takes no pictures and no files, and it shows an answer as

@@ -18,14 +18,16 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
-import { dayLabel, onDiskLine, titleFrom } from '../apps/desktop/src/chat.js';
-import { HEIGHT, SCALE, SCENES, WIDTH, engineOff, sessionsFrom, standIn } from './screenshots.mjs';
+import { dayLabel, onDiskLine, shouldStart, startLine, titleFrom } from '../apps/desktop/src/chat.js';
+import { HEIGHT, NOT_STARTED, SCALE, SCENES, WIDTH, engineOff, sessionsFrom, standIn } from './screenshots.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const BANNER = 'docs/rusty-business.svg';
 const FIRST_PICTURE = 'docs/chat-window.webp';
 const FOLDER = 'docs/screenshots';
 const GALLERY = `${FOLDER}/README.md`;
+const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
+const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 
 // The pages that show the app's pictures.
 const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
@@ -98,18 +100,34 @@ function markdownPages(folder = '') {
   return pages;
 }
 
-/** The fields of the app's report about the engine, as the page reads them, from the Rust source. */
-function reportFields() {
-  const [, body] = read('apps/desktop/src-tauri/src/engine.rs').match(/pub struct EngineStatus \{\n([^}]+)\}/) ?? [];
+/** The fields of one of the app's reports, as the page reads them, from the Rust source. */
+function fieldsOf(file, report) {
+  const [, body] = read(file).match(new RegExp(`pub struct ${report} \\{\\n([^}]+)\\}`)) ?? [];
   return [...(body ?? '').matchAll(/^\s*pub (\w+):/gm)].map(([, field]) =>
     field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
   );
 }
 
+/** The fields of the app's report about the engine. */
+function reportFields() {
+  return fieldsOf(ENGINE, 'EngineStatus');
+}
+
+/** The fields of the app's report about starting the engine. */
+function startFields() {
+  return fieldsOf(STARTER, 'StartReport');
+}
+
+/** What the page draws when no engine answers; undefined when it has no such panel. */
+function offPanel() {
+  const page = read('apps/desktop/src/App.vue');
+  return page.match(/<template v-else>\n(\s+<p><span class="dot off"[\s\S]*?)<\/template>/)?.[1];
+}
+
 /** The app's allow-list, read from the Rust source. */
 function catalog() {
   const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", context: ([\d_]+) \}/g;
-  return [...read('apps/desktop/src-tauri/src/engine.rs').matchAll(entry)].map(
+  return [...read(ENGINE).matchAll(entry)].map(
     ([, needle, name, maker, context]) => ({ needle, name, maker, context: Number(context.replaceAll('_', '')) }),
   );
 }
@@ -318,15 +336,44 @@ test('with the engine off, the app still names its models on this computer', () 
 
   // The page draws that sentence where it says the engine is not answering,
   // above the command that starts it.
-  const page = read('apps/desktop/src/App.vue');
-  const [, panel] = page.match(/<template v-else>\n(\s+<p><span class="dot off"[\s\S]*?)<\/template>/) ?? [];
+  const panel = offPanel();
   assert.ok(panel, 'the page has a panel for an engine that is not answering');
   const sentence = panel.indexOf('{{ onDiskLine(engine.onDisk) }}');
   assert.ok(sentence > 0, 'the panel names the models on this computer');
   assert.ok(sentence < panel.indexOf('{{ engine.startHint }}'), 'before the command that starts the engine');
 });
 
-test('the stand-in answers the three calls the pictures need, and refuses the rest', async () => {
+test('with the engine off, the app asks for one to be started, and says why when it cannot', () => {
+  // Brad: "it should search and up the local models and stack." and "install
+  // and go, one click ready". So when no engine answers, the page asks Rust
+  // to start one, and when Rust cannot, the page says why in one sentence.
+  const { engine } = recorded();
+  const off = engineOff(engine);
+  assert.equal(shouldStart(off), true, 'no engine answers, so one is asked for');
+  assert.equal(shouldStart(engine), false, 'an engine that answers is left alone');
+  assert.match(read('apps/desktop/src/App.vue'), /invoke\("start_engine"\)/, 'the page asks Rust to start the engine');
+
+  // What the pictures are told is what the app says: the same fields in the
+  // same order, and a sentence the Rust tests hold word for word.
+  const fields = startFields();
+  assert.ok(fields.includes('reason'), 'the fields were read from starter.rs');
+  assert.deepEqual(Object.keys(NOT_STARTED), fields);
+  assert.equal(NOT_STARTED.answering, false);
+  assert.equal(NOT_STARTED.started, false, 'no engine is started while the pictures are made');
+  assert.ok(read(STARTER).includes(`"${NOT_STARTED.reason}"`), `${STARTER} no longer holds the sentence in the picture`);
+  assert.equal(startLine(NOT_STARTED, off), NOT_STARTED.reason);
+
+  // The page draws the reason under the models it found, and above the
+  // command a person can run instead. While it waits, it says it is starting.
+  const panel = offPanel();
+  assert.ok(panel, 'the page has a panel for an engine that is not answering');
+  const reason = panel.indexOf('{{ startNote }}');
+  assert.ok(reason > panel.indexOf('{{ onDiskLine(engine.onDisk) }}'), 'the reason comes after the models on this computer');
+  assert.ok(reason < panel.indexOf('{{ engine.startHint }}'), 'and before the command that starts the engine');
+  assert.ok(panel.includes('Starting the engine...'), 'the page says so while the engine is on its way up');
+});
+
+test('the stand-in answers the four calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -348,6 +395,9 @@ test('the stand-in answers the three calls the pictures need, and refuses the re
     })),
   );
   assert.deepEqual(plain(await invoke('load_session', { id: sessions[1].id })), plain(sessions[1]));
+
+  // Asked to start the engine, the stand-in starts nothing and says why.
+  assert.deepEqual(plain(await invoke('start_engine')), NOT_STARTED);
 
   // A call that would send, save, or trash has no place in a picture.
   for (const command of ['send_message', 'save_session', 'trash_session']) {
