@@ -15,6 +15,10 @@ Select the picture to open it full size. The rest of the set is in
 - **Model picker** limited to a short list: Phi-4 (Microsoft), gpt-oss 20B
   (OpenAI), and Nemotron 3.5 Lightning (NVIDIA). A model the engine holds that
   is not on the list is never shown and never accepted.
+- **The models on this computer**, named when the engine is not answering.
+  The app looks in the Hugging Face cache folder, where the engine keeps the
+  models it has downloaded. It only reads there, it keeps no list of its own,
+  and a download that stopped part way is not counted.
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
 - **A context meter** that shows how full the model's window is.
@@ -25,7 +29,7 @@ Select the picture to open it full size. The rest of the set is in
 page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
 ```
 
-The page never talks to the network. Rust owns two things:
+The page never talks to the network. Rust owns three things:
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
@@ -33,6 +37,9 @@ The page never talks to the network. Rust owns two things:
   that is not on this computer, filters the models, and separates thinking
   from the answer (channel markers, think tags, or a separate reasoning
   field).
+- [src-tauri/src/models.rs](src-tauri/src/models.rs), the search for the
+  app's models on the disk. It works with the engine off, and it changes
+  nothing in the folder it reads.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 
 Which program serves the contract is the only thing that changes per system:
@@ -94,7 +101,8 @@ cd src-tauri && cargo test
 The page is built before the Rust tests because Tauri reads the built page
 (`dist`) when it compiles.
 
-One more test talks to the running engine and asks it for 2+2:
+Two more tests are run by hand. One asks the running engine for 2+2, and one
+looks for the app's models on this computer:
 
 ```bash
 cd src-tauri && cargo test -- --ignored

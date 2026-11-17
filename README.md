@@ -17,7 +17,7 @@ Select a picture to open it full size.
 
 | A model's thinking, apart from its answer | A new chat | No engine answering |
 | ----------------------------------------- | ---------- | ------------------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the command that starts the engine, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the command that starts the engine, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).

@@ -7,6 +7,7 @@ import {
   formatCount,
   formatWindow,
   fullness,
+  onDiskLine,
   requestMessages,
   savedTurn,
   titleFrom,
@@ -319,6 +320,7 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
         </template>
         <template v-else>
           <p><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
+          <p class="quiet small">{{ onDiskLine(engine.onDisk) }}</p>
           <p class="quiet small">Start it with:</p>
           <code class="hint">{{ engine.startHint }}</code>
           <button class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>

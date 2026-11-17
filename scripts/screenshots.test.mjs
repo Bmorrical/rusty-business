@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
-import { dayLabel, titleFrom } from '../apps/desktop/src/chat.js';
+import { dayLabel, onDiskLine, titleFrom } from '../apps/desktop/src/chat.js';
 import { HEIGHT, SCALE, SCENES, WIDTH, engineOff, sessionsFrom, standIn } from './screenshots.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -96,6 +96,14 @@ function markdownPages(folder = '') {
     }
   }
   return pages;
+}
+
+/** The fields of the app's report about the engine, as the page reads them, from the Rust source. */
+function reportFields() {
+  const [, body] = read('apps/desktop/src-tauri/src/engine.rs').match(/pub struct EngineStatus \{\n([^}]+)\}/) ?? [];
+  return [...(body ?? '').matchAll(/^\s*pub (\w+):/gm)].map(([, field]) =>
+    field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+  );
 }
 
 /** The app's allow-list, read from the Rust source. */
@@ -227,7 +235,10 @@ test('the recorded engine offers only models on the app\'s list', () => {
   const allowed = catalog();
   assert.ok(allowed.length > 0, 'the allow-list was read from engine.rs');
 
-  for (const model of engine.models) {
+  // The list holds for the models the engine offers and for the models the
+  // app found on the disk.
+  assert.ok(engine.onDisk.length > 0, 'the recorded report names models on the disk');
+  for (const model of [...engine.models, ...engine.onDisk]) {
     const entry = allowed.find((candidate) => model.id.toLowerCase().includes(candidate.needle));
     assert.ok(entry, `${model.id} is on the app's list`);
     assert.deepEqual(
@@ -248,6 +259,15 @@ test('the recorded engine offers only models on the app\'s list', () => {
   }
 
   assert.doesNotMatch(read(`${FOLDER}/chats.json`), /\b(meta|google|llama|gemma|gemini)\b/i);
+});
+
+test('the recorded report has the fields the app reports, in its order', () => {
+  // The pictures are only as true as the report behind them. A field the app
+  // gains or renames has to be recorded too, or a picture shows a page the
+  // app never draws.
+  const fields = reportFields();
+  assert.ok(fields.includes('onDisk') && fields.includes('startHint'), 'the fields were read from engine.rs');
+  assert.deepEqual(Object.keys(recorded().engine), fields);
 });
 
 test('the saved chats are listed newest first, and read "Today" and "Yesterday" at any hour', () => {
@@ -285,6 +305,25 @@ test('with the engine off, the app is told nothing answers', () => {
   assert.equal(off.url, engine.url);
   assert.equal(off.startHint, engine.startHint);
   assert.deepEqual(plain(engine), before, 'the recorded engine is left as it was');
+});
+
+test('with the engine off, the app still names its models on this computer', () => {
+  // Brad, on what the app does by itself: "it should search and up the local
+  // models and stack." The search does not need the engine, so its answer is
+  // on the page when nothing answers at the engine's address.
+  const { engine } = recorded();
+  const off = engineOff(engine);
+  assert.deepEqual(off.onDisk, engine.onDisk, 'a model on the disk is still on the disk');
+  assert.equal(onDiskLine(off.onDisk), 'On this computer: Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning.');
+
+  // The page draws that sentence where it says the engine is not answering,
+  // above the command that starts it.
+  const page = read('apps/desktop/src/App.vue');
+  const [, panel] = page.match(/<template v-else>\n(\s+<p><span class="dot off"[\s\S]*?)<\/template>/) ?? [];
+  assert.ok(panel, 'the page has a panel for an engine that is not answering');
+  const sentence = panel.indexOf('{{ onDiskLine(engine.onDisk) }}');
+  assert.ok(sentence > 0, 'the panel names the models on this computer');
+  assert.ok(sentence < panel.indexOf('{{ engine.startHint }}'), 'before the command that starts the engine');
 });
 
 test('the stand-in answers the three calls the pictures need, and refuses the rest', async () => {

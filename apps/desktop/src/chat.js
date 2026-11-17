@@ -63,6 +63,18 @@ export function formatWindow(context) {
   return `${Math.round(Number(context ?? 0) / 1024)}K`;
 }
 
+/**
+ * One sentence naming the app's models that are on this computer's disk,
+ * each name once, in the order given.
+ */
+export function onDiskLine(models) {
+  const names = [...new Set((models ?? []).map((entry) => entry.name))];
+  if (!names.length) return "None of this app's models is on this computer yet.";
+  if (names.length === 1) return `On this computer: ${names[0]}.`;
+  if (names.length === 2) return `On this computer: ${names[0]} and ${names[1]}.`;
+  return `On this computer: ${names.slice(0, -1).join(", ")}, and ${names.at(-1)}.`;
+}
+
 /** Tokens a second for one reply, or null when it cannot be worked out. */
 export function tokensPerSecond(turn) {
   if (!turn?.completionTokens || !turn?.seconds || turn.seconds < 0.05) return null;

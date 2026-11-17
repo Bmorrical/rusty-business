@@ -24,6 +24,26 @@
       }
     ],
     "hidden": 2,
+    "onDisk": [
+      {
+        "id": "mlx-community/phi-4-4bit",
+        "name": "Phi-4",
+        "maker": "Microsoft",
+        "context": 16384
+      },
+      {
+        "id": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+        "name": "gpt-oss 20B",
+        "maker": "OpenAI",
+        "context": 131072
+      },
+      {
+        "id": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+        "name": "Nemotron 3.5 Lightning",
+        "maker": "NVIDIA",
+        "context": 262144
+      }
+    ],
     "error": null,
     "startHint": "mlx_lm.server --port 8080"
   },
