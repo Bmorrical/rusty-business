@@ -18,8 +18,29 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
-import { dayLabel, onDiskLine, shouldStart, startLine, titleFrom } from '../apps/desktop/src/chat.js';
-import { HEIGHT, NOT_STARTED, SCALE, SCENES, WIDTH, engineOff, sessionsFrom, standIn } from './screenshots.mjs';
+import {
+  dayLabel,
+  firstRunOffers,
+  formatSize,
+  onDiskLine,
+  quickest,
+  shouldStart,
+  startLine,
+  titleFrom,
+} from '../apps/desktop/src/chat.js';
+import {
+  HEIGHT,
+  NOT_STARTED,
+  NO_MODEL,
+  SCALE,
+  SCENES,
+  WIDTH,
+  engineFor,
+  engineOff,
+  firstRun,
+  sessionsFrom,
+  standIn,
+} from './screenshots.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const BANNER = 'docs/rusty-business.svg';
@@ -28,6 +49,7 @@ const FOLDER = 'docs/screenshots';
 const GALLERY = `${FOLDER}/README.md`;
 const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
+const PINNED = 'apps/desktop/src-tauri/pinned-models.json';
 
 // The pages that show the app's pictures.
 const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
@@ -103,8 +125,9 @@ function markdownPages(folder = '') {
 /** The fields of one of the app's reports, as the page reads them, from the Rust source. */
 function fieldsOf(file, report) {
   const [, body] = read(file).match(new RegExp(`pub struct ${report} \\{\\n([^}]+)\\}`)) ?? [];
-  return [...(body ?? '').matchAll(/^\s*pub (\w+):/gm)].map(([, field]) =>
-    field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+  // A field renamed for the page goes by its new name.
+  return [...(body ?? '').matchAll(/^\s*(?:#\[serde\(rename = "(\w+)"\)\]\n\s*)?pub (\w+):/gm)].map(([, renamed, field]) =>
+    renamed ?? field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
   );
 }
 
@@ -180,7 +203,8 @@ test('every picture opens by itself at full size, and has words for it', () => {
       checked += 1;
     }
   }
-  // Four in the README, one for the desktop app, and five in the gallery.
+  // The set in the README, one for the desktop app, and in the gallery the
+  // set and the first picture.
   assert.equal(checked, SCENES.length * 2 + 2);
 });
 
@@ -233,7 +257,7 @@ test('each scene is a picture the script can make', () => {
   for (const scene of SCENES) {
     assert.match(scene.file, /^[a-z-]+\.png$/, `${scene.file} is a PNG with a plain name`);
     assert.ok(['light', 'dark'].includes(scene.scheme), `${scene.file} is light or dark`);
-    assert.ok(['on', 'off'].includes(scene.engine), `${scene.file} has the engine on or off`);
+    assert.ok(['on', 'off', 'first-run'].includes(scene.engine), `${scene.file} has the engine on, off, or on a first run`);
     if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
     if (scene.thinking) {
       const chat = chats.find((entry) => entry.id === scene.open);
@@ -265,6 +289,12 @@ test('the recorded engine offers only models on the app\'s list', () => {
       `${model.id} is described as the app describes it`,
     );
   }
+  // And for the models it offers to download.
+  for (const offer of engine.offers) {
+    const entry = allowed.find((candidate) => offer.id.toLowerCase().includes(candidate.needle));
+    assert.ok(entry, `${offer.id} is on the app's list`);
+    assert.deepEqual({ name: offer.name, maker: offer.maker }, { name: entry.name, maker: entry.maker });
+  }
 
   const offered = engine.models.map((model) => model.id);
   for (const chat of chats) {
@@ -286,6 +316,93 @@ test('the recorded report has the fields the app reports, in its order', () => {
   const fields = reportFields();
   assert.ok(fields.includes('onDisk') && fields.includes('startHint'), 'the fields were read from engine.rs');
   assert.deepEqual(Object.keys(recorded().engine), fields);
+});
+
+test('the recorded downloads are the pinned ones, in order, with their sizes', () => {
+  // The picture of the first run shows each size. It is the size of the
+  // files the app would download, added up, so a picture never promises a
+  // smaller download than the app makes.
+  const pins = JSON.parse(read(PINNED));
+  assert.deepEqual(
+    recorded().engine.offers.map((offer) => ({ id: offer.id, bytes: offer.bytes })),
+    pins.map((pin) => ({ id: pin.id, bytes: pin.files.reduce((sum, file) => sum + file.bytes, 0) })),
+  );
+});
+
+test('on a first run, the app offers its models with their sizes, and the quickest', () => {
+  // Brad: "I should be able to just pull the .dmg or .exe from read me and
+  // install and go, one click ready." He picked "Picker with sizes". So on a
+  // computer with none of the app's models, the page lists the ones it can
+  // download, each with its size, and points to the quickest to start.
+  const { engine } = recorded();
+  const before = plain(engine);
+  const first = firstRun(engine);
+
+  assert.deepEqual(first.onDisk, []);
+  assert.deepEqual(first.models, []);
+  assert.equal(first.reachable, false);
+  assert.deepEqual(firstRunOffers(first), engine.offers);
+  assert.deepEqual(firstRunOffers(engine), [], 'with models on hand, nothing is offered');
+  assert.deepEqual(firstRunOffers(engineOff(engine)), [], 'nor with models on the disk and the engine off');
+  assert.deepEqual(
+    engine.offers.map((offer) => formatSize(offer.bytes)),
+    ['8.3 GB', '12.1 GB', '17.8 GB'],
+  );
+  assert.equal(quickest(engine.offers), 'mlx-community/phi-4-4bit');
+  assert.deepEqual(plain(engine), before, 'the recorded engine is left as it was');
+
+  // With nothing to serve, the app does not start the engine, and says so in
+  // the app's own words. A first run has no saved chats yet.
+  const sessions = sessionsFrom(recorded().chats);
+  assert.deepEqual(engineFor({ engine: 'first-run' }, engine, sessions), { report: first, start: NO_MODEL, saved: [] });
+  assert.deepEqual(engineFor({ engine: 'off' }, engine, sessions).saved, sessions);
+  assert.deepEqual(engineFor({ engine: 'on' }, engine, sessions).report, engine);
+  assert.deepEqual(Object.keys(NO_MODEL), startFields());
+  assert.equal(NO_MODEL.started, false, 'no engine is started while the pictures are made');
+  assert.ok(read(STARTER).includes(`"${NO_MODEL.reason}"`), `${STARTER} no longer holds the sentence in the picture`);
+  assert.equal(startLine(NO_MODEL, first), NO_MODEL.reason);
+});
+
+test('the page downloads a model only when its Download button is pressed', () => {
+  // "Inside the app (Recommended)": the app downloads models itself, and
+  // only when asked.
+  const page = read('apps/desktop/src/App.vue');
+  const asks = [...page.matchAll(/invoke\("download_model"/g)];
+  assert.equal(asks.length, 1, 'the page asks Rust for a download in one place');
+  const calls = [...page.matchAll(/\bdownload\(/g)].map((match) => page.slice(match.index - 30, match.index));
+  assert.deepEqual(
+    calls.map((before) => /async function $|@click="$/.test(before)),
+    [true, true],
+    'download() is defined once and called only from a button',
+  );
+  assert.match(page, /\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer shows its size');
+  assert.match(page, />\s*Download\s*</, 'each offer has a Download button');
+  assert.match(page, /invoke\("stop_download"\)/, 'a download can be stopped');
+});
+
+test('while a model downloads, the page shows it, stops it on Cancel, and starts the engine once it is whole', () => {
+  // Brad: "Picker with sizes (Recommended)", and of the engine: "Inside the
+  // app (Recommended)". The page points to the quickest, runs one download at
+  // a time, says when one stopped or failed, and starts the engine once a
+  // model is whole.
+  const page = read('apps/desktop/src/App.vue');
+  const download = page.match(/\nasync function download\(offer\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
+  assert.match(download, /^\s*if \(downloading\.value\) return;/, 'download() does nothing while one is running');
+  assert.match(download, /invoke\("download_model", \{ id: offer\.id, onProgress: channel \}\)/, 'Rust is told which model, and reports its progress');
+  assert.match(download, /if \(report\.stopped\) stoppedNote\.value = `The download of \$\{offer\.name\} stopped, and none of it was kept\.`;/, 'a stopped download says so');
+  assert.match(download, /if \(report\.whole\) await checkEngine\(\);/, 'a whole model starts the engine');
+  assert.match(download, /catch \(error\) \{\n\s*problem\.value = String\(error\);/, 'a download that fails says why');
+  const cancel = page.match(/\nasync function cancelDownload\(\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
+  assert.match(cancel, /await invoke\("stop_download"\)/, 'Cancel asks Rust to stop the download');
+
+  const row = page.match(/<li v-for="offer in offers"[\s\S]*?<\/li>/)?.[0] ?? '';
+  assert.match(row, /\{\{ offer\.id === quick \? " · quickest to start" : "" \}\}/, 'the quickest to start is pointed to');
+  assert.match(row, /<progress\s+:value="downloaded\(progress\)"/, 'a download shows how far it has come');
+  assert.match(row, /\{\{ stopping \? "Stopping\.\.\." : downloadLine\(progress\) \}\}/, 'and in words');
+  assert.match(row, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it');
+  assert.match(row, /:disabled="Boolean\(downloading\)"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads');
+  assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
+  assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed');
 });
 
 test('the saved chats are listed newest first, and read "Today" and "Yesterday" at any hour', () => {
@@ -398,9 +515,12 @@ test('the stand-in answers the four calls the pictures need, and refuses the res
 
   // Asked to start the engine, the stand-in starts nothing and says why.
   assert.deepEqual(plain(await invoke('start_engine')), NOT_STARTED);
+  const first = { window: { localStorage: { clear: () => {} } }, structuredClone };
+  vm.runInNewContext(standIn(firstRun(engine), sessions, NO_MODEL), first);
+  assert.deepEqual(plain(await first.window.__TAURI_INTERNALS__.invoke('start_engine')), NO_MODEL);
 
-  // A call that would send, save, or trash has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session']) {
+  // A call that would send, save, trash, or download has no place in a picture.
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

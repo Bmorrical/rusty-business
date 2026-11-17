@@ -1,3 +1,4 @@
+mod downloads;
 mod engine;
 mod models;
 mod sessions;
@@ -13,6 +14,10 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(starter::Starter::new(data.join("engine.log")));
+            // What a download left when the app last quit part way is thrown away.
+            let downloads = downloads::Downloads::new(data.join("downloads"));
+            downloads.clear();
+            app.manage(downloads);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -20,6 +25,8 @@ pub fn run() {
             engine::chat_stream,
             engine::stop_chat,
             starter::start_engine,
+            downloads::download_model,
+            downloads::stop_download,
             sessions::list_sessions,
             sessions::load_session,
             sessions::save_session,

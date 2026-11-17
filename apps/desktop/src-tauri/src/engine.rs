@@ -141,6 +141,9 @@ pub struct EngineStatus {
     /// Models on the list that are on this computer's disk, whether or not
     /// the engine is answering.
     pub on_disk: Vec<ModelInfo>,
+    /// Models the app can download, with their sizes. The page shows them
+    /// only while none of the app's models is on the disk.
+    pub offers: Vec<crate::downloads::Offer>,
     pub error: Option<String>,
     pub start_hint: String,
 }
@@ -173,18 +176,25 @@ pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
     Ok(list.data.into_iter().map(|row| row.id).collect())
 }
 
-#[tauri::command]
-pub async fn engine_status() -> Result<EngineStatus, String> {
-    let mut status = EngineStatus {
+/// What the page is told before the engine is asked: the app's models on
+/// this computer's disk, and the ones it can download.
+fn first_status() -> EngineStatus {
+    EngineStatus {
         name: engine_name().to_string(),
         url: DEFAULT_BASE_URL.to_string(),
         reachable: false,
         models: Vec::new(),
         hidden: 0,
         on_disk: crate::models::on_disk(),
+        offers: crate::downloads::offers(),
         error: None,
         start_hint: start_hint().to_string(),
-    };
+    }
+}
+
+#[tauri::command]
+pub async fn engine_status() -> Result<EngineStatus, String> {
+    let mut status = first_status();
     let base = match base_url() {
         Ok(base) => base,
         Err(error) => {
@@ -695,6 +705,16 @@ mod tests {
             max_tokens: None,
         };
         assert!(checked_request(&request).is_err());
+    }
+
+    #[test]
+    fn the_report_carries_the_models_the_app_can_download() {
+        let offered = first_status().offers;
+        assert_eq!(offered, crate::downloads::offers());
+        if cfg!(target_os = "macos") {
+            let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
+            assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
+        }
     }
 
     #[test]

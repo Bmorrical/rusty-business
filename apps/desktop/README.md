@@ -24,6 +24,10 @@ Select the picture to open it full size. The rest of the set is in
   is already running is used as it is, and asking twice changes nothing. When
   the app quits, it stops the engine it started and no other. When it cannot
   start one, it says why in one sentence.
+- **A first-run picker.** When none of the app's models is on this computer,
+  the page lists them with their download sizes and marks the quickest to
+  start. Download brings the one you pick from Hugging Face, with a progress
+  bar and a Cancel button, and the app then starts the engine with it.
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
 - **A context meter** that shows how full the model's window is.
@@ -32,9 +36,10 @@ Select the picture to open it full size. The rest of the set is in
 
 ```
 page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
+                      Rust  --https, on Download only-->   Hugging Face
 ```
 
-The page never talks to the network. Rust owns four things:
+The page never talks to the network. Rust owns five things:
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
@@ -50,6 +55,11 @@ The page never talks to the network. Rust owns four things:
   model for it to serve, the port, and a place for its log. The engine it
   starts listens on this computer only, and is told to stay offline, so it
   downloads nothing.
+- [src-tauri/src/downloads.rs](src-tauri/src/downloads.rs), the models'
+  download. It brings only a model on the list, at a pinned revision, and
+  only from Hugging Face over https, and it checks each file's size and
+  SHA-256 as it arrives. A finished model moves into the models folder
+  whole; a cancelled or broken one leaves nothing behind.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 
 Which program serves the contract is the only thing that changes per system:
@@ -74,7 +84,7 @@ its full path, and that program is the only one tried.
 | Path                   | What it is                                              |
 | ---------------------- | ------------------------------------------------------- |
 | [src](src)             | The page: one Vue component and its helpers             |
-| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, saved chats |
+| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, saved chats |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |
 | `package.json`         | The page's packages and the `npm` commands below        |
@@ -120,12 +130,19 @@ cd src-tauri && cargo test
 The page is built before the Rust tests because Tauri reads the built page
 (`dist`) when it compiles.
 
-Three more tests are run by hand. One asks the running engine for 2+2, one
-looks for the app's models on this computer, and one starts a second engine
-on a free port and stops it again:
+Four more tests are run by hand. One asks the running engine for 2+2, one
+looks for the app's models on this computer, one starts a second engine on
+a free port and stops it again, and one checks the small pinned files
+against Hugging Face:
 
 ```bash
-cd src-tauri && cargo test -- --ignored
+cd src-tauri && cargo test -- --ignored --skip a_whole_model_downloads_from_hugging_face
+```
+
+A fifth downloads Phi-4 whole, 8.3 GB, into an empty folder you name:
+
+```bash
+cd src-tauri && RUSTY_DOWNLOAD_TO=<an empty folder> cargo test -- --ignored a_whole_model_downloads_from_hugging_face
 ```
 
 ## Where chats are kept

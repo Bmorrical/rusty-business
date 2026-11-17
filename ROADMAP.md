@@ -16,14 +16,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 In this order:
 
-- **A first-run picker.** On a computer with no models, the app lists the
-  models it knows with their download sizes, and points to a small one to
-  get talking quickly. On a computer with no engine, it installs the engine
-  too.
 - **The app starts the stack.** When Docker is installed, the app brings the
   Docker stack up too.
 - **Installers.** A `.dmg` and an `.exe`, linked from the README: download,
-  open, and go. Unsigned at first; see pin 1.
+  open, and go. The Mac's carries the model engine inside, so there is
+  nothing else to install. Unsigned at first; see pin 1.
 
 ## Later
 
@@ -42,3 +39,7 @@ In this order:
 - **The app finds its models.** It names the models already on the computer,
   and it starts the model engine by itself when the engine's program is
   installed, with nothing to type in a terminal first. MLX on Apple silicon.
+- **A first-run picker.** On a computer with none of its models, the app
+  lists them with their download sizes and points to the quickest to start.
+  Download brings the one you pick from Hugging Face, each file checked
+  against its pinned size and checksum.
