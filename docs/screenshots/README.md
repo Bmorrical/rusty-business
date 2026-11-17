@@ -22,14 +22,14 @@ above the answer. Here it is opened.
 
 ## A new chat
 
-[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](new-chat.png)](new-chat.png?raw=true)
+[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, and the stack line reading Stack on 127.0.0.1:4700](new-chat.png)](new-chat.png?raw=true)
 
 What the app shows before the first question. The app follows the system's
 light or dark setting; this is light.
 
 ## No engine answering
 
-[![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
+[![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](engine-off.png)](engine-off.png?raw=true)
 
 What the app shows when nothing answers at the engine's address and it could
 not start an engine itself: which of its models are already on this computer,
@@ -66,6 +66,8 @@ These are pictures of the app's page, not captures of the app's window:
   pictures are made, and no engine is started: in the last two pictures, the
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
+  No stack is started either: in every picture, the page is told the stack's
+  front door already answers.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 

@@ -103,7 +103,7 @@ fn pip_folders(library: &Path) -> Vec<PathBuf> {
 }
 
 /// A file that can be run, or a link that leads to one.
-fn can_run(path: &Path) -> bool {
+pub(crate) fn can_run(path: &Path) -> bool {
     let Ok(found) = fs::metadata(path) else {
         return false;
     };

@@ -17,11 +17,11 @@ Select a picture to open it full size.
 
 | A model's thinking, apart from its answer | A new chat |
 | ----------------------------------------- | ---------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, and the engine line reading MLX on 127.0.0.1:8080](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, and the stack line reading Stack on 127.0.0.1:4700](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
 
 | No engine answering | The first run: pick a model |
 | ------------------- | --------------------------- |
-| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
+| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -41,9 +41,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   not a setting. The page has no way to call out, and the Rust behind it
   refuses an engine address that is not on this computer. An engine the app
   starts listens on this computer only, and is told to stay offline. The app
-  itself reaches out once, and only when you ask: on a first run, Download
-  brings the model you pick from Hugging Face, over https and from nowhere
-  else, and nothing you type goes with it. There is no account, no sign-in,
+  itself reaches out in two places. On a first run, Download brings the model
+  you pick from Hugging Face, over https and from nowhere else. The first time
+  it starts the stack, Docker downloads the stack's images. Nothing you type
+  goes with either. There is no account, no sign-in,
   and nothing in the cloud. Ollama keeps your prompts on your computer too
   when a model runs there. It also offers models that run in its cloud, with
   a switch that turns them off.
@@ -99,8 +100,9 @@ says what is in it.
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
 | [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy that waits for it | The gate runs; the deploy publishes the API and worker images |
 
-The chat window does not use the stack yet. It talks only to the model engine
-on this computer. The stack is the ground the next features stand on.
+The chat window starts the stack when Docker is on the computer, and does not
+use it yet: it talks only to the model engine on this computer. The stack is
+the ground the next features stand on.
 
 ## Run the chat window (macOS)
 
@@ -122,6 +124,12 @@ running. To start one yourself, in another terminal:
 ```bash
 mlx_lm.server --port 8080
 ```
+
+When Docker is on the computer, the app also starts the stack, opening
+Docker Desktop first when it is not running. It pulls the API and the worker
+from GitHub's container registry, so nothing is built, and the first start
+downloads it all, which takes a few minutes. A stack from `make up` that is
+already running is used as it is.
 
 More in [apps/desktop](apps/desktop), including where the app looks for the
 engine.
@@ -196,6 +204,9 @@ next.
 - **It does not install its engine.** The app starts `mlx_lm.server` when
   that program is already on the computer. It does not put it there. (On the
   roadmap: Installers.)
+- **It does not install Docker.** The app starts the stack when Docker is
+  on the computer. It does not put Docker there. The chat does not need the
+  stack yet.
 - **One model, on a first run.** The app offers its models only while none
   of them is on the computer, and downloads one at a time. A second model
   has to be downloaded by hand.
@@ -204,7 +215,7 @@ next.
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the
-  chat window does not use them.
+  chat window starts them but does not use them.
 
 ## Roadmap
 

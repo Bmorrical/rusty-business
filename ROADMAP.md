@@ -16,8 +16,6 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 In this order:
 
-- **The app starts the stack.** When Docker is installed, the app brings the
-  Docker stack up too.
 - **Installers.** A `.dmg` and an `.exe`, linked from the README: download,
   open, and go. The Mac's carries the model engine inside, so there is
   nothing else to install. Unsigned at first; see pin 1.
@@ -43,3 +41,7 @@ In this order:
   lists them with their download sizes and points to the quickest to start.
   Download brings the one you pick from Hugging Face, each file checked
   against its pinned size and checksum.
+- **The app starts the stack.** When Docker is on the computer, the app
+  starts the Docker stack too, opening Docker Desktop when it is not running.
+  The API and the worker come from GitHub's container registry, pinned by
+  digest. When the app quits, it stops the stack it started.

@@ -16,6 +16,7 @@ import {
   requestMessages,
   savedTurn,
   shouldStart,
+  stackLine,
   startLine,
   titleFrom,
   tokensPerSecond,
@@ -29,6 +30,8 @@ const engine = ref(null);
 const checking = ref(false);
 const starting = ref(false);
 const startNote = ref("");
+const stack = ref(null);
+const stackStarting = ref(false);
 const modelId = ref("");
 const sessions = ref([]);
 const current = ref(blankSession());
@@ -117,6 +120,24 @@ async function checkEngine() {
       checkAgain = false;
       checkEngine();
     }
+  }
+}
+
+/**
+ * Asks the app to start the stack. Rust starts only what is missing and stops
+ * only what it started, when the app quits, so this runs when the window
+ * opens and from Try again, never on focus: a first start downloads the
+ * stack, which takes a few minutes.
+ */
+async function checkStack() {
+  if (!inApp || stackStarting.value) return;
+  stackStarting.value = true;
+  try {
+    stack.value = await invoke("start_stack");
+  } catch (error) {
+    stack.value = { running: false, started: false, address: "", reason: String(error) };
+  } finally {
+    stackStarting.value = false;
   }
 }
 
@@ -334,6 +355,8 @@ function replyNote(turn) {
 onMounted(async () => {
   if (!inApp) return;
   window.addEventListener("focus", checkEngine);
+  // The stack can take minutes, so the page does not wait for it.
+  checkStack();
   await Promise.all([checkEngine(), refreshSessions()]);
   focusComposer();
 });
@@ -402,6 +425,12 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
           <p v-if="!starting" class="quiet small">To start it yourself:</p>
           <code v-if="!starting" class="hint">{{ engine.startHint }}</code>
           <button v-if="!starting" class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>
+        </template>
+        <p v-if="stackStarting" class="quiet small">{{ stackLine(stack, true) }}</p>
+        <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
+        <template v-else-if="stack">
+          <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
+          <button class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
         <p class="quiet small">Nothing you type leaves this computer.</p>
       </footer>

@@ -25,6 +25,7 @@ import {
   onDiskLine,
   quickest,
   shouldStart,
+  stackLine,
   startLine,
   titleFrom,
 } from '../apps/desktop/src/chat.js';
@@ -34,6 +35,7 @@ import {
   NO_MODEL,
   SCALE,
   SCENES,
+  STACK_RUNNING,
   WIDTH,
   engineFor,
   engineOff,
@@ -49,6 +51,7 @@ const FOLDER = 'docs/screenshots';
 const GALLERY = `${FOLDER}/README.md`;
 const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
+const STACK = 'apps/desktop/src-tauri/src/stack.rs';
 const PINNED = 'apps/desktop/src-tauri/pinned-models.json';
 
 // The pages that show the app's pictures.
@@ -490,7 +493,33 @@ test('with the engine off, the app asks for one to be started, and says why when
   assert.ok(panel.includes('Starting the engine...'), 'the page says so while the engine is on its way up');
 });
 
-test('the stand-in answers the four calls the pictures need, and refuses the rest', async () => {
+test('with the window open, the app asks for the stack to be started, and says why when it cannot', () => {
+  // Brad: "it should search and up the local models and stack." and "install
+  // and go, one click ready". So when the window opens, the page asks Rust to
+  // start the stack, and the footer says where it answers or why it does not.
+  const page = read('apps/desktop/src/App.vue');
+  assert.match(page, /invoke\("start_stack"\)/, 'the page asks Rust to start the stack');
+  const mounted = page.match(/onMounted\(async \(\) => \{\n([\s\S]*?)\n\}\);/)?.[1] ?? '';
+  assert.match(mounted, /^\s+checkStack\(\);$/m, 'it asks when the window opens, without waiting on it');
+  assert.ok(!/addEventListener\("focus", checkStack\)/.test(page), 'and not each time the window is focused');
+
+  // The footer draws the stack's line under the engine's, with Try again
+  // when the stack is not running.
+  const footer = page.match(/<footer class="engine"[\s\S]*?<\/footer>/)?.[0] ?? '';
+  const line = footer.indexOf('{{ stackLine(stack, false) }}');
+  assert.ok(line > footer.indexOf('{{ engine.startHint }}'), 'the stack comes after the engine');
+  assert.ok(footer.includes('@click="checkStack">Try again</button>'), 'Try again asks once more');
+
+  // What the pictures are told is what the app says: the same fields, in the
+  // same order, and the address of the app's own front door.
+  assert.deepEqual(Object.keys(STACK_RUNNING), fieldsOf(STACK, 'StackReport'));
+  const port = read(STACK).match(/pub const FRONT_DOOR_PORT: u16 = (\d+);/)?.[1];
+  assert.equal(STACK_RUNNING.address, `127.0.0.1:${port}`);
+  assert.equal(STACK_RUNNING.started, false, 'no stack is started while the pictures are made');
+  assert.equal(stackLine(STACK_RUNNING, false), `Stack on 127.0.0.1:${port}`);
+});
+
+test('the stand-in answers the five calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -518,6 +547,9 @@ test('the stand-in answers the four calls the pictures need, and refuses the res
   const first = { window: { localStorage: { clear: () => {} } }, structuredClone };
   vm.runInNewContext(standIn(firstRun(engine), sessions, NO_MODEL), first);
   assert.deepEqual(plain(await first.window.__TAURI_INTERNALS__.invoke('start_engine')), NO_MODEL);
+
+  // Asked to start the stack, it starts nothing and says the stack runs.
+  assert.deepEqual(plain(await invoke('start_stack')), STACK_RUNNING);
 
   // A call that would send, save, trash, or download has no place in a picture.
   for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download']) {
