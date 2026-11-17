@@ -1,6 +1,6 @@
 # Roadmap
 
-What is planned for Rusty Business, and in what order. There are no dates
+What is planned for Rusty Business™, and in what order. There are no dates
 here: a thing ships when its tests are green.
 
 ## Pinned

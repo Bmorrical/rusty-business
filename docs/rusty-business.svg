@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-labelledby="rb-title rb-desc">
-  <title id="rb-title">Rusty Business</title>
+  <title id="rb-title">Rusty Business™</title>
   <desc id="rb-desc">A person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails lying on the ground below.</desc>
 
   <!-- The picture carries its own background, so it reads the same on a
@@ -9,7 +9,7 @@
   <!-- Wordmark -->
   <g font-family="Georgia, 'Times New Roman', Times, serif" font-weight="700" font-size="104">
     <text x="96" y="238" fill="#B7410E">Rusty</text>
-    <text x="96" y="346" fill="#2B2622">Business</text>
+    <text x="96" y="346" fill="#2B2622">Business<tspan font-size="48" dy="-38">™</tspan></text>
   </g>
   <text x="100" y="408" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="27" fill="#6B5F53">Chat with models on your own computer.</text>
 

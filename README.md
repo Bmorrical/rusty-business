@@ -1,6 +1,6 @@
-# Rusty Business
+# Rusty Business™
 
-![Rusty Business: a person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails on the ground below](docs/rusty-business.svg)
+![Rusty Business™: a person wobbling on one foot on the very top of a tipping stepladder, reaching for a hanging light bulb, with two rusty nails on the ground below](docs/rusty-business.svg)
 
 A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. Nothing you type leaves the
@@ -22,12 +22,12 @@ Select a picture to open it full size.
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
 
-## Rusty Business or Ollama?
+## Rusty Business™ or Ollama?
 
 [Ollama](https://ollama.com) is a widely used way to run models on your own
 computer, and it is ahead of this project in most ways. Here is how to choose.
 
-### Why choose Rusty Business
+### Why choose Rusty Business™
 
 - **A short list, on purpose.** It knows three models, from Microsoft, OpenAI,
   and NVIDIA. A model that is not on the list is never shown and never
@@ -50,19 +50,19 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 ### Why choose Ollama
 
 - **Install and go, today.** Ollama installs on macOS, Windows, and Linux with
-  one download or one command. Rusty Business has no installer yet, and runs
+  one download or one command. Rusty Business™ has no installer yet, and runs
   on a Mac with Apple silicon only.
 - **Any model, one command away.** Ollama downloads a model when you ask for
-  it. Rusty Business does not download models yet, and its engine is a
+  it. Rusty Business™ does not download models yet, and its engine is a
   separate program that you install yourself.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
-  Business is a window for a person, and gives other programs no way to reach
+  Business™ is a window for a person, and gives other programs no way to reach
   a model.
 - **Models that run in the cloud.** Ollama offers them, for a model larger
-  than your computer can hold. Rusty Business runs only what your computer
+  than your computer can hold. Rusty Business™ runs only what your computer
   can.
 - **Pictures and files.** Ollama's app takes images and dropped files. Rusty
-  Business takes words.
+  Business™ takes words.
 
 ### The same either way
 
@@ -71,7 +71,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 - Both keep a model's thinking apart from its answer.
 
 What this says of Ollama was read from Ollama's own pages, and they are where
-to check it. Ollama is a trademark of its owner. Rusty Business is not
+to check it. Ollama is a trademark of its owner. Rusty Business™ is not
 affiliated with Ollama, and Ollama does not endorse it.
 
 ## What is here
@@ -175,7 +175,7 @@ pull requests, so run `make test` and `make e2e` before you push. More in
 
 ## Limits
 
-What Rusty Business cannot do yet. The [roadmap](ROADMAP.md) says what comes
+What Rusty Business™ cannot do yet. The [roadmap](ROADMAP.md) says what comes
 next.
 
 - **One kind of computer.** It runs on a Mac with Apple silicon. Windows has
@@ -200,7 +200,7 @@ promises no dates: a thing ships when its tests are green.
 
 ## License
 
-Rusty Business is open source under the [MIT License](LICENSE).
+Rusty Business™ is open source under the [MIT License](LICENSE).
 
 Rusty Business™ is a trademark of Brad Morrical. The license covers the code,
 not the name: [TRADEMARKS.md](TRADEMARKS.md) says how the name and the artwork

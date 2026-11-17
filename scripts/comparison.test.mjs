@@ -3,7 +3,7 @@
 // The section answers the ask that started it: "the readme should call out a
 // rusty.business vs ollama.  like why chose ours?". A page like that is worth
 // reading only while it is fair and true. So it has to say where Ollama is
-// ahead, each reason it gives for Rusty Business has to be kept by the code,
+// ahead, each reason it gives for Rusty Business™ has to be kept by the code,
 // and the README has to list what the app cannot do yet.
 //
 // The checks read the files as text, so nothing has to be installed to run
@@ -125,17 +125,17 @@ export function roadmapPointers(text) {
 const readme = read('README.md');
 const sections = sectionsOf(readme);
 const comparisons = sections.filter(
-  (each) => each.heading.includes('Rusty Business') && each.heading.includes('Ollama'),
+  (each) => each.heading.includes('Rusty Business™') && each.heading.includes('Ollama'),
 );
 const comparison = comparisons[0] ?? { heading: '', body: '' };
 const parts = sectionsOf(comparison.body, '###');
-const ours = parts.filter((each) => each.heading.includes('Rusty Business') && !each.heading.includes('Ollama'));
-const theirs = parts.filter((each) => each.heading.includes('Ollama') && !each.heading.includes('Rusty Business'));
+const ours = parts.filter((each) => each.heading.includes('Rusty Business™') && !each.heading.includes('Ollama'));
+const theirs = parts.filter((each) => each.heading.includes('Ollama') && !each.heading.includes('Rusty Business™'));
 const same = parts.filter((each) => /\bsame\b/i.test(each.heading));
 const limits = sections.find((each) => each.heading === 'Limits');
 
-test('the README compares Rusty Business with Ollama, right after the screenshots', () => {
-  assert.equal(comparisons.length, 1, 'README.md needs one "## " section that names both Rusty Business and Ollama');
+test('the README compares Rusty Business™ with Ollama, right after the screenshots', () => {
+  assert.equal(comparisons.length, 1, 'README.md needs one "## " section that names both Rusty Business™ and Ollama');
   const at = sections.indexOf(comparison);
   assert.equal(
     sections[at - 1]?.heading,
@@ -145,7 +145,7 @@ test('the README compares Rusty Business with Ollama, right after the screenshot
 });
 
 test('the comparison gives reasons to choose each one, and says what is the same', () => {
-  assert.equal(ours.length, 1, 'the comparison needs one "### " part for choosing Rusty Business');
+  assert.equal(ours.length, 1, 'the comparison needs one "### " part for choosing Rusty Business™');
   assert.equal(theirs.length, 1, 'the comparison needs one "### " part for choosing Ollama');
   assert.equal(same.length, 1, 'the comparison needs one "### " part for what is the same');
 
@@ -162,13 +162,13 @@ test('the comparison gives reasons to choose each one, and says what is the same
   assert.ok(itemsOf(same[0].body).length >= 2, 'the part on what is the same lists at least two things');
 });
 
-test('each reason to choose Ollama says where Rusty Business stands', () => {
+test('each reason to choose Ollama says where Rusty Business™ stands', () => {
   for (const reason of itemsOf(theirs[0]?.body ?? '')) {
     assert.match(reason.text, /\bOllama\b/, `this reason does not name Ollama: "${reason.text}"`);
     assert.match(
       reason.text,
-      /\bRusty Business\b/,
-      `this reason does not say where Rusty Business stands: "${reason.text}"`,
+      /\bRusty Business™/,
+      `this reason does not say where Rusty Business™ stands: "${reason.text}"`,
     );
   }
 });
@@ -179,7 +179,7 @@ test('the short list in the comparison is the list in the code', () => {
 
   const reasons = itemsOf(ours[0]?.body ?? '');
   const reason = reasons.find((each) => makers.some((maker) => each.text.includes(maker)));
-  assert.ok(reason, 'no reason to choose Rusty Business names the makers of its models');
+  assert.ok(reason, 'no reason to choose Rusty Business™ names the makers of its models');
   assert.match(
     reason.text,
     new RegExp(`\\b${COUNTS[makers.length]} models\\b`),
@@ -190,7 +190,7 @@ test('the short list in the comparison is the list in the code', () => {
   }
 });
 
-test('what the comparison says of Rusty Business is kept by a test in the Rust', () => {
+test('what the comparison says of Rusty Business™ is kept by a test in the Rust', () => {
   for (const { file, test: name } of KEPT_BY) {
     assert.match(read(file), new RegExp(`#\\[test\\]\\s+fn ${name}\\(`), `${file} has lost the test ${name}`);
   }
@@ -251,7 +251,7 @@ test("the comparison links only to Ollama's own site and to this repository", ()
 test('the comparison says whose name Ollama is, and that the two are not connected', () => {
   const text = comparison.body.replace(/\s+/g, ' ');
   assert.match(text, /Ollama is a trademark of its owner\./);
-  assert.match(text, /Rusty Business is not affiliated with Ollama\b/);
+  assert.match(text, /Rusty Business™ is not affiliated with Ollama\b/);
 });
 
 test('the comparison and the limits promise no dates', () => {

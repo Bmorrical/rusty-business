@@ -282,14 +282,14 @@ onBeforeUnmount(() => window.removeEventListener("focus", checkEngine));
 
 <template>
   <div v-if="!inApp" class="outside">
-    <h1>Rusty Business</h1>
-    <p>This page runs inside the Rusty Business window. Start it with <code>npm run tauri dev</code>.</p>
+    <h1>Rusty Business™</h1>
+    <p>This page runs inside the Rusty Business™ window. Start it with <code>npm run tauri dev</code>.</p>
   </div>
 
   <div v-else class="app">
     <aside class="side">
       <div class="side-head">
-        <h1>Rusty Business</h1>
+        <h1>Rusty Business™</h1>
         <button class="primary wide" type="button" :disabled="busy" @click="newChat">New chat</button>
       </div>
 

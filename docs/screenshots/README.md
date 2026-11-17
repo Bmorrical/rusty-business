@@ -61,7 +61,7 @@ These are pictures of the app's page, not captures of the app's window:
 
 ## The first picture
 
-[![The first picture of the Rusty Business window, wide and in the dark theme: one saved chat on the left, a long answer from Phi-4 about string theory in the middle, and the model picker at the top right](../chat-window.webp)](../chat-window.webp?raw=true)
+[![The first picture of the Rusty Business™ window, wide and in the dark theme: one saved chat on the left, a long answer from Phi-4 about string theory in the middle, and the model picker at the top right](../chat-window.webp)](../chat-window.webp?raw=true)
 
 The one capture of the app's real window, title bar and all. The window was
 wide when it was taken, so its words are small. It is kept here and shown

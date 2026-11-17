@@ -167,7 +167,7 @@ test('the banner is the first picture in the README, with words for it', () => {
 
 test('the banner describes itself and pulls nothing in from outside', () => {
   const svg = read(BANNER);
-  assert.match(svg, /<title[^>]*>Rusty Business<\/title>/);
+  assert.match(svg, /<title[^>]*>Rusty Business™<\/title>/);
 
   const described = /<desc[^>]*>([^<]+)<\/desc>/.exec(svg);
   assert.ok(described, 'the banner has no description');
