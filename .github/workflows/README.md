@@ -2,10 +2,11 @@
 
 What GitHub runs for this repository.
 
-| File         | When it runs                                                        | What it does                                             |
-| ------------ | ------------------------------------------------------------------- | -------------------------------------------------------- |
-| `gate.yml`   | Once on each push to `main`, on request, and when `deploy.yml` calls it | Runs every test this repository has                  |
-| `deploy.yml` | Only on request, only from `main`                                   | Runs the gate, then puts the API and worker images on GitHub's container registry |
+| File          | When it runs                                                        | What it does                                             |
+| ------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
+| `gate.yml`    | Once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
+| `deploy.yml`  | Only on request, only from `main`                                   | Runs the gate, then puts the API and worker images on GitHub's container registry |
+| `release.yml` | Only on request, only from `main`                                   | Runs the gate, then builds the Mac app on a Mac and puts it on a GitHub release, where the README's download link finds it |
 
 ## The rule
 
@@ -51,6 +52,30 @@ in.
 `scripts/publish-images.test.mjs` checks what it asks Docker to do, with a
 stand-in Docker, so nothing is built or pushed by a test.
 
+## What Release publishes
+
+Release puts the Mac app on a GitHub release named for its version, such as
+`v0.1.0`: `Rusty-Business-mac-arm64.dmg`, with the model engine inside, and
+its checksum. It is marked as the newest release, which is the one the
+README's download link finds.
+
+| Job       | Machine                  | What it does                                                   |
+| --------- | ------------------------ | -------------------------------------------------------------- |
+| `gate`    | as above                 | The whole gate. Nothing below starts until it is green         |
+| `build`   | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the next job |
+| `publish` | Linux                    | Checks the checksum and that the app's three version numbers agree, then makes the release and its tag at this commit |
+
+A release that is out is never changed. When the version's tag is already
+on GitHub, the run stops, so publishing again means raising the version in
+`apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, and
+`apps/desktop/src-tauri/Cargo.toml`.
+
+To run it: the Actions tab, then Release, then Run workflow, on `main`.
+
+`scripts/release.sh` makes the release, and `scripts/release.test.mjs`
+checks what it asks GitHub to do, with a stand-in `gh`, so nothing is
+released by a test.
+
 ## Pull requests
 
 The gate does not run on pull request pushes. Before you push, run:
@@ -70,9 +95,10 @@ The gate then judges what actually landed on `main`.
 ## How the workflows are kept safe
 
 - Each workflow can only read the repository (`permissions: contents: read`).
-  Deploy's `build` and `publish` jobs are the one exception: they may also
-  write packages, which is how they push the images. No job may write
-  anything else.
+  There are two exceptions. Deploy's `build` and `publish` jobs may also
+  write packages, which is how they push the images. Release's `publish`
+  job may write the repository's contents, which is how it makes the
+  release and its tag. No job may write anything else.
 - Every action is pinned to a full commit, with its version in a comment
   beside it. A tag can be moved; a commit cannot.
 - No workflow uses `pull_request_target`.
@@ -80,11 +106,13 @@ The gate then judges what actually landed on `main`.
 - No `${{ }}` expression is written into a command. A value reaches a
   command through `env:`, so it is never read as shell.
 - The registry token reaches Docker only on its standard input, never on a
-  command line, and no other secret is used.
+  command line. In Release, the token reaches `gh` only through the release
+  step's own `env:`. No other secret is used.
 
 `scripts/workflows.test.mjs` checks these rules, that every job in
-`deploy.yml` waits for the gate, and that Deploy builds each kind of image on
-its own kind of computer before it joins them. It runs with
+`deploy.yml` and `release.yml` waits for the gate, that Deploy builds each
+kind of image on its own kind of computer before it joins them, and that
+Release builds the Mac app on a Mac with `make dmg`. It runs with
 `make test-repo`, so the gate checks its own rules.
 
 There is no README directly in `.github`: GitHub would show it as the

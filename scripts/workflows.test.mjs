@@ -1,5 +1,6 @@
 // The rules for the GitHub workflows, checked on every test run. The one
-// they all serve: nothing deploys until the gate is green.
+// they all serve: nothing deploys and nothing is released until the gate is
+// green.
 //
 // The checks read the files as text. That is enough for these rules, and
 // it means nothing has to be installed to run them.
@@ -94,14 +95,29 @@ export function runsOf(text) {
   return runs;
 }
 
-// Deploy's two image jobs may also write packages: they push the images. No
-// other job, in any workflow, sets permissions of its own.
-const WRITERS = new Map([['deploy.yml', ['build', 'publish']]]);
+// The jobs that may write, and what each may write. Deploy's two image jobs
+// may also write packages: they push the images. Release's last job may
+// write the repository's contents, and nothing else: it makes the release
+// and its tag. No other job, in any workflow, sets permissions of its own.
+const WRITERS = new Map([
+  ['deploy.yml', { jobs: ['build', 'publish'], permissions: ['contents: read', 'packages: write'] }],
+  ['release.yml', { jobs: ['publish'], permissions: ['contents: write'] }],
+]);
+
+// The one secret is GitHub's own token, and each workflow has one line that
+// may hand it on: to Docker's sign-in in Deploy, and to gh in Release.
+const TOKEN_LINES = new Map([
+  ['deploy.yml', /^ {10}REGISTRY_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/],
+  ['release.yml', /^ {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/],
+]);
 
 // The one line that signs in to the registry, word for word. The token
 // reaches Docker on its standard input, never on a command line.
 const SIGN_IN =
   'run: printf \'%s\' "${REGISTRY_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin';
+
+// The .dmg's name, as `make dmg` gives it.
+const DMG = /^DMG=(\S+)$/m.exec(readFileSync(new URL('mac-app.sh', import.meta.url), 'utf8'))?.[1];
 
 function workflow(name) {
   const found = workflows.find((each) => each.name === name);
@@ -109,10 +125,10 @@ function workflow(name) {
   return found.text;
 }
 
-test('the gate and the deploy workflow are both here', () => {
+test('the gate, the deploy workflow, and the release workflow are all here', () => {
   assert.deepEqual(
     workflows.map((each) => each.name),
-    ['deploy.yml', 'gate.yml'],
+    ['deploy.yml', 'gate.yml', 'release.yml'],
   );
 });
 
@@ -129,12 +145,12 @@ test('every action is pinned to a full commit', () => {
   }
 });
 
-test('every workflow can only read the repository, and only the image jobs write, and only packages', () => {
+test('every workflow can only read the repository, and only the jobs listed write, and only what is listed', () => {
   for (const { name, text } of workflows) {
     const plain = withoutComments(text);
     assert.match(plain, /^permissions:\n {2}contents: read\n(?! )/m, `${name}: top-level permissions`);
 
-    const writers = WRITERS.get(name) ?? [];
+    const { jobs: writers, permissions } = WRITERS.get(name) ?? { jobs: [], permissions: [] };
     const setting = jobsOf(text).filter((job) => jobPermissions(job.body) !== null);
     assert.deepEqual(
       setting.map((job) => job.id),
@@ -142,21 +158,17 @@ test('every workflow can only read the repository, and only the image jobs write
       `${name}: the jobs that set their own permissions`,
     );
     for (const job of setting) {
-      assert.deepEqual(
-        jobPermissions(job.body),
-        ['contents: read', 'packages: write'],
-        `${name}: the ${job.id} job's permissions`,
-      );
+      assert.deepEqual(jobPermissions(job.body), permissions, `${name}: the ${job.id} job's permissions`);
     }
     assert.equal(
       plain.match(/^\s*permissions:/gm).length,
       1 + writers.length,
-      `${name}: permissions set somewhere other than the top and the image jobs`,
+      `${name}: permissions set somewhere other than the top and the jobs listed`,
     );
     assert.equal(
       (plain.match(/write/g) ?? []).length,
       writers.length,
-      `${name}: write access given anywhere but packages in the image jobs`,
+      `${name}: write access given anywhere but the jobs listed`,
     );
   }
 });
@@ -188,20 +200,33 @@ test('every checkout keeps no credentials behind', () => {
   }
 });
 
-test('the registry token reaches Docker only on its standard input', () => {
+test('the token reaches Docker only on its standard input, and gh only from its own step', () => {
   for (const { name, text } of workflows) {
     const plain = withoutComments(text);
+    const allowed = TOKEN_LINES.get(name) ?? /^(?!)/;
     for (const [line] of plain.matchAll(/^.*secrets\..*$/gm)) {
-      assert.match(
-        line,
-        /^ {10}REGISTRY_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/,
-        `${name}: a secret used anywhere but the registry sign-in: ${line.trim()}`,
-      );
+      assert.match(line, allowed, `${name}: a secret used anywhere but its one place: ${line.trim()}`);
     }
+    assert.doesNotMatch(plain, /github\.token/, `${name}: the token reached another way than secrets`);
     assert.doesNotMatch(plain, /--password(?!-stdin)|\s-p\s/, `${name}: a password on a command line`);
     assert.doesNotMatch(plain, /^\s+REGISTRY:/m, `${name}: the images sent to a registry other than GitHub's`);
+  }
 
-    for (const id of WRITERS.get(name) ?? []) {
+  const release = withoutComments(workflow('release.yml'));
+  assert.equal((release.match(/secrets\./g) ?? []).length, 1, 'release.yml: the token is handed on more than once');
+  const publish = jobsOf(workflow('release.yml')).find((each) => each.id === 'publish');
+  assert.match(
+    publish?.body ?? '',
+    /^ {6}- name: .*\n {8}env:\n {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}\n {8}run: scripts\/release\.sh publish dist\n/m,
+    "release.yml: the token goes anywhere but the release step's own env",
+  );
+  for (const other of ['deploy.yml', 'gate.yml']) {
+    assert.doesNotMatch(workflow(other), /GH_TOKEN/, `${other}: the token reaches gh`);
+  }
+
+  for (const name of ['deploy.yml']) {
+    const text = workflow(name);
+    for (const id of WRITERS.get(name).jobs) {
       const job = jobsOf(text).find((each) => each.id === id);
       const signIn = job.body.indexOf(SIGN_IN);
       assert.ok(signIn > 0, `${name}: the ${id} job does not sign in the one way allowed`);
@@ -269,26 +294,71 @@ test('the gate is green only when every other job is green', () => {
   assert.match(gate.body, /needs\.\*\.result/);
 });
 
-test('a deploy starts only on request, and every job waits for the gate', () => {
-  const text = workflow('deploy.yml');
-  assert.deepEqual(triggersOf(text), ['workflow_dispatch']);
+test('a deploy or a release starts only on request, from main, and every job waits for the gate', () => {
+  for (const name of ['deploy.yml', 'release.yml']) {
+    const text = workflow(name);
+    assert.deepEqual(triggersOf(text), ['workflow_dispatch'], `${name}: what starts it`);
+
+    const jobs = jobsOf(text);
+    const gate = jobs.find((job) => job.id === 'gate');
+    assert.ok(gate, `${name} has no gate job`);
+    assert.match(gate.body, /^ {4}uses: \.\/\.github\/workflows\/gate\.yml$/m, `${name}: the gate job`);
+    assert.match(gate.body, /^ {4}if: github\.ref == 'refs\/heads\/main'$/m, `${name}: the gate runs on other branches`);
+
+    const others = jobs.filter((job) => job.id !== 'gate');
+    assert.ok(others.length > 0, `${name} has no job but the gate`);
+    for (const job of others) {
+      assert.match(
+        job.body,
+        /^ {4}needs: (gate|\[(.*, )?gate(, .*)?\])$/m,
+        `${name}: the ${job.id} job does not wait for the gate`,
+      );
+      assert.doesNotMatch(job.body, /^ {4}if: /m, `${name}: the ${job.id} job may run past a red gate`);
+    }
+  }
+});
+
+// Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
+// read me and install and go, one click ready." Release puts the .dmg where
+// the README's link finds it, after a green gate.
+test('Release builds the Mac app on a Mac with the command a person runs, and only its last job publishes', () => {
+  const text = workflow('release.yml');
+  assert.match(withoutComments(text), /^concurrency:\n {2}group: release\n {2}cancel-in-progress: false\n/m);
 
   const jobs = jobsOf(text);
-  const gate = jobs.find((job) => job.id === 'gate');
-  assert.ok(gate, 'deploy.yml has no gate job');
-  assert.match(gate.body, /^ {4}uses: \.\/\.github\/workflows\/gate\.yml$/m);
-  assert.match(gate.body, /^ {4}if: github\.ref == 'refs\/heads\/main'$/m);
+  assert.deepEqual(
+    jobs.map((job) => job.id),
+    ['gate', 'build', 'publish'],
+  );
+  const [, build, publish] = jobs;
+  assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
 
-  const others = jobs.filter((job) => job.id !== 'gate');
-  assert.ok(others.length > 0, 'deploy.yml has no deploy job');
-  for (const job of others) {
-    assert.match(
-      job.body,
-      /^ {4}needs: (gate|\[(.*, )?gate(, .*)?\])$/m,
-      `the ${job.id} job does not wait for the gate`,
-    );
-    assert.doesNotMatch(job.body, /^ {4}if: .*always\(\)/m, `the ${job.id} job runs past a red gate`);
-  }
+  // macos-15 is GitHub's Mac with Apple silicon, the only kind the app is for.
+  assert.match(build.body, /^ {4}needs: gate$/m);
+  assert.match(build.body, /^ {4}runs-on: macos-15$/m);
+  assert.deepEqual(runsOf(build.body), ['make dmg'], 'the build job runs anything but make dmg');
+  const folder = 'apps/desktop/src-tauri/target/mac';
+  assert.ok(
+    build.body.includes(
+      [
+        '        with:',
+        '          name: mac-dmg',
+        '          path: |',
+        `            ${folder}/${DMG}`,
+        `            ${folder}/${DMG}.sha256`,
+        '          if-no-files-found: error',
+      ].join('\n'),
+    ),
+    'the build job does not keep exactly the .dmg and its checksum, or goes on without them',
+  );
+
+  assert.match(publish.body, /^ {4}needs: \[gate, build\]$/m);
+  assert.match(publish.body, /^ {4}runs-on: ubuntu-24\.04$/m);
+  assert.ok(
+    publish.body.includes(['        with:', '          name: mac-dmg', '          path: dist\n'].join('\n')),
+    'the publish job does not take the build job\'s files into dist',
+  );
+  assert.deepEqual(runsOf(publish.body), ['scripts/release.sh publish dist'], 'the publish job runs anything but the release script');
 });
 
 test('jobs and triggers are read from the text, and comments are ignored', () => {
