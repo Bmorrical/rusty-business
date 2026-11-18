@@ -5,6 +5,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
   answersLine,
+  canGrade,
   canRemove,
   chatModels,
   checkedLine,
@@ -17,7 +18,13 @@ import {
   formatSize,
   fullest,
   gateLine,
+  GRADE_ROLE,
+  gradedAnswers,
+  gradeMessages,
+  graderFor,
+  gradesLine,
   groups,
+  isOutside,
   keptPicks,
   listedLine,
   looksLikePath,
@@ -29,6 +36,7 @@ import {
   pickedMakers,
   quickest,
   requestMessages,
+  roundGrades,
   savedTurn,
   shouldStart,
   showsStartHint,
@@ -83,6 +91,9 @@ const outside = ref(null);
 const outsideBusy = ref("");
 const outsideNote = ref("");
 const outsidePath = ref("");
+// The model picked in Settings to grade the answers: its id, "" for no
+// grading, or null until one is picked.
+const graderPick = ref(rememberedGrader());
 const settingsOpen = ref(false);
 const settingsTitle = ref(null);
 let updateTimer = 0;
@@ -104,6 +115,20 @@ const chosen = computed(() => models.value.filter((entry) => picked.value.includ
 const many = computed(() => chosen.value.length > 1);
 const top = computed(() => fullest(current.value.messages, chosen.value));
 const rounds = computed(() => groups(current.value.messages));
+// Each round's grades and summary, by the round's key.
+const gradesFor = computed(() => new Map(rounds.value.map((round) => [round.key, roundGrades(round, modelName)])));
+// The model that grades the answers, of the models on hand, or null.
+const grader = computed(() => graderFor(graderPick.value, models.value));
+// What the list in Settings shows picked.
+const graderChoice = computed({
+  get: () => graderPick.value ?? grader.value?.id ?? "",
+  set: (id) => {
+    graderPick.value = id;
+    rememberGrader(id);
+  },
+});
+// A grader picked that is not on hand now, such as Grok with the gate off.
+const graderAway = computed(() => (graderPick.value && !grader.value ? graderPick.value : ""));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && chosen.value.length > 0);
 // With Grok to ask, the first run's downloads wait in Settings.
 const offers = computed(() => (outsideModels.value.length ? [] : firstRunOffers(engine.value)));
@@ -127,6 +152,22 @@ function remembered() {
 function remember(ids) {
   try {
     window.localStorage.setItem("models", JSON.stringify(ids));
+  } catch {
+    // The choice just is not kept for next time.
+  }
+}
+
+function rememberedGrader() {
+  try {
+    return window.localStorage.getItem("grader");
+  } catch {
+    return null;
+  }
+}
+
+function rememberGrader(id) {
+  try {
+    window.localStorage.setItem("grader", id);
   } catch {
     // The choice just is not kept for next time.
   }
@@ -550,6 +591,15 @@ async function send() {
   }
   // A reply that never began is not kept.
   session.messages = session.messages.filter((turn) => !replies.includes(turn) || turn.content || turn.thinking);
+  // Once every answer is in, the grader grades them. After Stop, it does not.
+  const judge = grader.value;
+  if (!stopAll && judge) {
+    const round = groups(session.messages).at(-1);
+    if (canGrade(round)) {
+      const error = await grade(session, round, judge);
+      if (error) failed.push(error);
+    }
+  }
   busy.value = false;
   if (failed.length) {
     problem.value = failed.join("\n");
@@ -597,6 +647,45 @@ async function ask(reply, entry, messages) {
     reply.pending = false;
     chatId = "";
   }
+}
+
+/**
+ * "The results are graded and summarized by grok after all the results are
+ * in", and "I should be able to pick which engine does the grading". The
+ * grader reads the question and the answers, numbered and without the models'
+ * names, and its grade is kept with them. A grade that failed or was stopped
+ * part way, or one that never began, is not kept. Gives back why it failed,
+ * or nothing.
+ */
+async function grade(session, round, judge) {
+  const answers = gradedAnswers(round).map((turn) => turn.content);
+  const messages = gradeMessages(round.question?.content, answers, judge.context);
+  const at = session.messages.indexOf(round.answers.at(-1)) + 1;
+  session.messages.splice(at, 0, { role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true });
+  const reply = session.messages[at];
+  scrollDown();
+  const error = await ask(reply, judge, messages);
+  if (error || reply.stopped || !reply.content.trim()) {
+    session.messages = session.messages.filter((turn) => turn !== reply);
+  }
+  return error ? `${judge.name} could not grade the answers: ${error}` : "";
+}
+
+/** Grades a round that has none yet, such as one asked before a grader was picked. */
+async function gradeRound(round) {
+  const judge = grader.value;
+  if (busy.value || !judge || !canGrade(round)) return;
+  const session = current.value;
+  problem.value = "";
+  busy.value = true;
+  stopAll = false;
+  const error = await grade(session, round, judge);
+  busy.value = false;
+  if (error) {
+    problem.value = error;
+    checkEngine();
+  }
+  await persist();
 }
 
 function stop() {
@@ -661,6 +750,16 @@ function replyNote(turn, named = true) {
   if (turn.cutShort) parts.push("reached the length limit");
   else if (turn.stopped) parts.push("stopped");
   return parts.filter(Boolean).join(" · ");
+}
+
+/** The grade an answer got, or null. */
+function gradeOf(round, index) {
+  return gradesFor.value.get(round.key)?.grades[index] ?? null;
+}
+
+/** Under a grade: that it was graded without names, and its counts. */
+function gradeNote(turn) {
+  return ["Graded without the models' names", replyNote(turn, false)].filter(Boolean).join(" · ");
 }
 
 onMounted(async () => {
@@ -926,6 +1025,33 @@ onBeforeUnmount(() => {
             </form>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+
+          <h3 class="gap-above">Grading</h3>
+          <p class="quiet">
+            When several models answer, one model grades each answer from A to F once all are in, and sums them up. It
+            reads the question and the answers, numbered and without the models' names.
+          </p>
+          <div class="grader-pick">
+            <label for="grader" class="small">Grades the answers</label>
+            <select id="grader" v-model="graderChoice" :disabled="busy">
+              <option value="">No grading</option>
+              <option v-for="entry in models" :key="entry.id" :value="entry.id">
+                {{ entry.name }} · {{ chipDetail(entry) }}
+              </option>
+              <option v-if="graderAway" :value="graderAway" disabled>
+                {{ modelName(graderAway) || "A model not on hand" }} · not on hand
+              </option>
+            </select>
+          </div>
+          <p v-if="graderPick === null" class="quiet small">Until you pick one, Grok grades while it is on hand.</p>
+          <p v-if="graderAway" class="quiet small">
+            The model picked is not on hand, so the answers are not graded.
+            <template v-if="isOutside(graderAway)">Grok is on hand only while the gate is on.</template>
+          </p>
+          <p v-if="grader && isOutside(grader.id)" class="small">
+            Grok grades on xAI's computers, so the question and every answer, the answers from this computer too, go to
+            xAI each time it grades. That happens only while the gate is on.
+          </p>
         </div>
       </section>
       <header v-show="!settingsOpen" class="bar">
@@ -1011,6 +1137,7 @@ onBeforeUnmount(() => {
             <p v-if="chosen.length" class="quiet">{{ answersLine(chosen) }}</p>
             <p v-else-if="starting" class="quiet">Starting the engine...</p>
             <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
+            <p v-if="many && grader" class="quiet">{{ gradesLine(grader) }}</p>
           </template>
         </div>
 
@@ -1021,6 +1148,10 @@ onBeforeUnmount(() => {
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
             <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
               <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <p v-if="gradeOf(round, index)" class="grade small">
+                <span class="grade-letter"><span class="sr-only">Grade </span>{{ gradeOf(round, index).letter }}</span>
+                <span>{{ gradeOf(round, index).why }}</span>
+              </p>
               <details v-if="turn.thinking" class="thinking">
                 <summary>{{ turn.pending && !turn.content ? "Thinking..." : "Thinking" }}</summary>
                 <p>{{ turn.thinking }}</p>
@@ -1031,6 +1162,19 @@ onBeforeUnmount(() => {
               <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
             </section>
           </div>
+          <section v-if="round.grade" class="grade-card">
+            <h3 class="card-head">Summary, by {{ modelName(round.grade.model) || "a model not on hand" }}</h3>
+            <details v-if="round.grade.thinking" class="thinking">
+              <summary>{{ round.grade.pending && !round.grade.content ? "Thinking..." : "Thinking" }}</summary>
+              <p>{{ round.grade.thinking }}</p>
+            </details>
+            <p v-if="gradesFor.get(round.key)?.summary" class="answer">{{ gradesFor.get(round.key).summary }}</p>
+            <p v-else-if="round.grade.pending" class="quiet waiting">Grading the answers...</p>
+            <p v-if="!round.grade.pending" class="quiet small note">{{ gradeNote(round.grade) }}</p>
+          </section>
+          <p v-else-if="!busy && grader && canGrade(round)" class="grade-ask">
+            <button type="button" @click="gradeRound(round)">Grade with {{ grader.name }}</button>
+          </p>
         </article>
       </section>
 
@@ -1645,6 +1789,19 @@ button.switch {
   gap: 0.5rem;
 }
 
+.grader-pick {
+  display: grid;
+  gap: 0.3rem;
+  max-width: 26rem;
+}
+
+.grader-pick select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  padding: 0.4rem 0.6rem;
+}
+
 .key-path input {
   flex: 1;
   min-width: 0;
@@ -1724,6 +1881,58 @@ button.switch {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+/* An answer's grade, under its model's name. */
+.grade {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.grade-letter {
+  flex: none;
+  min-width: 1.7rem;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The grader's summary, under the answers it graded. */
+.grade-card {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 72rem;
+  margin: 0 auto 1.1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.grade-card .note {
+  margin: 0;
+}
+
+.grade-ask {
+  max-width: 72rem;
+  margin: -0.4rem auto 1.1rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .bubble,

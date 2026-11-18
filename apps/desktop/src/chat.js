@@ -17,17 +17,25 @@ export function titleFrom(text) {
 }
 
 /**
- * The chat in rounds: each question, and the answers that came after it, one
- * for each model asked. The turns are the chat's own, not copies, so a reply
- * that is still arriving shows as it grows.
+ * The role of the turn that grades a question's answers and sums them up. It
+ * is the chat's own record, never sent to a model as part of the chat.
+ */
+export const GRADE_ROLE = "grade";
+
+/**
+ * The chat in rounds: each question, the answers that came after it, one for
+ * each model asked, and the grade of those answers when there is one. The
+ * turns are the chat's own, not copies, so a reply that is still arriving
+ * shows as it grows.
  */
 export function groups(turns) {
   const rounds = [];
   for (const [index, turn] of (turns ?? []).entries()) {
     if (turn.role === "user" || !rounds.length) {
-      rounds.push({ key: index, question: turn.role === "user" ? turn : null, answers: [] });
+      rounds.push({ key: index, question: turn.role === "user" ? turn : null, answers: [], grade: null });
     }
-    if (turn.role !== "user") rounds.at(-1).answers.push(turn);
+    if (turn.role === GRADE_ROLE) rounds.at(-1).grade ??= turn;
+    else if (turn.role !== "user") rounds.at(-1).answers.push(turn);
   }
   return rounds;
 }
@@ -407,4 +415,163 @@ export function outsideModelsLine(status) {
   const names = (status?.models ?? []).map((entry) => entry.name);
   if (!names.length) return `No ${status?.name ?? "Grok"} models found yet.`;
   return `${status.name}'s models: ${namesLine(names)}.`;
+}
+
+// Grading: once every answer to a question is in, one model grades each and
+// sums them up.
+
+/** The answers a round's grade numbers, in order: each answer with words in it. */
+export function gradedAnswers(round) {
+  return (round?.answers ?? []).filter((turn) => turn.role === "assistant" && String(turn.content ?? "").trim());
+}
+
+/** True when a round has answers from several models to grade, and no grade yet. */
+export function canGrade(round) {
+  return Boolean(round) && !round.grade && gradedAnswers(round).length > 1;
+}
+
+/** What the grader is told, before the question and the answers. */
+export const GRADE_INSTRUCTIONS = [
+  "You grade answers to one question. The answers are numbered, and the names of the models that wrote them are left out.",
+  "For each answer, write one line: Answer, its number, a colon, a letter grade from A to F, a period, and one short sentence on why. For example: Answer 1: B. Right, but it leaves out the second step.",
+  "Then write Summary, a colon, and a short summary: what the answers agree on, where they differ, and which is best.",
+  "An answer that ends in [cut to fit] went on longer; grade what is shown.",
+].join(" ");
+
+/** What ends an answer cut short to fit the grader's window. */
+export const CUT_MARK = "[cut to fit]";
+
+// Tokens kept free in the grader's window, for its instructions and its reply.
+const GRADE_RESERVE = 5120;
+// Characters to a token, counted low so an answer cut to fit does fit.
+const CHARS_PER_TOKEN = 3;
+// The fewest characters of an answer the grader always reads.
+const GRADE_FLOOR = 600;
+
+/**
+ * The characters of each answer the grader can read: all of each when its
+ * window is not known, or an even share of the room the question leaves.
+ */
+export function answerRoom(count, context, asked = 0) {
+  if (!context || !count) return Infinity;
+  const room = Math.floor(((context - GRADE_RESERVE) * CHARS_PER_TOKEN - asked) / count);
+  return Math.max(GRADE_FLOOR, room);
+}
+
+function cutToFit(text, room) {
+  const characters = Array.from(text);
+  if (characters.length <= room) return text;
+  return `${characters.slice(0, room).join("").trimEnd()}\n${CUT_MARK}`;
+}
+
+/**
+ * What the grader is sent: the question and each answer, numbered. Only the
+ * answers' words are given, so no model's name reaches the grader, and each
+ * answer is cut to fit the grader's window, `context`.
+ */
+export function gradeMessages(question, answers, context) {
+  const asked = String(question ?? "").trim();
+  const texts = (answers ?? []).map((text) => String(text ?? "").trim());
+  const room = answerRoom(texts.length, context, asked.length);
+  const parts = [`Question:\n${asked}`, ...texts.map((text, index) => `Answer ${index + 1}:\n${cutToFit(text, room)}`)];
+  return [
+    { role: "system", content: GRADE_INSTRUCTIONS },
+    { role: "user", content: parts.join("\n\n") },
+  ];
+}
+
+// "Answer 2: B. Why.", with or without bold, a bullet, a list number, or the
+// word Grade. The letter is a capital, so "Answer 1: a clear one" is not read
+// as an A, and "Answer 1: Accurate" is not read as one either.
+const GRADE_LINE = /^(?:[-•*]\s*|\d+[.)]\s+)?(?:[Aa]nswer|ANSWER)\s+#?(\d+)\s*[:.()\-–—]?\s*(?:(?:[Gg]rade|GRADE)\s*:?\s*)?([A-F][+-]?)(?![A-Za-z0-9])[\s.:,)\-–—]*(.*)$/;
+const SUMMARY_LINE = /^(?:#+\s*)?(?:[Ss]ummary|SUMMARY)\b\s*[:.\-–—]?\s*(.*)$/;
+
+/**
+ * The grader's reply, read: a grade and its reason for each of `count`
+ * answers, null where none was given, and the summary. Everything after the
+ * Summary line is the summary. A reply with no Summary line keeps whatever is
+ * not a grade as its summary, so nothing the grader said is lost.
+ */
+export function parseGrades(text, count) {
+  const grades = Array.from({ length: Math.max(0, count ?? 0) }, () => null);
+  const summary = [];
+  const other = [];
+  let summed = false;
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.replace(/\*\*|__/g, "").trim();
+    if (summed) {
+      summary.push(line);
+      continue;
+    }
+    const graded = GRADE_LINE.exec(line);
+    if (graded) {
+      const at = Number(graded[1]) - 1;
+      // The first grade given an answer stands; a number with no answer is left out.
+      if (at >= 0 && at < grades.length && !grades[at]) grades[at] = { letter: graded[2], why: graded[3].trim() };
+      continue;
+    }
+    const heading = SUMMARY_LINE.exec(line);
+    if (heading) {
+      summed = true;
+      summary.push(heading[1]);
+    } else {
+      other.push(line);
+    }
+  }
+  const said = (summed ? summary : other).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { grades, summary: said, summed };
+}
+
+/**
+ * A round's grades, one for each of its answers in order (null for an answer
+ * not graded), and its summary. While the grade is still arriving, the
+ * summary shows once its Summary line has come. `nameOf` gives a model's
+ * name, so where the grader wrote "Answer 2", the page shows
+ * "Answer 2 (gpt-oss 20B)".
+ */
+export function roundGrades(round, nameOf) {
+  const answers = round?.answers ?? [];
+  if (!round?.grade) return { grades: answers.map(() => null), summary: "" };
+  const graded = gradedAnswers(round);
+  const read = parseGrades(round.grade.content, graded.length);
+  const named = (text) => nameAnswers(text, graded, nameOf);
+  const summary = round.grade.pending && !read.summed ? "" : named(read.summary);
+  const grades = answers.map((turn) => {
+    const grade = read.grades[graded.indexOf(turn)];
+    return grade ? { ...grade, why: named(grade.why) } : null;
+  });
+  return { grades, summary };
+}
+
+// "Answer 2", not yet followed by a name in brackets.
+const ANSWER_NUMBER = /\b(?:[Aa]nswer|ANSWER)\s+#?(\d+)\b(?!\s*\()/g;
+
+/**
+ * The grader's words, with each answer's number followed by the name of the
+ * model that wrote it. The grader never had the names; only the page adds
+ * them, once the grade is in. A number with no answer is left as it is.
+ */
+export function nameAnswers(text, graded, nameOf) {
+  if (!nameOf) return text;
+  return String(text ?? "").replace(ANSWER_NUMBER, (whole, number) => {
+    const turn = graded[Number(number) - 1];
+    const name = turn ? nameOf(turn.model) : "";
+    return name ? `${whole} (${name})` : whole;
+  });
+}
+
+/**
+ * The model that grades, of the models on hand: the one picked in Settings,
+ * `saved`, or, until one is picked, Grok's first model. "" picked means no
+ * grading. Null when no model grades.
+ */
+export function graderFor(saved, models) {
+  const list = models ?? [];
+  if (saved === null || saved === undefined) return list.find((entry) => isOutside(entry.id)) ?? null;
+  return list.find((entry) => entry.id === saved) ?? null;
+}
+
+/** "Grok 4.7 grades the answers once all are in." */
+export function gradesLine(grader) {
+  return `${grader.name} grades the answers once all are in.`;
 }

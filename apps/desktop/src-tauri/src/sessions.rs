@@ -339,6 +339,33 @@ mod tests {
         assert!(latest_answers(&[]).is_empty());
     }
 
+    // Brad, 2026-11-17: "The results are graded and summarized by grok after
+    // all the results are in".
+    #[test]
+    fn a_grade_is_kept_and_names_no_model_as_an_answer() {
+        let store = scratch_store();
+        let mut session = chat("Nails");
+        session.messages.push(Turn { role: "user".to_string(), content: "Why do nails rust?".to_string(), ..Turn::default() });
+        session.messages.push(answer("mlx-community/phi-4-4bit", "Oxygen."));
+        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Water and air."));
+        session.messages.push(Turn {
+            role: "grade".to_string(),
+            content: "Answer 1: B. Short.\nAnswer 2: A. Clear.\nSummary: Both are right.".to_string(),
+            thinking: Some("Read both.".to_string()),
+            model: Some("xai:grok-4".to_string()),
+            ..Turn::default()
+        });
+        let saved = store.save(session).unwrap();
+        let loaded = store.load(&saved.id).unwrap();
+        assert_eq!(loaded, saved, "the grade does not come back whole");
+        assert_eq!(loaded.messages.last().map(|turn| turn.role.as_str()), Some("grade"));
+        assert_eq!(
+            store.list().unwrap()[0].models,
+            ["mlx-community/phi-4-4bit", "mlx-community/gpt-oss-20b-MXFP4-Q8"],
+            "the model that graded is named as one that answered",
+        );
+    }
+
     #[test]
     fn an_empty_title_gets_a_name_and_a_long_one_is_cut() {
         let store = scratch_store();
