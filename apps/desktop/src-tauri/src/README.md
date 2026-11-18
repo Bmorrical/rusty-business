@@ -14,7 +14,7 @@ The desktop app's Rust code.
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
 | `outside.rs`  | The engines outside this computer, Grok first: keeps the path to the person's xAI key, never the key, and asks xAI's API through the gate |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
-| `sessions.rs` | Saved chats: one JSON file each. Trash moves a file; nothing deletes |
+| `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
 
 Three rules live in `gate.rs`, each with tests:

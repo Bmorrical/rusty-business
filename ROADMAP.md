@@ -14,8 +14,6 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **Grading and a summary.** Once every answer is in, an engine you pick
-  grades them and sums them up.
 - **An installers page.** One click installs a model to run here, or sets up
   Claude or OpenAI's models.
 
@@ -95,3 +93,8 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   https only to xAI's API, and only while the outbound gate is on. Grok
   answers alone or as one of several, and a chip at the top says it is
   asked online.
+- **Grading and a summary.** Once every answer is in, one model grades each
+  from A to F and sums them up, reading the question and the answers,
+  numbered and without the models' names. Grok grades until another model is
+  picked in Settings, where No grading turns it off. A round not graded yet
+  has a button to grade it.
