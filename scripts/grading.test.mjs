@@ -9,8 +9,8 @@
 // before every answer is in, runs after Stop, sends the models' names or
 // anything but the question and the answers, goes anywhere but the app's own
 // way of asking a model, keeps a grade that failed or was stopped, loses the
-// pick in Settings or its line on what goes to xAI, keeps something new in the
-// page's storage, or when Rust loses the test that keeps a grade apart from
+// pick in Settings or its line on what goes to an outside grader's maker,
+// keeps something new in the page's storage, or when Rust loses the test that keeps a grade apart from
 // the answers.
 //
 // The checks read the files as text, so nothing has to be installed to run
@@ -77,7 +77,7 @@ test('the grader reads the question and the answers alone, and asks the way ever
   assert.ok(!/\bmodel|\bname/.test(messages), "the grader can read the models' names");
 });
 
-test('Settings lets the user pick the grader, or none, and says what goes to xAI', () => {
+test("Settings lets the user pick the grader, or none, and says what goes to an outside grader's maker", () => {
   const app = read(APP);
   const start = app.indexOf('<h3 class="gap-above">Grading</h3>');
   assert.ok(start >= 0, 'Settings has lost the pick of the grader');
@@ -88,12 +88,12 @@ test('Settings lets the user pick the grader, or none, and says what goes to xAI
     '<option value="">No grading</option>',
     'v-for="entry in models"',
     'numbered and without the models\' names',
-    'Until you pick one, Grok grades while it is on hand.',
+    'Until you pick one, the first outside engine on hand grades, in the order the Installers page lists them.',
     'The model picked is not on hand, so the answers are not graded.',
-    'Grok is on hand only while the gate is on.',
+    'Outside engines are on hand only while the gate is on.',
     'v-if="grader && isOutside(grader.id)"',
-    'the answers from this computer too, go to',
-    'xAI each time it grades. That happens only while the gate is on.',
+    "{{ grader.name }} grades on {{ grader.maker }}'s computers, so the question and every answer, the answers",
+    'from this computer too, go to {{ grader.maker }} each time it grades. That happens only while the gate is on.',
   ]) {
     assert.ok(settings.includes(part), `Settings' grading has lost ${part}`);
   }

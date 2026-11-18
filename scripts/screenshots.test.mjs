@@ -34,10 +34,10 @@ import {
 } from '../apps/desktop/src/chat.js';
 import {
   FIRST_MAKER,
-  GROK_NOT_ADDED,
   HEIGHT,
   NOT_STARTED,
   NO_MODEL,
+  OUTSIDE_NOT_ADDED,
   PAGE_BUTTONS,
   SCALE,
   SCENES,
@@ -692,15 +692,21 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   // The outbound gate is off, as on a first run, and the pictures leave it so.
   assert.equal(await invoke('gate_status'), false);
 
-  // Grok is not added, and comes in the fields outside.rs gives the page.
-  assert.deepEqual(plain(await invoke('outside_status')), GROK_NOT_ADDED);
-  const [, grokBody] = read(OUTSIDE).match(/pub struct OutsideStatus \{\n([^}]+)\}/) ?? [];
-  assert.deepEqual(
-    Object.keys(GROK_NOT_ADDED),
-    [...(grokBody ?? '').matchAll(/^\s*(?:pub )?(\w+):/gm)].map(([, field]) => field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())),
-    'the stand-in gives Grok in the fields outside.rs has',
-  );
-  assert.ok(read(OUTSIDE).includes(`pub const XAI_HOST: &str = "${GROK_NOT_ADDED.host}";`), 'the stand-in gives Grok a host outside.rs does not ask');
+  // No outside engine is added, and each comes in the fields outside.rs gives
+  // the page, in the order it gives them.
+  assert.deepEqual(plain(await invoke('outside_status')), OUTSIDE_NOT_ADDED);
+  const [, statusBody] = read(OUTSIDE).match(/pub struct OutsideStatus \{\n([^}]+)\}/) ?? [];
+  const fields = [...(statusBody ?? '').matchAll(/^\s*(?:pub )?(\w+):/gm)].map(([, field]) => field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()));
+  for (const entry of OUTSIDE_NOT_ADDED) {
+    assert.deepEqual(Object.keys(entry), fields, `the stand-in gives ${entry.name} in fields outside.rs does not have`);
+  }
+  const source = read(OUTSIDE);
+  const idOf = source.slice(source.indexOf('    fn id(self) -> &\'static str {'), source.indexOf('\n    }\n', source.indexOf('    fn id(self) -> &\'static str {')));
+  const ids = [...idOf.matchAll(/Self::\w+ => "(\w+)",/g)].map(([, id]) => id);
+  assert.ok(source.includes('const ALL: [Self; 2] = [Self::Xai, Self::OpenAi];'), 'outside.rs gives the engines in another order');
+  assert.deepEqual(OUTSIDE_NOT_ADDED.map((entry) => entry.id), ids, 'the stand-in gives engines outside.rs does not, or in another order');
+  assert.ok(read(OUTSIDE).includes(`pub const XAI_HOST: &str = "${OUTSIDE_NOT_ADDED[0].host}";`), 'the stand-in gives Grok a host outside.rs does not ask');
+  assert.ok(read(OUTSIDE).includes(`pub const OPENAI_HOST: &str = "${OUTSIDE_NOT_ADDED[1].host}";`), 'the stand-in gives GPT a host outside.rs does not ask');
 
   // A call that would send, save, trash, or download has no place in a picture.
   for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside']) {
