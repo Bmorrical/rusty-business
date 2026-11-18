@@ -1,4 +1,5 @@
-//! Engines outside this computer: Grok by xAI, and GPT by OpenAI.
+//! Engines outside this computer: Grok by xAI, GPT by OpenAI, and Claude by
+//! Anthropic.
 //!
 //! It answers these asks: "user can add their outside inference, start with
 //! Grok and Grok ai. user adds it manually, they will need to provide or
@@ -34,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::engine::{self, ChatDone, ChatEvent, ChatRequest, ModelInfo};
+use crate::engine::{self, ChatDone, ChatEvent, ChatRequest, ModelInfo, ReplyStream, Taken};
 use crate::gate::Gate;
 
 /// The one host asked for each engine, and its API.
@@ -42,6 +43,11 @@ pub const XAI_HOST: &str = "api.x.ai";
 const XAI_BASE: &str = "https://api.x.ai/v1";
 pub const OPENAI_HOST: &str = "api.openai.com";
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
+pub const ANTHROPIC_HOST: &str = "api.anthropic.com";
+const ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";
+
+/// The version of Anthropic's API the app speaks, sent with every call.
+const ANTHROPIC_VERSION: &str = "2026-10-21";
 
 const UNKNOWN: &str = "The app does not know that outside engine.";
 const NOT_OUTSIDE: &str = "That model is not one an outside engine listed.";
@@ -79,17 +85,19 @@ const NOT_FOR_CHAT: [&str; 13] =
 enum Engine {
     Xai,
     OpenAi,
+    Anthropic,
 }
 
 impl Engine {
     /// Every one, in the order the page shows them.
-    const ALL: [Self; 2] = [Self::Xai, Self::OpenAi];
+    const ALL: [Self; 3] = [Self::Xai, Self::OpenAi, Self::Anthropic];
 
     /// The page's name for it.
     fn id(self) -> &'static str {
         match self {
             Self::Xai => "xai",
             Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
         }
     }
 
@@ -98,6 +106,7 @@ impl Engine {
         match self {
             Self::Xai => "xai:",
             Self::OpenAi => "openai:",
+            Self::Anthropic => "anthropic:",
         }
     }
 
@@ -105,6 +114,7 @@ impl Engine {
         match self {
             Self::Xai => "Grok",
             Self::OpenAi => "GPT",
+            Self::Anthropic => "Claude",
         }
     }
 
@@ -112,6 +122,7 @@ impl Engine {
         match self {
             Self::Xai => "xAI",
             Self::OpenAi => "OpenAI",
+            Self::Anthropic => "Anthropic",
         }
     }
 
@@ -119,6 +130,7 @@ impl Engine {
         match self {
             Self::Xai => XAI_HOST,
             Self::OpenAi => OPENAI_HOST,
+            Self::Anthropic => ANTHROPIC_HOST,
         }
     }
 
@@ -126,15 +138,42 @@ impl Engine {
         match self {
             Self::Xai => XAI_BASE,
             Self::OpenAi => OPENAI_BASE,
+            Self::Anthropic => ANTHROPIC_BASE,
         }
     }
 
-    /// The most models kept from its maker's list. OpenAI lists years of
-    /// models, so only its newest are kept.
+    /// The most models kept from its maker's list. OpenAI and Anthropic list
+    /// years of models, so only their newest are kept.
     fn most_models(self) -> usize {
         match self {
             Self::Xai => 30,
-            Self::OpenAi => 12,
+            Self::OpenAi | Self::Anthropic => 12,
+        }
+    }
+
+    /// The call with the person's key on it, the way its maker asks for it.
+    /// xAI and OpenAI take it as a bearer token; Anthropic takes it in its own
+    /// header, with the version of its API.
+    fn signed(self, builder: reqwest::RequestBuilder, key: &Key) -> reqwest::RequestBuilder {
+        match self {
+            Self::Xai | Self::OpenAi => builder.bearer_auth(&key.0),
+            // read_key takes printable ASCII alone, so the key always makes a
+            // header. It is marked sensitive, so nothing prints it.
+            Self::Anthropic => match reqwest::header::HeaderValue::from_str(&key.0) {
+                Ok(mut value) => {
+                    value.set_sensitive(true);
+                    builder.header("x-api-key", value).header("anthropic-version", ANTHROPIC_VERSION)
+                }
+                Err(_) => builder,
+            },
+        }
+    }
+
+    /// Where a chat is asked.
+    fn chat_path(self) -> &'static str {
+        match self {
+            Self::Xai | Self::OpenAi => "chat/completions",
+            Self::Anthropic => "messages",
         }
     }
 
@@ -156,6 +195,7 @@ impl Engine {
             && match self {
                 Self::Xai => id.starts_with("grok-"),
                 Self::OpenAi => openai_fits(id),
+                Self::Anthropic => id.starts_with("claude-"),
             }
     }
 
@@ -164,6 +204,7 @@ impl Engine {
         match self {
             Self::Xai => id.split('-').filter(|word| !word.is_empty()).map(capital).collect::<Vec<_>>().join(" "),
             Self::OpenAi => openai_name(id),
+            Self::Anthropic => claude_name(id),
         }
     }
 
@@ -219,6 +260,11 @@ impl Engine {
     fn elsewhere(self) -> String {
         format!("{} answered from somewhere else.", self.maker())
     }
+
+    /// What an answer says when the model turned the question down.
+    fn declined(self) -> String {
+        format!("{} declined to answer this one.", self.name())
+    }
 }
 
 /// A word with its first letter a capital, when it starts with a letter.
@@ -251,6 +297,32 @@ fn openai_name(id: &str) -> String {
         [] => return String::new(),
     };
     std::iter::once(head).chain(rest.iter().map(|word| capital(word))).collect::<Vec<_>>().join(" ")
+}
+
+/// True for a word that is a date, such as the "20250219" in
+/// "claude-3-7-sonnet-20250219".
+fn is_date(word: &str) -> bool {
+    word.len() == 8 && word.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// "claude-opus-5-5" reads "Claude Opus 5.5", "claude-haiku-4-5-20251001"
+/// "Claude Haiku 4.5", and "claude-3-7-sonnet-20250219" "Claude 3.7 Sonnet".
+fn claude_name(id: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut number = false;
+    for word in id.strip_prefix("claude-").unwrap_or(id).split('-').filter(|word| !word.is_empty() && !is_date(word)) {
+        let digits = word.bytes().all(|byte| byte.is_ascii_digit());
+        match words.last_mut() {
+            // A run of numbers is one version: 4, 5 reads 4.5.
+            Some(last) if digits && number => {
+                last.push('.');
+                last.push_str(word);
+            }
+            _ => words.push(capital(word)),
+        }
+        number = digits;
+    }
+    std::iter::once("Claude".to_string()).chain(words).collect::<Vec<_>>().join(" ")
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +478,37 @@ fn openai_models(answer: &[u8]) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
+/// The Claude models in Anthropic's list, each once, newest first, with their
+/// windows. A dated copy is left out when the same model is listed without
+/// its date.
+fn anthropic_models(answer: &[u8]) -> Result<Vec<Found>, String> {
+    let engine = Engine::Anthropic;
+    let value: Value = serde_json::from_slice(answer).map_err(|_| engine.unreadable())?;
+    let listed = value.get("data").and_then(Value::as_array).ok_or_else(|| engine.unreadable())?;
+    let mut found: Vec<(&str, Found)> = Vec::new();
+    for entry in listed {
+        let Some(id) = entry.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if engine.fits(id) && !found.iter().any(|(_, kept)| kept.id == id) {
+            let created = entry.get("created_at").and_then(Value::as_str).unwrap_or("");
+            let context = entry.get("max_input_tokens").and_then(Value::as_u64).map_or(0, |context| u32::try_from(context).unwrap_or(u32::MAX));
+            found.push((created, Found { id: id.to_string(), context }));
+        }
+    }
+    let undated = |id: &str| id.rsplit_once('-').filter(|(_, last)| is_date(last)).map(|(model, _)| model.to_string());
+    let listed_ids: Vec<String> = found.iter().map(|(_, kept)| kept.id.clone()).collect();
+    found.retain(|(_, kept)| undated(&kept.id).is_none_or(|model| !listed_ids.contains(&model)));
+    // Anthropic writes each time the same way, so the newest sorts last as
+    // text. Models made at the same time keep the list's order.
+    found.sort_by(|(one, _), (other, _)| other.cmp(one));
+    let models: Vec<Found> = found.into_iter().take(engine.most_models()).map(|(_, kept)| kept).collect();
+    if models.is_empty() {
+        return Err(engine.none_listed());
+    }
+    Ok(models)
+}
+
 // ---------------------------------------------------------------------------
 // Asking an engine
 // ---------------------------------------------------------------------------
@@ -430,6 +533,7 @@ fn status_error(engine: Engine, code: u16) -> String {
     let maker = engine.maker();
     match code {
         401 | 403 => format!("{maker} did not take the key ({code}). Check the key file."),
+        402 => format!("{maker} says the account needs credits or billing set up (402). Check your {maker} account."),
         404 => format!("{maker} answered 404. It may no longer offer that model: refresh {}'s models on the Installers page.", engine.name()),
         429 => format!("{maker} says too many requests, or no credits left (429). Wait a moment, or check your {maker} account."),
         500..=599 => format!("{maker} is not answering right now ({code})."),
@@ -453,9 +557,8 @@ async fn read_capped<B: AsRef<[u8]>, E>(engine: Engine, chunks: impl Stream<Item
 
 /// One of the engine's lists, such as `models`.
 async fn list(engine: Engine, client: &reqwest::Client, key: &Key, which: &str) -> Result<Vec<u8>, String> {
-    let response = client
-        .get(format!("{}/{which}", engine.base()))
-        .bearer_auth(&key.0)
+    let response = engine
+        .signed(client.get(format!("{}/{which}", engine.base())), key)
         .timeout(LIST_WAIT)
         .send()
         .await
@@ -481,6 +584,8 @@ async fn find_models(engine: Engine, client: &reqwest::Client, key: &Key) -> Res
         }
         // OpenAI's list gives no windows.
         Engine::OpenAi => Ok(openai_models(&list(engine, client, key, "models").await?)?.into_iter().map(|id| Found { id, context: 0 }).collect()),
+        // Anthropic lists 20 a page unless asked for more.
+        Engine::Anthropic => anthropic_models(&list(engine, client, key, "models?limit=100").await?),
     }
 }
 
@@ -525,6 +630,8 @@ struct KeptFile {
     xai: Kept,
     #[serde(default)]
     openai: Kept,
+    #[serde(default)]
+    anthropic: Kept,
 }
 
 impl KeptFile {
@@ -532,6 +639,7 @@ impl KeptFile {
         match engine {
             Engine::Xai => &self.xai,
             Engine::OpenAi => &self.openai,
+            Engine::Anthropic => &self.anthropic,
         }
     }
 
@@ -539,6 +647,7 @@ impl KeptFile {
         match engine {
             Engine::Xai => &mut self.xai,
             Engine::OpenAi => &mut self.openai,
+            Engine::Anthropic => &mut self.anthropic,
         }
     }
 
@@ -692,18 +801,22 @@ pub async fn run_chat(
         return Err(engine.not_listed());
     }
     engine::checked_messages(&request.messages)?;
+    let most = request.max_tokens.unwrap_or(engine::DEFAULT_MAX_TOKENS);
+    let body = match engine {
+        Engine::Xai | Engine::OpenAi => serde_json::json!({
+            "model": model,
+            "messages": request.messages,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "max_completion_tokens": most,
+        }),
+        Engine::Anthropic => claude_body(model, request, most)?,
+    };
     // The gate first: with it off, the key is not even read.
     let client = client(engine, gate)?;
     let path = outside.key_path(engine).ok_or_else(|| engine.not_added())?;
     let key = read_key(&path)?;
-    let body = serde_json::json!({
-        "model": model,
-        "messages": request.messages,
-        "stream": true,
-        "stream_options": { "include_usage": true },
-        "max_completion_tokens": request.max_tokens.unwrap_or(engine::DEFAULT_MAX_TOKENS),
-    });
-    let sending = client.post(format!("{}/chat/completions", engine.base())).bearer_auth(&key.0).json(&body).send();
+    let sending = engine.signed(client.post(format!("{}/{}", engine.base(), engine.chat_path())), &key).json(&body).send();
     drop(key);
     let response = tokio::select! {
         _ = cancel.changed() => return Ok(ChatDone { stopped: true, ..ChatDone::default() }),
@@ -733,7 +846,126 @@ async fn read_answer<B: AsRef<[u8]>, E>(
         engine.gate_went_off()
     };
     let broke = format!("{} stopped answering part way through.", engine.name());
-    engine::read_reply(reply, cancel, gate_off, emit, &broke).await
+    match engine {
+        Engine::Xai | Engine::OpenAi => engine::read_reply(reply, cancel, gate_off, emit, &broke).await,
+        Engine::Anthropic => {
+            let done = engine::read_stream(reply, cancel, gate_off, emit, &broke, claude_payload).await?;
+            if !done.stopped && done.finish_reason.as_deref() == Some("refusal") {
+                return Err(engine.declined());
+            }
+            Ok(done)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// How Claude is asked
+// ---------------------------------------------------------------------------
+
+/// What a chat says when Claude cannot take its turns.
+const CLAUDE_TURNS: &str = "Claude needs a chat that starts and ends with a message of yours.";
+
+/// The chat as Anthropic's API takes it. The system's words go on top, not
+/// in a turn. Empty turns are dropped, and two turns in a row from one side
+/// are joined, since each turn must answer the other. A chat that starts or
+/// ends with an answer is refused: Claude takes no answer to carry on.
+/// No temperature is sent, nor any setting for thinking, so each model
+/// thinks the way its maker made it.
+fn claude_body(model: &str, request: &ChatRequest, most: u32) -> Result<Value, String> {
+    let mut system: Vec<&str> = Vec::new();
+    let mut turns: Vec<(&str, String)> = Vec::new();
+    for message in &request.messages {
+        let text = message.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if message.role == "system" {
+            system.push(text);
+            continue;
+        }
+        match turns.last_mut() {
+            Some((role, joined)) if *role == message.role => {
+                joined.push_str("\n\n");
+                joined.push_str(&message.content);
+            }
+            _ => turns.push((message.role.as_str(), message.content.clone())),
+        }
+    }
+    let user = |turn: Option<&(&str, String)>| turn.is_some_and(|(role, _)| *role == "user");
+    if !user(turns.first()) || !user(turns.last()) {
+        return Err(CLAUDE_TURNS.to_string());
+    }
+    let messages: Vec<Value> = turns.into_iter().map(|(role, content)| serde_json::json!({ "role": role, "content": content })).collect();
+    let mut body = serde_json::json!({
+        "model": model,
+        "max_tokens": most,
+        "messages": messages,
+        "stream": true,
+    });
+    if !system.is_empty() {
+        body["system"] = Value::from(system.join("\n\n"));
+    }
+    Ok(body)
+}
+
+/// A count of tokens in one of Claude's pieces, where it gives one.
+fn tokens_at(value: &Value, pointer: &str) -> Option<u32> {
+    value.pointer(pointer).and_then(Value::as_u64).map(|count| u32::try_from(count).unwrap_or(u32::MAX))
+}
+
+/// One piece of Claude's stream. Each says what it is: the start, a piece of
+/// the answer or of its thinking, why it stopped, the end, or an error.
+fn claude_payload(payload: &str, reply: &mut ReplyStream, done: &mut ChatDone) -> Taken {
+    let Ok(value) = serde_json::from_str::<Value>(payload) else {
+        return Ok((Vec::new(), false));
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("message_start") => {
+            done.prompt_tokens = tokens_at(&value, "/message/usage/input_tokens").or(done.prompt_tokens);
+        }
+        Some("content_block_delta") => {
+            let text = |field: &str| value.pointer(&format!("/delta/{field}")).and_then(Value::as_str);
+            let events = match value.pointer("/delta/type").and_then(Value::as_str) {
+                Some("text_delta") => text("text").map(|text| reply.push_content(text)),
+                Some("thinking_delta") => text("thinking").map(|text| reply.push_reasoning(text)),
+                _ => None,
+            };
+            return Ok((events.unwrap_or_default(), false));
+        }
+        Some("message_delta") => {
+            if let Some(reason) = value.pointer("/delta/stop_reason").and_then(Value::as_str) {
+                done.finish_reason = Some(claude_finish(reason));
+            }
+            done.completion_tokens = tokens_at(&value, "/usage/output_tokens").or(done.completion_tokens);
+            done.prompt_tokens = tokens_at(&value, "/usage/input_tokens").or(done.prompt_tokens);
+        }
+        Some("message_stop") => return Ok((Vec::new(), true)),
+        Some("error") => return Err(claude_error(value.pointer("/error/type").and_then(Value::as_str))),
+        _ => {}
+    }
+    Ok((Vec::new(), false))
+}
+
+/// Why Claude stopped, in the words the other engines use: "stop" when it
+/// finished, "length" when it ran out of room. Any other reason, a refusal
+/// among them, is kept as Anthropic gives it.
+fn claude_finish(reason: &str) -> String {
+    match reason {
+        "end_turn" | "stop_sequence" => "stop",
+        "max_tokens" | "model_context_window_exceeded" => "length",
+        other => other,
+    }
+    .to_string()
+}
+
+/// What an error in Claude's stream says, from its kind alone. What Anthropic
+/// writes with it is never shown.
+fn claude_error(kind: Option<&str>) -> String {
+    match kind {
+        Some("overloaded_error") => "Anthropic is busy right now. Ask Claude again in a moment.".to_string(),
+        Some("rate_limit_error") => "Anthropic says too many requests. Wait a moment, then ask again.".to_string(),
+        _ => "Claude stopped answering part way through.".to_string(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -784,9 +1016,11 @@ mod tests {
     /// Plainly not keys anyone holds.
     const FAKE_KEY: &str = "xai-not-a-real-key-only-for-these-tests-0123456789";
     const FAKE_OPENAI_KEY: &str = "sk-not-a-real-key-only-for-these-tests-0123456789";
+    const FAKE_ANTHROPIC_KEY: &str = "sk-ant-not-a-real-key-only-for-these-tests-0123456789";
 
     const XAI: Engine = Engine::Xai;
     const OPENAI: Engine = Engine::OpenAi;
+    const ANTHROPIC: Engine = Engine::Anthropic;
 
     fn folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir().join(format!("rusty-outside-{name}-{}", std::process::id()));
@@ -852,6 +1086,7 @@ mod tests {
         let named = |engine: &Value| [&engine["id"], &engine["name"], &engine["maker"], &engine["host"]].map(|value| value.as_str().unwrap().to_string());
         assert_eq!(named(&told[0]), ["xai", "Grok", "xAI", "api.x.ai"]);
         assert_eq!(named(&told[1]), ["openai", "GPT", "OpenAI", "api.openai.com"]);
+        assert_eq!(named(&told[2]), ["anthropic", "Claude", "Anthropic", "api.anthropic.com"]);
 
         // Not in any message, whatever goes wrong.
         let mut errors = vec![
@@ -872,7 +1107,7 @@ mod tests {
     fn a_key_pasted_where_the_path_goes_is_refused_and_not_kept() {
         let place = folder("pasted");
         let outside = Outside::new(place.join("outside.json"));
-        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY)] {
+        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY), (ANTHROPIC, FAKE_ANTHROPIC_KEY)] {
             for pasted in [key, &format!("  {key}\n"), "xai-abc/def"] {
                 let error = block_on(outside.add(engine, &Gate::at(true), pasted)).unwrap_err();
                 assert_eq!(error, engine.whole_path());
@@ -954,7 +1189,7 @@ mod tests {
     fn with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read() {
         let place = folder("gate");
         let outside = Outside::new(place.join("outside.json"));
-        for (engine, model) in [(XAI, "grok-4.7"), (OPENAI, "gpt-5-mini")] {
+        for (engine, model) in [(XAI, "grok-4.7"), (OPENAI, "gpt-5-mini"), (ANTHROPIC, "claude-opus-5-5")] {
             // A path to no file at all: reading it would say so.
             outside.change(engine, |kept| kept.key_path = Some(place.join("no-such-key"))).unwrap();
             outside.change(engine, |kept| kept.models = found(model)).unwrap();
@@ -967,6 +1202,7 @@ mod tests {
             assert!(chat(&Gate::at(true), &outside, &asked).unwrap_err().starts_with("There is no key file"));
         }
         assert_eq!(OPENAI.gate_off(), "The gate is off. Turn it on to ask GPT.");
+        assert_eq!(ANTHROPIC.gate_off(), "The gate is off. Turn it on to ask Claude.");
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -984,7 +1220,8 @@ mod tests {
         let mut empty = request("xai:grok-4.7");
         empty.messages.clear();
         assert_eq!(chat(&Gate::at(true), &outside, &empty).unwrap_err(), "There is nothing to send.");
-        assert!(is_outside("xai:grok-4.7") && is_outside("openai:gpt-5") && !is_outside("mlx-community/phi-4-4bit") && !is_outside("grok-4.7"));
+        assert!(is_outside("xai:grok-4.7") && is_outside("openai:gpt-5") && is_outside("anthropic:claude-opus-5-5"));
+        assert!(!is_outside("mlx-community/phi-4-4bit") && !is_outside("grok-4.7") && !is_outside("claude-opus-5-5") && !is_outside("Anthropic:claude-opus-5-5"));
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -995,16 +1232,27 @@ mod tests {
         let outside = Outside::new(place.join("outside.json"));
         outside.change(XAI, |kept| kept.models = found("grok-4.7")).unwrap();
         outside.change(OPENAI, |kept| kept.models = found("gpt-5-mini")).unwrap();
-        // Each engine's model, named as the other's, is refused before the
+        outside.change(ANTHROPIC, |kept| kept.models = found("claude-opus-5-5")).unwrap();
+        // Each engine's model, named as another's, is refused before the
         // gate or the key is looked at.
-        assert_eq!(chat(&Gate::at(false), &outside, &request("openai:grok-4.7")).unwrap_err(), OPENAI.not_listed());
-        assert_eq!(chat(&Gate::at(false), &outside, &request("xai:gpt-5-mini")).unwrap_err(), XAI.not_listed());
+        for (model, engine) in [
+            ("openai:grok-4.7", OPENAI),
+            ("xai:gpt-5-mini", XAI),
+            ("anthropic:gpt-5-mini", ANTHROPIC),
+            ("anthropic:grok-4.7", ANTHROPIC),
+            ("openai:claude-opus-5-5", OPENAI),
+            ("xai:claude-opus-5-5", XAI),
+        ] {
+            assert_eq!(chat(&Gate::at(false), &outside, &request(model)).unwrap_err(), engine.not_listed(), "{model}");
+        }
         // Each as its own reaches the gate.
-        assert_eq!(chat(&Gate::at(false), &outside, &request("openai:gpt-5-mini")).unwrap_err(), OPENAI.gate_off());
-        assert_eq!(chat(&Gate::at(false), &outside, &request("xai:grok-4.7")).unwrap_err(), XAI.gate_off());
+        for (model, engine) in [("openai:gpt-5-mini", OPENAI), ("xai:grok-4.7", XAI), ("anthropic:claude-opus-5-5", ANTHROPIC)] {
+            assert_eq!(chat(&Gate::at(false), &outside, &request(model)).unwrap_err(), engine.gate_off(), "{model}");
+        }
         assert_eq!(Engine::of_model("openai:gpt-5-mini"), Some((OPENAI, "gpt-5-mini")));
         assert_eq!(Engine::of_model("xai:grok-4.7"), Some((XAI, "grok-4.7")));
-        assert_eq!(Engine::of_model("anthropic:claude"), None);
+        assert_eq!(Engine::of_model("anthropic:claude-opus-5-5"), Some((ANTHROPIC, "claude-opus-5-5")));
+        assert_eq!(Engine::of_model("google:gemini"), None);
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1012,7 +1260,8 @@ mod tests {
     fn an_engine_the_app_does_not_know_is_refused() {
         assert_eq!(Engine::named("xai"), Ok(XAI));
         assert_eq!(Engine::named("openai"), Ok(OPENAI));
-        for unknown in ["", "XAI", "OpenAI", "anthropic", "google", "openai ", "../xai"] {
+        assert_eq!(Engine::named("anthropic"), Ok(ANTHROPIC));
+        for unknown in ["", "XAI", "OpenAI", "Anthropic", "claude", "google", "gemini", "openai ", "anthropic ", "../xai"] {
             assert_eq!(Engine::named(unknown), Err(UNKNOWN.to_string()), "{unknown:?}");
         }
         // Each engine's names stand apart.
@@ -1036,6 +1285,7 @@ mod tests {
             "https://evilapi.x.ai/v1",
             "https://127.0.0.1/v1",
             "https://api.openai.com/v1",
+            "https://api.anthropic.com/v1",
         ] {
             assert!(!XAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
         }
@@ -1065,8 +1315,64 @@ mod tests {
             "https://chatgpt.com/v1",
             "https://notapi.openai.com/v1",
             "https://api.x.ai/v1",
+            "https://api.anthropic.com/v1",
         ] {
             assert!(!OPENAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
+        }
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn claude_is_asked_at_anthropics_api_alone_over_https() {
+        assert_eq!(ANTHROPIC_BASE, "https://api.anthropic.com/v1");
+        assert_eq!(ANTHROPIC_BASE, format!("https://{ANTHROPIC_HOST}/v1"));
+        assert_eq!(format!("{}/{}", ANTHROPIC.base(), ANTHROPIC.chat_path()), "https://api.anthropic.com/v1/messages");
+        assert_eq!(format!("{}/{}", OPENAI.base(), OPENAI.chat_path()), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(format!("{}/{}", XAI.base(), XAI.chat_path()), "https://api.x.ai/v1/chat/completions");
+        assert!(ANTHROPIC.owns(&reqwest::Url::parse("https://api.anthropic.com/v1/messages").unwrap()));
+        for away in [
+            "http://api.anthropic.com/v1/messages",
+            "https://api.anthropic.com:8443/v1",
+            "https://someone@api.anthropic.com/v1",
+            "https://api.anthropic.com.example.com/v1",
+            "https://anthropic.com/v1",
+            "https://claude.ai/v1",
+            "https://notapi.anthropic.com/v1",
+            "https://api.openai.com/v1",
+            "https://api.x.ai/v1",
+        ] {
+            assert!(!ANTHROPIC.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
+        }
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn claude_is_signed_with_its_own_header() {
+        let signed = |engine: Engine, key: &str| {
+            let url = format!("{}/{}", engine.base(), engine.chat_path());
+            engine.signed(client(engine, &Gate::at(true)).unwrap().post(url), &Key(key.into())).build().unwrap()
+        };
+        let asked = signed(ANTHROPIC, FAKE_ANTHROPIC_KEY);
+        let headers = asked.headers();
+        let key = headers.get("x-api-key").expect("the key goes in x-api-key");
+        assert_eq!(key.to_str().unwrap(), FAKE_ANTHROPIC_KEY);
+        assert!(key.is_sensitive(), "the key would show in a debug print");
+        // The version Claude's stream was read against. Moving it means
+        // reading the stream again, so the test moves with it.
+        assert_eq!(headers.get("anthropic-version").and_then(|version| version.to_str().ok()), Some("2026-10-21"));
+        assert!(headers.get(reqwest::header::AUTHORIZATION).is_none());
+        assert_eq!(asked.url().as_str(), "https://api.anthropic.com/v1/messages");
+        // The other engines take a bearer key, and no Anthropic header.
+        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY)] {
+            let asked = signed(engine, key);
+            let bearer = asked.headers().get(reqwest::header::AUTHORIZATION).expect("a bearer key");
+            assert_eq!(bearer.to_str().unwrap(), format!("Bearer {key}"));
+            assert!(bearer.is_sensitive());
+            assert!(asked.headers().get("x-api-key").is_none() && asked.headers().get("anthropic-version").is_none());
+        }
+        // A key that cannot go in a header is not sent at all.
+        for bad in ["sk-ant-bad\nkey", "sk-ant-bad\u{7f}key"] {
+            assert!(signed(ANTHROPIC, bad).headers().get("x-api-key").is_none(), "{bad:?}");
         }
     }
 
@@ -1177,6 +1483,175 @@ mod tests {
         );
     }
 
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn anthropics_list_gives_claude_models_newest_first_with_their_names() {
+        let listed = serde_json::json!({ "data": [
+            { "type": "model", "id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-09-30T00:00:00Z", "max_input_tokens": 1_000_000 },
+            { "id": "claude-opus-5-5", "created_at": "2026-10-21T00:00:00Z", "max_input_tokens": 1_000_000 },
+            { "id": "claude-haiku-4-5-20251001", "created_at": "2025-10-01T00:00:00Z", "max_input_tokens": 200_000 },
+            // A dated copy of a model also listed without its date.
+            { "id": "claude-opus-5-5-20261021", "created_at": "2026-10-21T00:00:00Z" },
+            { "id": "claude-3-7-sonnet-20250219", "created_at": "2025-02-19T00:00:00Z", "max_input_tokens": 99_999_999_999_u64 },
+            { "id": "claude-opus-5-5", "created_at": "2001-01-01T00:00:00Z" },
+            { "id": "claude-old" },
+            // Not Claude, or not ids at all.
+            { "id": "gpt-5", "created_at": "2030-01-01T00:00:00Z" },
+            { "id": "grok-4.7" },
+            { "id": "claude-<b>" },
+            { "id": "claude-opus/../x" },
+            { "id": format!("claude-{}", "x".repeat(100)) },
+            { "id": 7 },
+            { "display_name": "no id" },
+        ], "has_more": false });
+        let models = anthropic_models(listed.to_string().as_bytes()).unwrap();
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-3-7-sonnet-20250219", "claude-old"]);
+        let contexts: Vec<u32> = models.iter().map(|model| model.context).collect();
+        assert_eq!(contexts, [1_000_000, 1_000_000, 200_000, u32::MAX, 0]);
+        assert_eq!(anthropic_models(b"not json").unwrap_err(), "Anthropic's list of models could not be read.");
+        assert_eq!(anthropic_models(br#"{"models":[]}"#).unwrap_err(), ANTHROPIC.unreadable());
+        assert_eq!(anthropic_models(br#"{"data":[{"id":"gpt-5"}]}"#).unwrap_err(), "Anthropic listed no Claude models for text.");
+        // Only the newest are kept.
+        let many: Vec<Value> = (10..60).map(|n| serde_json::json!({ "id": format!("claude-{n}"), "created_at": format!("2026-01-01T00:00:{n}Z") })).collect();
+        let newest = anthropic_models(serde_json::json!({ "data": many }).to_string().as_bytes()).unwrap();
+        assert_eq!(newest.len(), ANTHROPIC.most_models());
+        assert_eq!(newest.first().map(|model| model.id.as_str()), Some("claude-59"));
+        assert_eq!(newest.last().map(|model| model.id.as_str()), Some("claude-48"));
+
+        for (id, name) in [
+            ("claude-opus-5-5", "Claude Opus 5.5"),
+            ("claude-sonnet-5", "Claude Sonnet 5"),
+            ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+            ("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet"),
+            ("claude-fable-5-2", "Claude Fable 5.2"),
+        ] {
+            assert_eq!(ANTHROPIC.name_of(id), name, "{id}");
+        }
+        assert_eq!(
+            Found { id: "claude-opus-5-5".into(), context: 1_000_000 }.info(ANTHROPIC),
+            ModelInfo { id: "anthropic:claude-opus-5-5".into(), name: "Claude Opus 5.5".into(), maker: "Anthropic".into(), context: 1_000_000 }
+        );
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn claude_is_asked_with_the_system_on_top_and_turns_that_take_turns() {
+        let message = |role: &str, content: &str| engine::ChatMessage { role: role.into(), content: content.into() };
+        let asked = |messages: Vec<engine::ChatMessage>| ChatRequest { model: "anthropic:claude-opus-5-5".into(), messages, max_tokens: None };
+        let long = asked(vec![
+            message("system", " Be brief. "),
+            message("system", "   "),
+            message("user", "What is 2+2?"),
+            message("assistant", "4"),
+            message("assistant", ""),
+            message("assistant", "Anything else?"),
+            message("system", "Use plain words."),
+            message("user", "And 3+3?"),
+            message("user", "Thanks."),
+        ]);
+        let body = claude_body("claude-opus-5-5", &long, engine::DEFAULT_MAX_TOKENS).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "model": "claude-opus-5-5",
+                "max_tokens": 4096,
+                "system": "Be brief.\n\nUse plain words.",
+                "messages": [
+                    { "role": "user", "content": "What is 2+2?" },
+                    { "role": "assistant", "content": "4\n\nAnything else?" },
+                    { "role": "user", "content": "And 3+3?\n\nThanks." },
+                ],
+                "stream": true,
+            })
+        );
+        // No setting each model makes its own: no temperature, no thinking.
+        let mut names: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["max_tokens", "messages", "model", "stream", "system"]);
+        // No system, no system field.
+        let plain = claude_body("claude-opus-5-5", &request("anthropic:claude-opus-5-5"), 100).unwrap();
+        assert!(plain.get("system").is_none());
+        assert_eq!(plain["max_tokens"], 100);
+        // A chat that starts or ends with an answer, or has no turn, is refused.
+        for messages in [
+            vec![message("assistant", "Hello."), message("user", "Hi.")],
+            vec![message("user", "Hi."), message("assistant", "Hello.")],
+            vec![message("system", "Be brief."), message("user", "  ")],
+        ] {
+            assert_eq!(claude_body("claude-opus-5-5", &asked(messages), 100).unwrap_err(), CLAUDE_TURNS);
+        }
+        // And before the gate, or the key, is looked at.
+        let place = folder("turns");
+        let outside = Outside::new(place.join("outside.json"));
+        outside.change(ANTHROPIC, |kept| kept.models = found("claude-opus-5-5")).unwrap();
+        let ends_with_an_answer = asked(vec![message("user", "Hi."), message("assistant", "Hello.")]);
+        assert_eq!(chat(&Gate::at(false), &outside, &ends_with_an_answer).unwrap_err(), CLAUDE_TURNS);
+        assert_eq!(chat(&Gate::at(false), &outside, &asked(vec![message("user", "Hi.")])).unwrap_err(), ANTHROPIC.gate_off());
+        fs::remove_dir_all(&place).unwrap();
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn claudes_stream_is_read_as_it_comes() {
+        let event = |kind: &str, data: Value| format!("event: {kind}\ndata: {data}\n\n");
+        let text = |text: &str| event("content_block_delta", serde_json::json!({ "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": text } }));
+        let stopped = |reason: &str| event("message_delta", serde_json::json!({ "type": "message_delta", "delta": { "stop_reason": reason }, "usage": { "output_tokens": 12 } }));
+        let start = event("message_start", serde_json::json!({ "type": "message_start", "message": { "id": "msg_1", "usage": { "input_tokens": 20, "output_tokens": 1 } } }));
+        let stop = event("message_stop", serde_json::json!({ "type": "message_stop" }));
+        let read = |pieces: Vec<String>| {
+            let (_stop, mut cancelled) = watch::channel(false);
+            let mut heard = String::new();
+            let reply = futures_util::stream::iter(pieces.into_iter().map(|piece| Ok::<_, std::io::Error>(piece.into_bytes())));
+            let done = block_on(read_answer(ANTHROPIC, &Gate::at(true), reply, &mut cancelled, |event| heard.push_str(&format!("{event:?}"))));
+            (done, heard)
+        };
+
+        let (done, heard) = read(vec![
+            start.clone(),
+            event("ping", serde_json::json!({ "type": "ping" })),
+            event("content_block_start", serde_json::json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking", "thinking": "" } })),
+            event("content_block_delta", serde_json::json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": "Two and two." } })),
+            event("content_block_delta", serde_json::json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": "c2lnbmVk" } })),
+            "data: not json\n\n".to_string(),
+            text("2+2 "),
+            text("is 4."),
+            stopped("end_turn"),
+            stop.clone(),
+            // Nothing after the end is read.
+            text(" More."),
+        ]);
+        let done = done.unwrap();
+        assert_eq!((done.thinking.as_str(), done.answer.as_str()), ("Two and two.", "2+2 is 4."));
+        assert_eq!((done.prompt_tokens, done.completion_tokens, done.finish_reason.as_deref()), (Some(20), Some(12), Some("stop")));
+        assert!(!heard.contains("c2lnbmVk") && !heard.contains("More"), "{heard}");
+
+        // Out of room reads as the other engines say it.
+        for (reason, said) in [("max_tokens", "length"), ("model_context_window_exceeded", "length"), ("stop_sequence", "stop"), ("pause_turn", "pause_turn")] {
+            let (done, _) = read(vec![start.clone(), text("2+2"), stopped(reason), stop.clone()]);
+            assert_eq!(done.unwrap().finish_reason.as_deref(), Some(said), "{reason}");
+        }
+
+        // A refusal is said plainly, after what came before it.
+        let (done, heard) = read(vec![start.clone(), text("I can "), stopped("refusal"), stop.clone()]);
+        assert_eq!(done.unwrap_err(), "Claude declined to answer this one.");
+        assert!(heard.contains("I can"), "{heard}");
+
+        // An error part way through is said from its kind alone.
+        for (kind, said) in [
+            ("overloaded_error", "Anthropic is busy right now. Ask Claude again in a moment."),
+            ("rate_limit_error", "Anthropic says too many requests. Wait a moment, then ask again."),
+            ("api_error", "Claude stopped answering part way through."),
+        ] {
+            let error = event("error", serde_json::json!({ "type": "error", "error": { "type": kind, "message": "the words sent were: secret" } }));
+            let (done, _) = read(vec![start.clone(), text("2+2"), error]);
+            let said_back = done.unwrap_err();
+            assert_eq!(said_back, said);
+            assert!(!said_back.contains("secret"));
+        }
+        assert_eq!(claude_error(None), "Claude stopped answering part way through.");
+    }
+
     #[test]
     fn xais_refusals_are_said_plainly() {
         assert_eq!(status_error(XAI, 401), "xAI did not take the key (401). Check the key file.");
@@ -1187,6 +1662,10 @@ mod tests {
         assert_eq!(status_error(XAI, 418), "xAI answered 418.");
         assert_eq!(status_error(OPENAI, 401), "OpenAI did not take the key (401). Check the key file.");
         assert_eq!(status_error(OPENAI, 429), "OpenAI says too many requests, or no credits left (429). Wait a moment, or check your OpenAI account.");
+        assert_eq!(status_error(ANTHROPIC, 401), "Anthropic did not take the key (401). Check the key file.");
+        assert_eq!(status_error(ANTHROPIC, 402), "Anthropic says the account needs credits or billing set up (402). Check your Anthropic account.");
+        assert_eq!(status_error(ANTHROPIC, 529), "Anthropic is not answering right now (529).");
+        assert!(status_error(ANTHROPIC, 404).contains("refresh Claude's models on the Installers page"));
         let chunks = |sizes: &[usize]| futures_util::stream::iter(sizes.iter().map(|size| Ok::<_, ()>(vec![b'x'; *size])).collect::<Vec<_>>());
         assert_eq!(block_on(read_capped(XAI, chunks(&[400, 600]), 1000)).unwrap().len(), 1000);
         assert_eq!(block_on(read_capped(XAI, chunks(&[400, 601]), 1000)).unwrap_err(), "xAI's answer was too large.");
@@ -1195,9 +1674,16 @@ mod tests {
 
     #[test]
     fn turning_the_gate_off_stops_grok_part_way_through() {
-        let piece = |text: &str| Ok::<_, std::io::Error>(format!("data: {}\n\n", serde_json::json!({ "choices": [{ "delta": { "content": text } }] })).into_bytes());
+        // A piece of an answer, as each engine sends it.
+        let piece = |engine: Engine, text: &str| {
+            let data = match engine {
+                Engine::Xai | Engine::OpenAi => serde_json::json!({ "choices": [{ "delta": { "content": text } }] }),
+                Engine::Anthropic => serde_json::json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": text } }),
+            };
+            Ok::<_, std::io::Error>(format!("data: {data}\n\n").into_bytes())
+        };
         // A stand-in for the engine that sends two pieces, then nothing more.
-        let reply = || futures_util::stream::iter(vec![piece("2+2 "), piece("is")]).chain(futures_util::stream::pending());
+        let reply = |engine: Engine| futures_util::stream::iter(vec![piece(engine, "2+2 "), piece(engine, "is")]).chain(futures_util::stream::pending());
         for engine in Engine::ALL {
             let gate = Gate::at(true);
             let switch = gate.clone();
@@ -1209,7 +1695,7 @@ mod tests {
             let mut heard = String::new();
             // Were the gate not heard, the stand-in would never end, so the
             // wait is short and the test fails rather than hangs.
-            let reading = read_answer(engine, &gate, reply(), &mut stopped, |event| heard.push_str(&format!("{event:?}")));
+            let reading = read_answer(engine, &gate, reply(engine), &mut stopped, |event| heard.push_str(&format!("{event:?}")));
             let ended = block_on(async { tokio::time::timeout(Duration::from_secs(10), reading).await }).expect("turning the gate off did not stop the engine");
             assert_eq!(ended.unwrap_err(), engine.gate_went_off());
             assert!(heard.contains("2+2") && heard.contains("is"), "{heard}");
@@ -1217,15 +1703,33 @@ mod tests {
         }
 
         // Stop keeps what came.
+        for engine in [OPENAI, ANTHROPIC] {
+            let (stop, mut stopped) = watch::channel(false);
+            let stopper = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                let _ = stop.send(true);
+                stop
+            });
+            let done = block_on(read_answer(engine, &Gate::at(true), reply(engine), &mut stopped, |_| {})).unwrap();
+            assert!(done.stopped);
+            assert_eq!(done.answer, "2+2 is");
+            drop(stopper.join().unwrap());
+        }
+
+        // Stop after Claude says it declines, but before its stream ends,
+        // reads as stopped: the person ended the turn.
+        let declining = serde_json::json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" }, "usage": { "output_tokens": 3 } });
+        let declined = Ok::<_, std::io::Error>(format!("data: {declining}\n\n").into_bytes());
+        let reply = futures_util::stream::iter(vec![piece(ANTHROPIC, "I can "), declined]).chain(futures_util::stream::pending());
         let (stop, mut stopped) = watch::channel(false);
         let stopper = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
             let _ = stop.send(true);
             stop
         });
-        let done = block_on(read_answer(OPENAI, &Gate::at(true), reply(), &mut stopped, |_| {})).unwrap();
+        let done = block_on(read_answer(ANTHROPIC, &Gate::at(true), reply, &mut stopped, |_| {})).unwrap();
         assert!(done.stopped);
-        assert_eq!(done.answer, "2+2 is");
+        assert_eq!((done.answer.as_str(), done.finish_reason.as_deref()), ("I can", Some("refusal")));
         drop(stopper.join().unwrap());
     }
 
@@ -1287,16 +1791,19 @@ mod tests {
         let kept = Outside::new(file.clone()).lock().clone();
         assert_eq!(kept.xai, Kept { key_path: Some(PathBuf::from("/keys/xai")), models: found("grok-4.7") });
         assert_eq!(kept.openai, Kept::default());
+        assert_eq!(kept.anthropic, Kept::default());
         // Only each engine's own models, each once, are kept.
         fs::write(
             &file,
             r#"{"xai":{"keyPath":"relative/key","models":[{"id":"grok-4.7","context":1},{"id":"grok-4.7"},{"id":"../x"},{"id":"phi-4"},{"id":"gpt-5"}]},
-               "openai":{"keyPath":"/keys/openai","models":[{"id":"gpt-5"},{"id":"grok-4.7"},{"id":"gpt-image-1"},{"id":"gpt-5"}]}}"#,
+               "openai":{"keyPath":"/keys/openai","models":[{"id":"gpt-5"},{"id":"grok-4.7"},{"id":"gpt-image-1"},{"id":"gpt-5"}]},
+               "anthropic":{"keyPath":"/keys/anthropic","models":[{"id":"claude-opus-5-5","context":1000000},{"id":"gpt-5"},{"id":"claude-opus-5-5"},{"id":"claude-<b>"}]}}"#,
         )
         .unwrap();
         let kept = Outside::new(file.clone()).lock().clone();
         assert_eq!(kept.xai, Kept { key_path: None, models: vec![Found { id: "grok-4.7".into(), context: 1 }] });
         assert_eq!(kept.openai, Kept { key_path: Some(PathBuf::from("/keys/openai")), models: found("gpt-5") });
+        assert_eq!(kept.anthropic, Kept { key_path: Some(PathBuf::from("/keys/anthropic")), models: vec![Found { id: "claude-opus-5-5".into(), context: 1_000_000 }] });
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1310,6 +1817,12 @@ mod tests {
     #[ignore = "asks OpenAI itself with the key at RUSTY_OPENAI_KEY_FILE; run with --ignored"]
     fn gpt_answers_two_plus_two() {
         answers_two_plus_two(OPENAI, "RUSTY_OPENAI_KEY_FILE");
+    }
+
+    #[test]
+    #[ignore = "asks Anthropic itself with the key at RUSTY_ANTHROPIC_KEY_FILE; run with --ignored"]
+    fn claude_answers_two_plus_two() {
+        answers_two_plus_two(ANTHROPIC, "RUSTY_ANTHROPIC_KEY_FILE");
     }
 
     fn answers_two_plus_two(engine: Engine, variable: &str) {

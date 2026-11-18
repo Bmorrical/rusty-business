@@ -119,6 +119,14 @@ test("numbers read the way a person writes them", () => {
   assert.equal(formatCount(16384), "16,384");
   assert.equal(formatWindow(16384), "16K");
   assert.equal(formatWindow(262144), "256K");
+  // Outside engines count their windows in round thousands. Read in 1,024s,
+  // Claude's 1,000,000 showed as 977K and Grok's 256,000 as 250K.
+  assert.equal(formatWindow(1_000_000), "1M");
+  assert.equal(formatWindow(200_000), "200K");
+  assert.equal(formatWindow(256_000), "256K");
+  assert.equal(formatWindow(400_000), "400K");
+  assert.equal(formatWindow(1_048_576), "1M");
+  assert.equal(formatWindow(0), "0K");
 });
 
 test("speed needs both a count and a time", () => {
@@ -540,12 +548,29 @@ const GROK_UNKNOWN = { id: "xai:grok-mini", name: "Grok Mini", maker: "xAI", con
 // Brad, 2026-11-17: "and claude and codex/gpt and gemmini". OpenAI's list
 // gives no windows, so a GPT model's is never known.
 const OPENAI_GPT = { id: "openai:gpt-5", name: "GPT-5", maker: "OpenAI", context: 0 };
+const CLAUDE = { id: "anthropic:claude-opus-5-5", name: "Claude Opus 5.5", maker: "Anthropic", context: 1_000_000 };
 
 test("the outside engines' models are told apart from the models on this computer", () => {
-  assert.deepEqual(OUTSIDE_PREFIXES, ["xai:", "openai:"]);
+  assert.deepEqual(OUTSIDE_PREFIXES, ["xai:", "openai:", "anthropic:"]);
   assert.ok(isOutside(GROK.id));
   assert.ok(isOutside(OPENAI_GPT.id));
-  for (const id of ["microsoft/phi-4", "", undefined, null, "grok-4", "gpt-5", "local/xai:grok", "local/openai:gpt-5", "openai", "OPENAI:gpt-5"]) {
+  assert.ok(isOutside(CLAUDE.id));
+  for (const id of [
+    "microsoft/phi-4",
+    "",
+    undefined,
+    null,
+    "grok-4",
+    "gpt-5",
+    "claude-opus-5-5",
+    "local/xai:grok",
+    "local/openai:gpt-5",
+    "local/anthropic:claude",
+    "openai",
+    "anthropic",
+    "OPENAI:gpt-5",
+    "Anthropic:claude-opus-5-5",
+  ]) {
     assert.equal(isOutside(id), false, `${id} read as an outside engine's`);
   }
 });
@@ -738,10 +763,12 @@ test("the page names the model behind each answer the grader numbered", () => {
 test("the first outside engine grades until another model is picked, and none when No grading is", () => {
   const phi = { id: PHI, name: "Phi-4" };
   assert.equal(graderFor(null, [phi, GROK, GROK_UNKNOWN]), GROK);
-  // In the Installers page's order: Grok's first, then GPT's.
-  assert.equal(graderFor(null, [phi, GROK, OPENAI_GPT]), GROK);
-  assert.equal(graderFor(null, [phi, OPENAI_GPT]), OPENAI_GPT, "GPT does not grade when Grok is not on hand");
+  // In the Installers page's order: Grok's first, then GPT's, then Claude's.
+  assert.equal(graderFor(null, [phi, GROK, OPENAI_GPT, CLAUDE]), GROK);
+  assert.equal(graderFor(null, [phi, OPENAI_GPT, CLAUDE]), OPENAI_GPT, "GPT does not grade when Grok is not on hand");
+  assert.equal(graderFor(null, [phi, CLAUDE]), CLAUDE, "Claude does not grade when it is the only outside engine on hand");
   assert.equal(graderFor(OPENAI_GPT.id, [phi, GROK, OPENAI_GPT]), OPENAI_GPT);
+  assert.equal(graderFor(CLAUDE.id, [phi, GROK, OPENAI_GPT, CLAUDE]), CLAUDE, "Claude does not grade when picked");
   assert.equal(graderFor(undefined, [phi]), null, "a model on this computer grades without being picked");
   assert.equal(graderFor("", [phi, GROK]), null, "No grading still grades");
   assert.equal(graderFor(PHI, [phi, GROK]), phi);

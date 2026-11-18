@@ -41,16 +41,18 @@ I want to hear about:
 - The page has no way to call out.
 - While the outbound gate is off, which it is until you turn it on, the app
   makes no connection past this computer: no check for a new version, no
-  download, no start of the stack, and no question to Grok or GPT. Turning it off
-  stops what is under way. With it on, every such connection is https only,
+  download, no start of the stack, and no question to Grok, GPT, or Claude.
+  Turning it off stops what is under way. With it on, every such connection is https only,
   through no proxy.
-- Your xAI and OpenAI keys stay in the files you name. The app keeps only
-  each file's path, reads the key from it when it asks that engine, and
-  sends the key only to its maker's API, xAI's for Grok and OpenAI's for
-  GPT, over https, following no redirect. A key never reaches the page, a
-  log, or a saved chat, never goes to the other maker, and the app never
+- Your xAI, OpenAI, and Anthropic keys stay in the files you name. The app
+  keeps only each file's path, reads the key from it when it asks that
+  engine, and sends the key only to its maker's API, over https, following
+  no redirect: xAI's for Grok and OpenAI's for GPT, each as a bearer token,
+  and Anthropic's for Claude, in its own `x-api-key` header. Each way marks
+  the key as sensitive, so nothing prints it. A key never reaches the page,
+  a log, or a saved chat, never goes to another maker, and the app never
   changes or removes the file.
-- A grade by Grok or GPT sends its maker the question and every answer to
+- A grade by Grok, GPT, or Claude sends its maker the question and every answer to
   it, those from the models on this computer too, and only while the gate
   is on. The grader reads no model's name. Settings picks a model on this
   computer to grade instead, or none.
