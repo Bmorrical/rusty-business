@@ -60,6 +60,7 @@ export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
 export const OUTSIDE_NOT_ADDED = [
   { id: 'xai', name: 'Grok', maker: 'xAI', host: 'api.x.ai', added: false, keyPath: null, models: [], warning: null, error: null },
   { id: 'openai', name: 'GPT', maker: 'OpenAI', host: 'api.openai.com', added: false, keyPath: null, models: [], warning: null, error: null },
+  { id: 'anthropic', name: 'Claude', maker: 'Anthropic', host: 'api.anthropic.com', added: false, keyPath: null, models: [], warning: null, error: null },
 ];
 
 const BROWSERS = [

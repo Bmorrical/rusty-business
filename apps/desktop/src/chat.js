@@ -190,9 +190,16 @@ export function formatCount(count) {
   return Number(count ?? 0).toLocaleString("en-US");
 }
 
-/** "16K" or "262K": a context window in thousands of tokens. */
+/**
+ * "16K", "200K", or "1M": a context window as its maker counts it. A window
+ * in round thousands (200,000) reads in thousands; one in powers of two
+ * (16,384) reads in 1,024s, as the models on this computer count theirs.
+ */
 export function formatWindow(context) {
-  return `${Math.round(Number(context ?? 0) / 1024)}K`;
+  const tokens = Number(context ?? 0);
+  const step = tokens % 1000 === 0 ? 1000 : 1024;
+  const thousands = Math.round(tokens / step);
+  return thousands >= step && thousands % step === 0 ? `${thousands / step}M` : `${thousands}K`;
 }
 
 /**
@@ -394,9 +401,9 @@ export function installLine(maker, model) {
 
 /**
  * The starts of the model ids that name an outside engine's models: Grok's,
- * asked at xAI, and GPT's, asked at OpenAI.
+ * asked at xAI, GPT's, asked at OpenAI, and Claude's, asked at Anthropic.
  */
-export const OUTSIDE_PREFIXES = ["xai:", "openai:"];
+export const OUTSIDE_PREFIXES = ["xai:", "openai:", "anthropic:"];
 
 /** True for a model asked outside this computer. */
 export function isOutside(id) {

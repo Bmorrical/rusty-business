@@ -596,8 +596,53 @@ pub(crate) async fn read_reply<B: AsRef<[u8]>, E>(
     bytes: impl Stream<Item = Result<B, E>>,
     cancel: &mut watch::Receiver<bool>,
     halt: impl Future<Output = String>,
+    emit: impl FnMut(ChatEvent),
+    broke: &str,
+) -> Result<ChatDone, String> {
+    read_stream(bytes, cancel, halt, emit, broke, chunk_payload).await
+}
+
+/// What one piece of a stream gave: the events it makes, and true when the
+/// stream says it has ended.
+pub(crate) type Taken = Result<(Vec<ChatEvent>, bool), String>;
+
+/// One piece of the stream the engine on this computer, Grok, and GPT send:
+/// pieces of the reply, then `[DONE]`.
+fn chunk_payload(payload: &str, reply: &mut ReplyStream, done: &mut ChatDone) -> Taken {
+    if payload == "[DONE]" {
+        return Ok((Vec::new(), true));
+    }
+    let Ok(chunk) = serde_json::from_str::<Chunk>(payload) else {
+        return Ok((Vec::new(), false));
+    };
+    if let Some(usage) = chunk.usage {
+        done.prompt_tokens = usage.prompt_tokens.or(done.prompt_tokens);
+        done.completion_tokens = usage.completion_tokens.or(done.completion_tokens);
+    }
+    let mut events = Vec::new();
+    for choice in chunk.choices {
+        if choice.finish_reason.is_some() {
+            done.finish_reason = choice.finish_reason;
+        }
+        if let Some(text) = choice.delta.reasoning.or(choice.delta.reasoning_content) {
+            events.extend(reply.push_reasoning(&text));
+        }
+        if let Some(text) = choice.delta.content {
+            events.extend(reply.push_content(&text));
+        }
+    }
+    Ok((events, false))
+}
+
+/// Reads a streamed answer whose pieces `take` reads, as `read_reply` does.
+/// A piece `take` refuses ends the answer with its reason.
+pub(crate) async fn read_stream<B: AsRef<[u8]>, E>(
+    bytes: impl Stream<Item = Result<B, E>>,
+    cancel: &mut watch::Receiver<bool>,
+    halt: impl Future<Output = String>,
     mut emit: impl FnMut(ChatEvent),
     broke: &str,
+    mut take: impl FnMut(&str, &mut ReplyStream, &mut ChatDone) -> Taken,
 ) -> Result<ChatDone, String> {
     let mut bytes = std::pin::pin!(bytes);
     let mut halt = std::pin::pin!(halt);
@@ -622,32 +667,14 @@ pub(crate) async fn read_reply<B: AsRef<[u8]>, E>(
             Some(Ok(piece)) => piece,
         };
         for payload in lines.push(piece.as_ref()) {
-            if payload == "[DONE]" {
+            let (events, ended) = take(&payload, &mut reply, &mut done)?;
+            if !events.is_empty() {
+                first_piece.get_or_insert_with(Instant::now);
+                last_piece = Instant::now();
+            }
+            events.into_iter().for_each(&mut emit);
+            if ended {
                 break 'stream;
-            }
-            let Ok(chunk) = serde_json::from_str::<Chunk>(&payload) else {
-                continue;
-            };
-            if let Some(usage) = chunk.usage {
-                done.prompt_tokens = usage.prompt_tokens.or(done.prompt_tokens);
-                done.completion_tokens = usage.completion_tokens.or(done.completion_tokens);
-            }
-            for choice in chunk.choices {
-                if choice.finish_reason.is_some() {
-                    done.finish_reason = choice.finish_reason;
-                }
-                let mut events = Vec::new();
-                if let Some(text) = choice.delta.reasoning.or(choice.delta.reasoning_content) {
-                    events.extend(reply.push_reasoning(&text));
-                }
-                if let Some(text) = choice.delta.content {
-                    events.extend(reply.push_content(&text));
-                }
-                if !events.is_empty() {
-                    first_piece.get_or_insert_with(Instant::now);
-                    last_piece = Instant::now();
-                }
-                events.into_iter().for_each(&mut emit);
             }
         }
     }
