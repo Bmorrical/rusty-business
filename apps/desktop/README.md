@@ -20,8 +20,14 @@ Select the picture to open it full size. The rest of the set is in
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **Model picker** limited to a short list: Phi-4 (Microsoft), gpt-oss 20B
-  (OpenAI), and Nemotron 3.5 Lightning (NVIDIA). A model the engine holds that
-  is not on the list is never shown and never accepted.
+  (OpenAI), Nemotron 3.5 Lightning (NVIDIA), Gemma 4 26B (Google), and
+  Llama 3.1 8B (Meta). It shows the models of the makers picked. A model the
+  engine holds that is not on the list is never shown and never accepted.
+- **Model makers**, picked on a first run, Microsoft to begin with, and in
+  Settings, which adds or removes one with one click. One maker always stays
+  picked. Settings also downloads a picked maker's model that is not on this
+  computer yet, with the gate on. Removing a maker hides its models and
+  deletes nothing, and saved chats still name them.
 - **The models on this computer**, named when the engine is not answering.
   The app looks in the Hugging Face cache folder, where the engine keeps the
   models it has downloaded. It only reads there, it keeps no list of its own,
@@ -39,7 +45,8 @@ Select the picture to open it full size. The rest of the set is in
   app quits it stops only a stack it started. The app does not install
   Docker; the chat does not need the stack yet.
 - **A first-run picker.** When none of the app's models is on this computer,
-  the page lists them with their download sizes and marks the quickest to
+  the page shows a box for each maker, Microsoft ticked, and lists the models
+  of the makers ticked with their download sizes, marking the quickest to
   start. With the gate on, Download brings the one you pick from Hugging
   Face, with a progress bar and a Cancel button, and the app then starts the
   engine with it. With it off, the picker offers to turn it on.
@@ -66,7 +73,7 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
 ```
 
 The page never talks to the network, and Rust reaches past this computer only
-through the gate. Rust owns eight things:
+through the gate. Rust owns nine things:
 
 - [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
   keeps the switch, off until the person turns it on, and makes every client
@@ -100,6 +107,11 @@ through the gate. Rust owns eight things:
   4700, on this computer only. That is the port `make up` uses too, so one
   of the two runs at a time, and when either answers, the app starts
   nothing.
+- [src-tauri/src/makers.rs](src-tauri/src/makers.rs), the makers picked.
+  It keeps them in the app's data folder, accepts only makers on the list,
+  always keeps one, and starts with Microsoft and the maker of any model
+  already on this computer. The models shown, on the disk, and offered for
+  download are only those of the makers picked.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 - [src-tauri/src/update.rs](src-tauri/src/update.rs), the notice of a new
   version. It asks only GitHub's API, only for this repository's newest
@@ -134,7 +146,7 @@ that program is the only one tried, even in an app that carries its own.
 | Path                   | What it is                                              |
 | ---------------------- | ------------------------------------------------------- |
 | [src](src)             | The page: one Vue component and its helpers             |
-| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the stack's start, saved chats |
+| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the stack's start, saved chats |
 | [engine](engine)       | The engine the Mac app carries: the one package asked for, and every package under it, pinned by hash |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |

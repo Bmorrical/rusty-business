@@ -142,6 +142,7 @@ pub struct Offer {
     pub id: String,
     pub name: String,
     pub maker: String,
+    pub license: String,
     pub bytes: u64,
 }
 
@@ -159,7 +160,8 @@ fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
         .into_iter()
         .filter_map(|model| {
             let bytes = pinned(pins, &model.id)?.bytes();
-            Some(Offer { id: model.id, name: model.name, maker: model.maker, bytes })
+            let license = engine::license_of(&model.name)?.to_string();
+            Some(Offer { id: model.id, name: model.name, maker: model.maker, license, bytes })
         })
         .collect()
 }
@@ -863,7 +865,7 @@ mod tests {
     fn every_model_on_the_list_is_pinned_and_nothing_else_is() {
         let read: Vec<Pinned> = serde_json::from_str(include_str!("../pinned-models.json")).unwrap();
         assert_eq!(read.len(), PINNED.len());
-        assert_eq!(names_of(&offers_from(&PINNED)), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
+        assert_eq!(names_of(&offers_from(&PINNED)), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
         let ids: BTreeSet<&str> = PINNED.iter().map(|pin| pin.id.as_str()).collect();
         assert_eq!(ids.len(), PINNED.len(), "each model is pinned once");
         for pin in PINNED.iter() {
@@ -896,10 +898,14 @@ mod tests {
                 (PHI, 8_256_384_748),
                 ("mlx-community/gpt-oss-20b-MXFP4-Q8", 12_104_215_835),
                 ("mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", 17_792_581_692),
+                ("mlx-community/gemma-4-26b-a4b-it-4bit", 15_373_586_252),
+                ("mlx-community/Llama-3.1-8B-Instruct-4bit", 4_534_808_112),
             ]
         );
         let offered: Vec<u64> = offers_from(&PINNED).iter().map(|offer| offer.bytes).collect();
-        assert_eq!(offered, [8_256_384_748, 12_104_215_835, 17_792_581_692]);
+        assert_eq!(offered, [8_256_384_748, 12_104_215_835, 17_792_581_692, 15_373_586_252, 4_534_808_112]);
+        let licenses: Vec<String> = offers_from(&PINNED).into_iter().map(|offer| offer.license).collect();
+        assert_eq!(licenses, ["MIT", "Apache 2.0", "OpenMDW 1.1", "Apache 2.0", "Llama 3.1 Community License"]);
     }
 
     #[test]
@@ -1500,8 +1506,8 @@ mod tests {
 
     #[test]
     fn the_page_is_told_under_the_names_it_reads() {
-        let offer = Offer { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), bytes: 8 };
-        assert_eq!(serde_json::to_value(&offer).unwrap(), serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "bytes": 8 }));
+        let offer = Offer { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), license: "MIT".to_string(), bytes: 8 };
+        assert_eq!(serde_json::to_value(&offer).unwrap(), serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "license": "MIT", "bytes": 8 }));
         assert_eq!(serde_json::to_value(Progress { done: 1, total: 2 }).unwrap(), serde_json::json!({ "done": 1, "total": 2 }));
         assert_eq!(
             serde_json::to_value(DownloadReport { whole: false, stopped: true }).unwrap(),

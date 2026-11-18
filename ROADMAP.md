@@ -14,9 +14,6 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **Model makers you choose.** On a first run, you pick one maker or more,
-  with Microsoft ticked to start. Settings adds another with one click,
-  Google and Meta among them.
 - **One question, many models.** Ask one model or several the same
   question, and see the answers side by side. Models that cannot run at
   once take turns.
@@ -87,3 +84,8 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   turn it on. While it is off, nothing leaves the computer: no check for a
   new version, no download, and no start of the stack. Turning it off stops
   what is under way. A chat with a model here works either way.
+- **Model makers you choose.** On a first run, you tick one maker or more,
+  with Microsoft ticked to start. Settings adds or removes a maker with one
+  click. The list now holds five models, Google's Gemma 4 26B and Meta's
+  Llama 3.1 8B among them. Removing a maker hides its models and deletes
+  nothing, and saved chats still name them.

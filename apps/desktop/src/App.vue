@@ -4,6 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
+  canRemove,
   checkedLine,
   dayLabel,
   downloaded,
@@ -14,7 +15,9 @@ import {
   formatWindow,
   fullness,
   gateLine,
+  listedLine,
   onDiskLine,
+  pickedMakers,
   quickest,
   requestMessages,
   savedTurn,
@@ -29,6 +32,7 @@ import {
   UPDATE_EVERY,
   updateDetail,
   updateLine,
+  withMaker,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -62,6 +66,11 @@ const updateChecked = ref("");
 const gate = ref(false);
 const gateBusy = ref(false);
 const gateNote = ref("");
+const makers = ref([]);
+const makersBusy = ref(false);
+const makersNote = ref("");
+const settingsOpen = ref(false);
+const settingsTitle = ref(null);
 let updateTimer = 0;
 
 let chatId = "";
@@ -80,6 +89,7 @@ const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boo
 const offers = computed(() => firstRunOffers(engine.value));
 const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
+const makersLocked = computed(() => makersBusy.value || Boolean(downloading.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
 
 function remembered() {
@@ -179,6 +189,55 @@ async function setGate(open) {
 }
 
 /**
+ * "user can pick google, gemini, meta from the app if they want those instead.
+ * I think the user can pick one or more at install with microsoft default, and
+ * in settings they can one click more of them if they want." Rust keeps the
+ * makers picked and reports only their models; the page shows the list and
+ * asks Rust to change it. None of this leaves the computer.
+ */
+async function readMakers() {
+  try {
+    makers.value = await invoke("makers_status");
+  } catch (error) {
+    makersNote.value = String(error);
+  }
+}
+
+async function setMaker(name, on, box) {
+  // A checkbox shows what Rust kept. Vue leaves a box alone when the pick did
+  // not change, so a refused click would otherwise stay ticked.
+  const showKept = () => {
+    if (box) box.checked = pickedMakers(makers.value).includes(name);
+  };
+  if (makersLocked.value) return showKept();
+  makersBusy.value = true;
+  makersNote.value = "";
+  try {
+    makers.value = await invoke("set_makers", { picked: withMaker(makers.value, name, on) });
+  } catch (error) {
+    // Nothing changed; Rust says why.
+    makersNote.value = String(error);
+    await readMakers();
+  } finally {
+    makersBusy.value = false;
+    showKept();
+  }
+  // The models shown follow the makers picked.
+  await checkEngine();
+}
+
+async function openSettings() {
+  settingsOpen.value = true;
+  nextTick(() => settingsTitle.value?.focus());
+  await readMakers();
+}
+
+function closeSettings() {
+  settingsOpen.value = false;
+  focusComposer();
+}
+
+/**
  * Asks the app to start the stack. Rust starts only what is missing and stops
  * only what it started, when the app quits, so this runs when the window
  * opens and from Try again, never on focus: a first start downloads the
@@ -265,7 +324,7 @@ async function download(offer) {
     const report = await invoke("download_model", { id: offer.id, onProgress: channel });
     if (report.stopped) stoppedNote.value = `The download of ${offer.name} stopped, and none of it was kept.`;
     // With the model in place, the engine can start with it.
-    if (report.whole) await checkEngine();
+    if (report.whole) await Promise.all([checkEngine(), readMakers()]);
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -313,13 +372,16 @@ async function persist() {
 function newChat() {
   if (busy.value) return;
   current.value = blankSession();
+  settingsOpen.value = false;
   problem.value = "";
   askTrash.value = "";
   focusComposer();
 }
 
 async function openSession(id) {
-  if (busy.value || id === current.value.id) return;
+  if (busy.value) return;
+  settingsOpen.value = false;
+  if (id === current.value.id) return;
   problem.value = "";
   askTrash.value = "";
   try {
@@ -444,7 +506,10 @@ function scrollDown() {
 }
 
 function modelName(id) {
-  return models.value.find((entry) => entry.id === id)?.name ?? "";
+  // A model whose maker was removed is set aside, not offered, but a saved
+  // chat still names the model that wrote it.
+  const known = [...models.value, ...(engine.value?.setAside ?? [])];
+  return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
 function replyNote(turn) {
@@ -462,6 +527,8 @@ onMounted(async () => {
   window.addEventListener("focus", checkEngine);
   // While the gate is off, Rust starts no stack and asks for no new version.
   await readGate();
+  // The makers picked are kept on this computer, so they need no gate.
+  await readMakers();
   // The stack can take minutes, so the page does not wait for it.
   checkStack();
   // So does the check for a new version, which asks GitHub.
@@ -545,6 +612,14 @@ onBeforeUnmount(() => {
           <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
           <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
+        <button
+          class="wide"
+          type="button"
+          :aria-current="settingsOpen ? 'page' : undefined"
+          @click="settingsOpen ? closeSettings() : openSettings()"
+        >
+          Settings
+        </button>
         <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
           {{ updateChecking ? "Checking..." : "Check for updates" }}
         </button>
@@ -588,7 +663,80 @@ onBeforeUnmount(() => {
           <button class="link" type="button" @click="updateLater = update.version">Later</button>
         </div>
       </section>
-      <header class="bar">
+      <section v-if="settingsOpen" class="settings" aria-labelledby="settings-title" @keydown.esc="closeSettings">
+        <header class="bar">
+          <h2 id="settings-title" ref="settingsTitle" tabindex="-1">Settings</h2>
+          <button type="button" @click="closeSettings">Back to the chat</button>
+        </header>
+        <div class="settings-body">
+          <h3>Model makers</h3>
+          <p class="quiet">
+            The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
+          </p>
+          <p v-if="!gate" class="gate-ask">
+            <span>The outbound gate is off, so nothing can download yet.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          </p>
+          <ul class="makers" aria-label="Model makers">
+            <li v-for="maker in makers" :key="maker.name" class="maker">
+              <div class="maker-head">
+                <span class="maker-name">{{ maker.name }}</span>
+                <button
+                  v-if="maker.picked"
+                  type="button"
+                  :aria-label="`Remove ${maker.name}`"
+                  :disabled="makersLocked || !canRemove(makers, maker.name)"
+                  @click="setMaker(maker.name, false)"
+                >
+                  Remove
+                </button>
+                <button
+                  v-else
+                  class="primary"
+                  type="button"
+                  :aria-label="`Add ${maker.name}`"
+                  :disabled="makersLocked"
+                  @click="setMaker(maker.name, true)"
+                >
+                  Add
+                </button>
+              </div>
+              <ul class="maker-models">
+                <li v-for="entry in maker.models" :key="entry.name" class="offer">
+                  <span class="offer-text">
+                    <span class="offer-name">{{ entry.name }}</span>
+                    <span class="quiet small">{{ listedLine(entry) }}</span>
+                  </span>
+                  <template v-if="entry.offer && downloading === entry.offer.id">
+                    <span class="offer-progress">
+                      <progress
+                        :value="downloaded(progress)"
+                        max="1"
+                        :aria-label="`How much of ${entry.name} has downloaded`"
+                      ></progress>
+                      <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                    </span>
+                    <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                  </template>
+                  <button
+                    v-else-if="maker.picked && entry.offer && !entry.onDisk"
+                    type="button"
+                    :aria-label="`Download ${entry.name}`"
+                    :disabled="Boolean(downloading) || !gate"
+                    @click="download(entry.offer)"
+                  >
+                    Download
+                  </button>
+                </li>
+              </ul>
+            </li>
+          </ul>
+          <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
+          <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+          <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+        </div>
+      </section>
+      <header v-show="!settingsOpen" class="bar">
         <h2>{{ current.title || "New chat" }}</h2>
         <label class="picker">
           <span class="quiet small">Model</span>
@@ -601,11 +749,24 @@ onBeforeUnmount(() => {
         </label>
       </header>
 
-      <section ref="thread" class="thread" @scroll="onScroll">
+      <section v-show="!settingsOpen" ref="thread" class="thread" @scroll="onScroll">
         <div v-if="!current.messages.length" class="empty">
           <div v-if="offers.length" class="first-run">
             <p class="lead">Pick a model to start.</p>
             <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
+            <fieldset class="makers-pick" :disabled="makersLocked">
+              <legend class="quiet small">Show models from</legend>
+              <label v-for="maker in makers" :key="maker.name" class="maker-check">
+                <input
+                  type="checkbox"
+                  :checked="maker.picked"
+                  :disabled="maker.picked && !canRemove(makers, maker.name)"
+                  @change="setMaker(maker.name, $event.target.checked, $event.target)"
+                />
+                {{ maker.name }}
+              </label>
+            </fieldset>
+            <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
             <p v-if="!gate" class="gate-ask">
               <span>The outbound gate is off, so nothing can download yet.</span>
               <button class="primary" type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
@@ -615,7 +776,9 @@ onBeforeUnmount(() => {
                 <span class="offer-text">
                   <span class="offer-name">{{ offer.name }}</span>
                   <span class="quiet small">
-                    by {{ offer.maker }} · {{ formatSize(offer.bytes) }}{{ offer.id === quick ? " · quickest to start" : "" }}
+                    by {{ offer.maker }} · {{ offer.license }} · {{ formatSize(offer.bytes) }}{{
+                      offer.id === quick ? " · quickest to start" : ""
+                    }}
                   </span>
                 </span>
                 <template v-if="downloading === offer.id">
@@ -668,12 +831,13 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
+      <!-- Shown under Settings too, where a download can fail. -->
       <p v-if="problem" class="problem" role="alert">
         {{ problem }}
         <button class="link" type="button" @click="problem = ''">Dismiss</button>
       </p>
 
-      <footer class="compose">
+      <footer v-show="!settingsOpen" class="compose">
         <div class="box">
           <textarea
             ref="composer"
@@ -1162,6 +1326,86 @@ select {
   display: grid;
   gap: 0.2rem;
   justify-items: end;
+}
+
+/* Settings, in place of the chat. */
+.settings {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings h2:focus {
+  outline: none;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 0.6rem;
+  width: min(40rem, 100%);
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.settings-body h3,
+.settings-body p {
+  margin: 0;
+}
+
+.makers,
+.maker-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.makers {
+  gap: 1rem;
+  margin-top: 0.4rem;
+}
+
+.maker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.maker-name {
+  font-weight: 600;
+}
+
+.makers-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.makers-pick legend {
+  float: left;
+  margin-right: 0.25rem;
+}
+
+.maker-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.maker-check input {
+  accent-color: var(--accent);
+  margin: 0;
 }
 
 .turn {
