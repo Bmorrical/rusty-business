@@ -15,7 +15,7 @@
 //!   gate is on, over https, with no proxy. The one other client in the app
 //!   speaks to the model engine on this computer.
 //! - Turning the gate off stops what is under way: the check for a new
-//!   version, a model download, and a start of the stack.
+//!   version, a model download, a start of the stack, and Grok's answer.
 
 use std::fs;
 use std::path::PathBuf;
@@ -100,7 +100,8 @@ pub fn gate_status(gate: tauri::State<'_, Gate>) -> bool {
 }
 
 /// Turns the gate on or off. Off stops a model download that is under way;
-/// the check for a new version and a start of the stack stop by themselves.
+/// the check for a new version, a start of the stack, and Grok's answer stop
+/// by themselves.
 #[tauri::command]
 pub fn set_gate(open: bool, gate: tauri::State<'_, Gate>, downloads: tauri::State<'_, Downloads>) -> Result<bool, String> {
     let set = gate.set(open);

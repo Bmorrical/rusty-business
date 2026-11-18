@@ -19,7 +19,8 @@
 A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. It is local first: a chat
 with a model here needs nothing from outside, and nothing leaves the computer
-until you turn on the outbound gate.
+until you turn on the outbound gate. With it on, Grok, by xAI, can answer too,
+with your own key.
 
 **Status:** version 0.5.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
@@ -67,21 +68,25 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   listens on this computer only, and is told to stay offline. Everything
   else waits for the outbound gate, a switch at the foot of the window that
   is off until you turn it on; turning it off stops what is under way. With
-  the gate on, the app reaches out in three places. On a first run or in
+  the gate on, the app reaches out in four places. On a first run or in
   Settings, Download brings the model you pick from Hugging Face, over https
   and from nowhere else. The first time it starts the stack, Docker downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
-  out. Nothing you type goes with any of them. There is no account, no
-  sign-in, and nothing in the cloud. Ollama keeps your prompts on your computer too
-  when a model runs there. It also offers models that run in its cloud, with
-  a switch that turns them off.
+  out. Nothing you type goes with any of these three. The fourth is Grok:
+  once you add it in Settings, with the path to a file that holds your own
+  xAI key, a question you ask Grok goes to xAI's API, over https and to
+  nowhere else, with the key. The key stays in its file and never reaches
+  the page. There is no account and no sign-in. Ollama keeps your prompts on
+  your computer too when a model runs there. It also offers models that run
+  in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
   can open, copy, and back up. The trash is a folder too, so nothing is
   deleted.
 - **One question, several models.** Pick one model or more at the top of
   the window, and each answers the same question, side by side. The models
-  on this computer take turns, since the engine holds one at a time.
+  on this computer take turns, since the engine holds one at a time. Grok,
+  once added, can be one of them, or answer alone.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
   is.
@@ -101,7 +106,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   a model.
 - **Models that run in the cloud.** Ollama offers them, for a model larger
   than your computer can hold. Rusty Business™ runs only what your computer
-  can.
+  can, and asks one engine outside it, Grok, with your own xAI key.
 - **Pictures and files.** Ollama's app takes images and dropped files. Rusty
   Business™ takes words.
 
@@ -126,8 +131,8 @@ run models on your own computer. Here are the three side by side.
 | Runs a model on | A Mac with Apple silicon; Windows and Linux get the window, with no engine yet | macOS, Windows, and Linux | macOS, Windows, and Linux |
 | How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
 | What does the work | Apple silicon's GPU, through MLX | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
-| Models | Five, on a fixed list, from the makers you pick; any other is refused | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
-| A model too big for memory | Not run; it runs only what your computer can | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
+| Models | Five, on a fixed list, from the makers you pick; any other is refused. Grok, by xAI, with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
+| A model too big for memory | Not run here; Grok, with your own key, answers from xAI's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
 | For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
 | Pictures and files | Words only | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
@@ -200,6 +205,13 @@ models of the makers you tick, Microsoft to begin with, with their download
 sizes. Turn on the outbound gate, at the foot of the window, and Download
 brings the one you pick from Hugging Face; the app then starts the engine
 with it. The gate stays as you leave it, and a chat works with it on or off.
+
+To ask Grok, by xAI, put your xAI key alone in a file, such as
+`~/.config/xai/key`, readable only by you. In Settings, under Outside
+engines, give the path to that file and click Add. With the gate on, the app
+finds Grok's models, and they join the ones at the top of the window, marked
+online. The app keeps the path, never the key, and Remove forgets the path
+and leaves the file as it is.
 
 Settings, above Check for updates, adds or removes a maker with one click,
 and downloads any of a picked maker's models that are not on the computer
@@ -392,6 +404,9 @@ next.
 - **One model at a time on this computer.** The engine holds one model, so
   when several answer, they take turns, and each answer waits for the ones
   before it.
+- **One engine outside this computer.** Grok, by xAI, is the only one so
+  far, and the app asks it through the chat API that xAI now calls legacy.
+  (On the roadmap: Grok through xAI's newer API.)
 - **Words only.** It takes no pictures and no files, and it shows an answer as
   plain text. (On the roadmap: Pictures.)
 - **A short list of models.** That is on purpose. A model that is not on the

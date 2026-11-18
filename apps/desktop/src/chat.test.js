@@ -6,6 +6,7 @@ import {
   canRemove,
   chatModels,
   checkedLine,
+  chipDetail,
   dayLabel,
   downloaded,
   downloadLine,
@@ -17,13 +18,17 @@ import {
   fullness,
   gateLine,
   groups,
+  isOutside,
   keptPicks,
   latestAnswers,
   listedLine,
+  looksLikePath,
   meterLine,
   moreLine,
   namesLine,
   onDiskLine,
+  OUTSIDE_PREFIX,
+  outsideModelsLine,
   pickedMakers,
   quickest,
   requestMessages,
@@ -346,7 +351,10 @@ test("the page asks once a day while it stays open", () => {
 // "off by default, everything stops".
 test("the gate's line says what off and on mean", () => {
   assert.equal(gateLine(false), "Gate off. Nothing leaves this computer.");
-  assert.equal(gateLine(true), "Gate on. The app may go online to check for updates, download models, and start the stack.");
+  assert.equal(
+    gateLine(true),
+    "Gate on. The app may go online to check for updates, download models, start the stack, and ask Grok.",
+  );
   // Anything but a plain yes reads as off.
   for (const open of [undefined, null, 0, ""]) assert.equal(gateLine(open), gateLine(false));
 });
@@ -492,4 +500,54 @@ test("the models asked are named in one line, with the Oxford comma", () => {
   // iterate on the question".
   assert.equal(answersLine([phi, { name: "gpt-oss 20B" }]), "Phi-4 and gpt-oss 20B answer in turn, side by side.");
   assert.equal(answersLine([]), "");
+});
+
+// Brad, 2026-11-17: "user can add their outside inference, start with Grok and
+// Grok ai. user adds it manually, they will need to provide or specify a path
+// to a key, now, the Rusty Business™ can query Grok for the same question. ...
+// you can use grok by it's self too."
+const GROK = { id: "xai:grok-4", name: "Grok 4", maker: "xAI", context: 262_144 };
+const GROK_UNKNOWN = { id: "xai:grok-mini", name: "Grok Mini", maker: "xAI", context: 0 };
+
+test("Grok's models are told apart from the models on this computer", () => {
+  assert.equal(OUTSIDE_PREFIX, "xai:");
+  assert.ok(isOutside(GROK.id));
+  for (const id of ["microsoft/phi-4", "", undefined, null, "grok-4", "local/xai:grok"]) {
+    assert.equal(isOutside(id), false, `${id} read as Grok`);
+  }
+});
+
+test("a chip says when a model is asked online", () => {
+  assert.equal(chipDetail({ id: "microsoft/phi-4", maker: "Microsoft", context: 16_384 }), "Microsoft · 16K");
+  assert.equal(chipDetail(GROK), "xAI · online · 256K");
+  // A window xAI did not give is left out, not shown as 0K.
+  assert.equal(chipDetail(GROK_UNKNOWN), "xAI · online");
+});
+
+test("Grok can answer alone, even when its window is not known", () => {
+  assert.equal(answersLine([GROK]), "Grok 4 by xAI answers, with room for 262,144 tokens.");
+  assert.equal(answersLine([GROK_UNKNOWN]), "Grok Mini by xAI answers.");
+  assert.equal(
+    answersLine([{ name: "Phi-4", maker: "Microsoft", context: 16_384 }, GROK]),
+    "Phi-4 and Grok 4 answer in turn, side by side.",
+  );
+  // A window not known is never the fullest, and never divides by nothing.
+  const asked = [{ role: "user", content: "Hi." }, { role: "assistant", content: "Hello.", model: GROK_UNKNOWN.id, promptTokens: 9, completionTokens: 3 }];
+  assert.equal(fullest(asked, [GROK_UNKNOWN]), null);
+  assert.equal(fullest(asked, [GROK_UNKNOWN, GROK]).model, GROK);
+});
+
+test("a key pasted where the path goes is told from a path", () => {
+  for (const path of ["/Users/me/.config/xai/key", "~/xai-key.txt", "~\\keys\\xai", "C:\\keys\\xai.txt", "c:/keys/xai", "\\\\server\\keys", "  ~/padded  "]) {
+    assert.ok(looksLikePath(path), `${path} did not read as a path`);
+  }
+  for (const text of ["xai-0123456789abcdefghijklmnopqrstuvwxyz", "key.txt", "~", "~key", "", undefined, "C:keys"]) {
+    assert.equal(looksLikePath(text), false, `${text} read as a path`);
+  }
+});
+
+test("Settings names Grok's models, or that none is found yet", () => {
+  assert.equal(outsideModelsLine({ name: "Grok", models: [GROK, GROK_UNKNOWN] }), "Grok's models: Grok 4 and Grok Mini.");
+  assert.equal(outsideModelsLine({ name: "Grok", models: [] }), "No Grok models found yet.");
+  assert.equal(outsideModelsLine(null), "No Grok models found yet.");
 });
