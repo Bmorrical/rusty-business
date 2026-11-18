@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -59,6 +59,18 @@ test('every folder has a README', () => {
 
   const missing = missingReadmes(folders, (file) => existsSync(path.join(REPO, file)));
   assert.deepEqual(missing, [], `no README.md in: ${missing.join(', ')}`);
+});
+
+test('every check in this folder is listed in its README', () => {
+  // The makers check was missed once, so a check that is not listed fails.
+  const listed = readFileSync(path.join(REPO, 'scripts', 'README.md'), 'utf8')
+    .split('\n')
+    .map((line) => line.match(/^\| `([^`]+\.test\.mjs)` \| Fails when /)?.[1])
+    .filter(Boolean);
+  const checks = readdirSync(path.join(REPO, 'scripts')).filter((file) => file.endsWith('.test.mjs'));
+  assert.ok(checks.length > 10, 'the list of checks looks too short to be right');
+  assert.deepEqual(checks.filter((file) => !listed.includes(file)), [], 'a check is missing from scripts/README.md');
+  assert.deepEqual(listed.filter((file) => !checks.includes(file)), [], 'scripts/README.md lists a check that is not there');
 });
 
 test('a folder is found at every depth, once', () => {

@@ -1,17 +1,17 @@
 # Screenshots
 
-Six pictures of the chat window. Each is 1,840 pixels wide, taken from a
+Seven pictures of the chat window. Each is 1,840 pixels wide, taken from a
 window 920 points wide, so the words are large enough to read. Select a
 picture to open it full size.
 
 ## A chat
 
-[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](chat.png)](chat.png?raw=true)
+[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](chat.png)](chat.png?raw=true)
 
 Two questions to Phi-4 and its answers. Under each answer is the model's
 name, how many tokens the answer took, and how fast they came. Saved chats
-are on the left, the model picker is at the top right, and the meter under
-the message box shows how full the model's window is.
+are on the left, the models are at the top with Phi-4 picked, and the meter
+under the message box shows how full the model's window is.
 
 ## Thinking, apart from the answer
 
@@ -20,9 +20,19 @@ the message box shows how full the model's window is.
 gpt-oss 20B thinks before it answers. The app keeps that thinking folded away
 above the answer. Here it is opened.
 
+## One question, three models
+
+[![One question put to three models in the light theme: Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning picked at the top, and their answers side by side under the question, each with its token count and speed, and the meter naming the fullest window](compare.png)](compare.png?raw=true)
+
+Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning are picked, so each answers
+the same question, and the answers sit side by side. The models on this
+computer take turns, since the engine holds one at a time. gpt-oss and
+Nemotron think first, and their thinking is folded away. The meter shows
+the fullest of the three windows, and names its model.
+
 ## A new chat
 
-[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](new-chat.png)](new-chat.png?raw=true)
+[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 picked among the models at the top, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](new-chat.png)](new-chat.png?raw=true)
 
 What the app shows before the first question. The app follows the system's
 light or dark setting; this is light.
@@ -70,12 +80,13 @@ in Google Chrome with no window on screen and saves each picture here.
 
 These are pictures of the app's page, not captures of the app's window:
 
-- There is no title bar, and the model picker is drawn by Chrome. The app
-  uses the system's web view, which draws that control its own way.
+- There is no title bar, and the first run's boxes are drawn by Chrome. The
+  app uses the system's web view, which draws them its own way.
 - Rust is not running. The page's calls to it are answered from
   [chats.json](chats.json): what the app reported about the engine on one
   Mac with every maker picked, the five models it offers with their sizes,
-  and replies the three models there gave, recorded once. Each picture picks
+  and replies the three models there gave, recorded once. One of the chats
+  puts the same question to all three. Each picture picks
   makers as the app does before you pick any: Microsoft, and the maker of
   each model already on the computer. The words, token counts, and speeds
   are real. Nothing is sent to a model while the pictures are made, and no
@@ -102,8 +113,9 @@ nowhere else.
 | ---------------- | -------------------------------------------------------------- |
 | `chat.png`       | A chat with two questions answered                             |
 | `thinking.png`   | A chat with the model's thinking opened                        |
+| `compare.png`    | One question answered by three models, side by side            |
 | `new-chat.png`   | A new chat, before the first question                          |
 | `engine-off.png` | The app with no engine answering                               |
 | `first-run.png`  | The first run, with none of the app's models on this computer  |
 | `settings.png`   | Settings, with the five model makers                           |
-| `chats.json`     | What the pictures are made from: the engine's report, the models offered, and four recorded chats |
+| `chats.json`     | What the pictures are made from: the engine's report, the models offered, and five recorded chats |

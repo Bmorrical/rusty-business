@@ -31,17 +31,19 @@ has a model engine yet. What it cannot do yet is under [Limits](#limits).
 
 Select a picture to open it full size.
 
-[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](docs/screenshots/chat.png)](docs/screenshots/chat.png?raw=true)
+[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](docs/screenshots/chat.png)](docs/screenshots/chat.png?raw=true)
 
-| A model's thinking, apart from its answer | A new chat |
-| ----------------------------------------- | ---------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
+| A model's thinking, apart from its answer | One question, three models |
+| ----------------------------------------- | -------------------------- |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![One question put to three models in the light theme: Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning picked at the top, and their answers side by side under the question, each with its token count and speed, and the meter naming the fullest window](docs/screenshots/compare.png)](docs/screenshots/compare.png?raw=true) |
 
-| No engine answering | The first run: pick makers, then a model |
-| ------------------- | ---------------------------------------- |
-| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
+| A new chat | No engine answering |
+| ---------- | ------------------- |
+| [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 picked among the models at the top, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
 
-[![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true)
+| The first run: pick makers, then a model | Settings: add or remove a maker |
+| ---------------------------------------- | ------------------------------- |
+| [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -77,6 +79,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
   can open, copy, and back up. The trash is a folder too, so nothing is
   deleted.
+- **One question, several models.** Pick one model or more at the top of
+  the window, and each answers the same question, side by side. The models
+  on this computer take turns, since the engine holds one at a time.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
   is.
@@ -384,6 +389,9 @@ next.
   on the computer and the gate is on. It does not put Docker there. The chat does not need the
   stack yet.
 - **One download at a time.** The app downloads one model, then the next.
+- **One model at a time on this computer.** The engine holds one model, so
+  when several answer, they take turns, and each answer waits for the ones
+  before it.
 - **Words only.** It takes no pictures and no files, and it shows an answer as
   plain text. (On the roadmap: Pictures.)
 - **A short list of models.** That is on purpose. A model that is not on the

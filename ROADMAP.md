@@ -14,9 +14,6 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **One question, many models.** Ask one model or several the same
-  question, and see the answers side by side. Models that cannot run at
-  once take turns.
 - **Engines outside this computer, Grok first.** You give the path to your
   key. The app reads it there, never shows it to the page, and sends it
   over https only to the maker's own address, and only while the outbound
@@ -89,3 +86,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   click. The list now holds five models, Google's Gemma 4 26B and Meta's
   Llama 3.1 8B among them. Removing a maker hides its models and deletes
   nothing, and saved chats still name them.
+- **One question, many models.** Pick one model or several at the top of
+  the window, and each answers the same question, side by side. The models
+  on this computer take turns, since the engine holds one at a time, and
+  Stop asks no more of them.

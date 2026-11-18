@@ -516,9 +516,27 @@ pub struct ChatDone {
     pub seconds: f64,
 }
 
-/// Chats in flight, so one can be stopped by its id.
+/// Chats in flight, so one can be stopped by its id, and the turn they wait
+/// for.
 #[derive(Default)]
-pub struct Chats(Mutex<HashMap<String, watch::Sender<bool>>>);
+pub struct Chats {
+    stops: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// One model on this computer answers at a time. The engine holds one
+    /// model and loads another in its place, so models here take turns.
+    turn: tokio::sync::Mutex<()>,
+}
+
+/// Waits until no other model on this computer is answering. `None` when the
+/// chat is stopped first, so a stopped chat never takes its turn.
+async fn wait_for_turn<'a>(
+    turn: &'a tokio::sync::Mutex<()>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    tokio::select! {
+        held = turn.lock() => Some(held),
+        _ = cancel.changed() => None,
+    }
+}
 
 fn checked_request(request: &ChatRequest) -> Result<(), String> {
     if catalog_entry(&request.model).is_none() {
@@ -627,12 +645,18 @@ pub async fn chat_stream(
     on_event: Channel<ChatEvent>,
 ) -> Result<ChatDone, String> {
     let (stop, mut stopped) = watch::channel(false);
-    chats.0.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
-    let result = run_chat(&request, &mut stopped, |event| {
-        let _ = on_event.send(event);
-    })
-    .await;
-    if let Ok(mut map) = chats.0.lock() {
+    chats.stops.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
+    // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
+    let result = match wait_for_turn(&chats.turn, &mut stopped).await {
+        None => Ok(ChatDone { stopped: true, ..ChatDone::default() }),
+        Some(_turn) => {
+            run_chat(&request, &mut stopped, |event| {
+                let _ = on_event.send(event);
+            })
+            .await
+        }
+    };
+    if let Ok(mut map) = chats.stops.lock() {
         map.remove(&chat_id);
     }
     result
@@ -640,7 +664,7 @@ pub async fn chat_stream(
 
 #[tauri::command]
 pub fn stop_chat(chats: tauri::State<'_, Chats>, chat_id: String) {
-    if let Ok(map) = chats.0.lock() {
+    if let Ok(map) = chats.stops.lock() {
         if let Some(stop) = map.get(&chat_id) {
             let _ = stop.send(true);
         }
@@ -881,6 +905,34 @@ mod tests {
     fn events_carry_their_kind() {
         let json = serde_json::to_value(ChatEvent::Answer { text: "4".to_string() }).unwrap();
         assert_eq!(json, serde_json::json!({ "kind": "answer", "text": "4" }));
+    }
+
+    // Brad, 2026-11-17: "if they can't run asychronos then the models can
+    // iterate on the question." The engine here holds one model at a time,
+    // so the models on this computer take turns.
+    #[test]
+    fn models_on_this_computer_take_turns() {
+        tauri::async_runtime::block_on(async {
+            let turn = tokio::sync::Mutex::new(());
+            let (_first_stop, mut first) = watch::channel(false);
+            let answering = wait_for_turn(&turn, &mut first).await.expect("the first model gets its turn");
+
+            let (second_stop, mut second) = watch::channel(false);
+            let waited = tokio::time::timeout(Duration::from_millis(50), wait_for_turn(&turn, &mut second)).await;
+            assert!(waited.is_err(), "a second model answered while the first still was");
+
+            drop(answering);
+            let next = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut second)).await;
+            assert!(matches!(next, Ok(Some(_))), "the next model gets its turn once the first is done");
+            drop(next);
+
+            let _held = turn.lock().await;
+            let (third_stop, mut third) = watch::channel(false);
+            third_stop.send(true).unwrap();
+            let stopped = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut third)).await;
+            assert!(matches!(stopped, Ok(None)), "a model stopped while it waits never takes its turn");
+            drop(second_stop);
+        });
     }
 
     /// Needs the engine running with Phi-4 on hand: `cargo test -- --ignored`.

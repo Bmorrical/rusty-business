@@ -22,6 +22,8 @@ import {
   dayLabel,
   firstRunOffers,
   formatSize,
+  groups,
+  latestAnswers,
   onDiskLine,
   quickest,
   shouldStart,
@@ -285,8 +287,8 @@ test('each scene is a picture the script can make', () => {
 });
 
 test('the recorded engine offers only models on the app\'s list', () => {
-  // The pictures show a model picker, so what was recorded has to match the
-  // allow-list in the Rust code. Brad, 2026-11-17: "user can pick google,
+  // The pictures show the models at the top of the window, so what was
+  // recorded has to match the allow-list in the Rust code. Brad, 2026-11-17: "user can pick google,
   // gemini, meta from the app if they want those instead." So the list holds
   // models from Google and Meta too, and the recording offers every model on
   // it, so Settings can show each maker.
@@ -321,15 +323,24 @@ test('the recorded engine offers only models on the app\'s list', () => {
     'every model on the list is offered, in the list\'s order',
   );
 
+  // A chat names the model it was started with. Its answers may come from
+  // several: Brad, 2026-11-17: "user can run the same question in 1-nth
+  // models and checks the results of each one". Each answer names a model the
+  // engine offers, and no model answers one question twice.
   const offered = engine.models.map((model) => model.id);
+  let many = 0;
   for (const chat of chats) {
     assert.ok(offered.includes(chat.model), `the chat "${chat.id}" uses a model the engine offers`);
-    for (const message of chat.messages) {
-      if (message.role === 'assistant') {
-        assert.equal(message.model, chat.model, `every answer in "${chat.id}" names the chat's model`);
+    for (const group of groups(chat.messages)) {
+      const models = group.answers.filter((answer) => answer.role === 'assistant').map((answer) => answer.model);
+      for (const model of models) {
+        assert.ok(offered.includes(model), `an answer in "${chat.id}" names ${model}, which the engine offers`);
       }
+      assert.equal(new Set(models).size, models.length, `no model answers one question in "${chat.id}" twice`);
+      if (models.length > 1) many += 1;
     }
   }
+  assert.ok(many > 0, 'one recorded question is answered by several models, for compare.png');
 });
 
 test('the recorded report has the fields the app reports, in its order', () => {
@@ -646,6 +657,7 @@ test('the stand-in answers the seven calls the pictures need, and refuses the re
       id: entry.id,
       title: entry.title,
       model: entry.model,
+      models: latestAnswers(entry.messages),
       updatedAt: entry.updatedAt,
       turns: entry.messages.length,
     })),

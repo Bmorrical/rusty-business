@@ -17,14 +17,48 @@ export function titleFrom(text) {
 }
 
 /**
+ * The chat in rounds: each question, and the answers that came after it, one
+ * for each model asked. The turns are the chat's own, not copies, so a reply
+ * that is still arriving shows as it grows.
+ */
+export function groups(turns) {
+  const rounds = [];
+  for (const [index, turn] of (turns ?? []).entries()) {
+    if (turn.role === "user" || !rounds.length) {
+      rounds.push({ key: index, question: turn.role === "user" ? turn : null, answers: [] });
+    }
+    if (turn.role !== "user") rounds.at(-1).answers.push(turn);
+  }
+  return rounds;
+}
+
+/**
+ * The chat as one model sees it: each question with that model's own answer,
+ * or with the first answer when that model was not asked, so every model
+ * reads one answer to each question.
+ */
+function threadFor(turns, modelId) {
+  const kept = [];
+  for (const round of groups(turns)) {
+    if (round.question) kept.push(round.question);
+    const replies = round.answers.filter((turn) => turn.role === "assistant" && String(turn.content ?? "").trim());
+    kept.push(...round.answers.filter((turn) => turn.role !== "assistant"));
+    const own = replies.find((turn) => turn.model === modelId) ?? replies[0];
+    if (own) kept.push(own);
+  }
+  return kept;
+}
+
+/**
  * What goes to the engine: role and answer only. Thinking is never sent
  * back, an empty turn is left out, and two turns in a row from the same
  * side (a reply that was stopped before it began) are joined, because some
- * models refuse a chat whose turns do not alternate.
+ * models refuse a chat whose turns do not alternate. Given a model, each
+ * question carries one answer, that model's own when it gave one.
  */
-export function requestMessages(turns) {
+export function requestMessages(turns, modelId) {
   const messages = [];
-  for (const turn of turns ?? []) {
+  for (const turn of modelId ? threadFor(turns, modelId) : (turns ?? [])) {
     const content = String(turn.content ?? "").trim();
     if (!content || !["system", "user", "assistant"].includes(turn.role)) continue;
     const last = messages[messages.length - 1];
@@ -37,11 +71,14 @@ export function requestMessages(turns) {
   return messages;
 }
 
-/** Tokens the chat held after its latest measured reply, or null if none. */
-export function tokensUsed(turns) {
+/**
+ * Tokens the chat held after its latest measured reply, or null if none.
+ * Given a model, only that model's replies count.
+ */
+export function tokensUsed(turns, modelId) {
   for (let index = (turns ?? []).length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
-    if (turn.role === "assistant" && Number.isFinite(turn.promptTokens)) {
+    if (turn.role === "assistant" && Number.isFinite(turn.promptTokens) && (!modelId || turn.model === modelId)) {
       return turn.promptTokens + (turn.completionTokens ?? 0);
     }
   }
@@ -52,6 +89,91 @@ export function tokensUsed(turns) {
 export function fullness(used, context) {
   if (!used || !context) return 0;
   return Math.min(1, used / context);
+}
+
+/**
+ * Of the models asked, the one whose window is fullest, with its tokens used:
+ * its own latest count, or the chat's latest when it has not answered yet.
+ * Null when nothing has been counted.
+ */
+export function fullest(turns, models) {
+  let top = null;
+  for (const entry of models ?? []) {
+    const used = tokensUsed(turns, entry.id) ?? tokensUsed(turns);
+    if (!used) continue;
+    const full = fullness(used, entry.context);
+    if (!top || full > top.full) top = { model: entry, used, full };
+  }
+  return top;
+}
+
+/** "184 of 16,384 tokens", naming the model when several are asked. */
+export function meterLine(top, many) {
+  const count = `${formatCount(top.used)} of ${formatCount(top.model.context)} tokens`;
+  return many ? `Fullest window, ${top.model.name}: ${count}` : count;
+}
+
+/** "Phi-4", "Phi-4 and gpt-oss 20B", or "Phi-4, gpt-oss 20B, and Nemotron". */
+export function namesLine(names) {
+  const list = [...new Set(names ?? [])];
+  if (list.length <= 2) return list.join(" and ");
+  return `${list.slice(0, -1).join(", ")}, and ${list.at(-1)}`;
+}
+
+/**
+ * The models picked once `id` is added (`on`) or taken away, in the order
+ * of `ids`, the models on hand. The last one picked stays: a question always
+ * goes to at least one model.
+ */
+export function withPick(picks, id, on, ids) {
+  const kept = (ids ?? []).filter((each) => (each === id ? on : (picks ?? []).includes(each)));
+  return kept.length ? kept : (ids ?? []).filter((each) => (picks ?? []).includes(each));
+}
+
+/**
+ * The first of the lists given that names a model on hand, kept to those on
+ * hand and in their order. Empty when none does.
+ */
+export function keptPicks(ids, ...lists) {
+  for (const list of lists) {
+    const kept = (ids ?? []).filter((id) => (list ?? []).includes(id));
+    if (kept.length) return kept;
+  }
+  return [];
+}
+
+/**
+ * The models that answered the latest question, each once, in the order they
+ * answered. Rust names the same ones in the list of saved chats.
+ */
+export function latestAnswers(turns) {
+  const list = turns ?? [];
+  const start = list.findLastIndex((turn) => turn.role === "user") + 1;
+  return [...new Set(list.slice(start).filter((turn) => turn.role === "assistant" && turn.model).map((turn) => turn.model))];
+}
+
+/** The models a saved chat was last asked with: its latest answers, or its model. */
+export function chatModels(session) {
+  const answered = latestAnswers(session?.messages);
+  return answered.length ? answered : [session?.model].filter(Boolean);
+}
+
+/** "Phi-4", or "Phi-4 and 2 more": a saved chat's models in the list's width. */
+export function moreLine(names) {
+  const list = [...new Set((names ?? []).filter(Boolean))];
+  if (list.length <= 1) return list[0] ?? "";
+  return `${list[0]} and ${list.length - 1} more`;
+}
+
+/** What a new chat says will answer: one model and its room, or each in turn. */
+export function answersLine(models) {
+  const list = models ?? [];
+  if (!list.length) return "";
+  if (list.length === 1) {
+    const [only] = list;
+    return `${only.name} by ${only.maker} answers, with room for ${formatCount(only.context)} tokens.`;
+  }
+  return `${namesLine(list.map((entry) => entry.name))} answer in turn, side by side.`;
 }
 
 export function formatCount(count) {
@@ -68,11 +190,9 @@ export function formatWindow(context) {
  * each name once, in the order given.
  */
 export function onDiskLine(models) {
-  const names = [...new Set((models ?? []).map((entry) => entry.name))];
+  const names = (models ?? []).map((entry) => entry.name);
   if (!names.length) return "None of this app's models is on this computer yet.";
-  if (names.length === 1) return `On this computer: ${names[0]}.`;
-  if (names.length === 2) return `On this computer: ${names[0]} and ${names[1]}.`;
-  return `On this computer: ${names.slice(0, -1).join(", ")}, and ${names.at(-1)}.`;
+  return `On this computer: ${namesLine(names)}.`;
 }
 
 /**
