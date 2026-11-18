@@ -1,6 +1,6 @@
 # Screenshots
 
-Seven pictures of the chat window. Each is 1,840 pixels wide, taken from a
+Eight pictures of the chat window. Each is 1,840 pixels wide, taken from a
 window 920 points wide, so the words are large enough to read. Select a
 picture to open it full size.
 
@@ -48,14 +48,25 @@ button to try again.
 
 ## The first run
 
-[![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](first-run.png)](first-run.png?raw=true)
+[![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and Grok, are on the Installers page](first-run.png)](first-run.png?raw=true)
 
 What the app shows when none of its models is on this computer. Microsoft
 is ticked to begin with; ticking another maker adds its models below, each
 with its maker, license, and download size, and the smallest marked as the
 quickest to start. Microsoft cannot be unticked while it is the only maker
 ticked. Nothing downloads until the outbound gate is on and Download is
-pressed.
+pressed. More models, and Grok, are a click away on the Installers page.
+
+## The Installers page
+
+[![The Installers page in the dark theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate, and Outside engines below](installers.png)](installers.png?raw=true)
+
+The Installers page, opened from the foot of the window above Settings,
+lists every model on the app's list, from every maker, with its license and
+download size. Install downloads one, once the outbound gate is on, then
+adds its maker so the model shows at the top of the window. Here the gate is
+off, so Install waits. A model already on this computer whose maker is not
+added has a Show button instead. Grok is added below, under Outside engines.
 
 ## Settings: the model makers
 
@@ -65,8 +76,8 @@ Settings, opened from the foot of the window, lists every maker on the app's
 list with its models. Add and Remove pick a maker with one click. Here the
 makers picked are the three whose models are on this computer, as the app
 picks them before you do. Removing one hides its models and deletes nothing,
-and saved chats still name them. A picked maker's model that is not on the
-computer has a Download button, which waits for the outbound gate.
+and saved chats still name them. To download a model, Settings points to
+the Installers page.
 
 ## How these were made
 
@@ -94,8 +105,9 @@ These are pictures of the app's page, not captures of the app's window:
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
   No stack is started either: in every picture, the page is told the stack's
-  front door already answers. The outbound gate is off in every picture, as
-  it is until it is turned on, and no maker can be changed.
+  front door already answers. Grok is not added, and no key is read. The
+  outbound gate is off in every picture, as it is until it is turned on, and
+  no maker can be changed.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 
@@ -117,5 +129,6 @@ nowhere else.
 | `new-chat.png`   | A new chat, before the first question                          |
 | `engine-off.png` | The app with no engine answering                               |
 | `first-run.png`  | The first run, with none of the app's models on this computer  |
+| `installers.png` | The Installers page, with every maker's models                 |
 | `settings.png`   | Settings, with the five model makers                           |
 | `chats.json`     | What the pictures are made from: the engine's report, the models offered, and five recorded chats |

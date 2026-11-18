@@ -38,9 +38,9 @@ export const SCALE = 2;
 /**
  * One picture each. `open` is the id of the saved chat to show, `thinking`
  * opens that chat's thinking, `top` shows the chat from its first question
- * rather than its last answer, `settings` opens Settings, `engine: 'off'` is
- * the app with no engine answering, and `engine: 'first-run'` is the app on a
- * computer with none of its models yet.
+ * rather than its last answer, `page` opens the Installers or Settings page,
+ * `engine: 'off'` is the app with no engine answering, and
+ * `engine: 'first-run'` is the app on a computer with none of its models yet.
  */
 export const SCENES = [
   { file: 'chat.png', scheme: 'dark', engine: 'on', open: 'nails' },
@@ -49,8 +49,24 @@ export const SCENES = [
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
-  { file: 'settings.png', scheme: 'light', engine: 'on', settings: true },
+  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers' },
+  { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings' },
 ];
+
+/** The button in the side bar that opens each page a picture shows. */
+export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
+
+/** Grok as outside_status gives it before anyone adds it. */
+export const GROK_NOT_ADDED = {
+  name: 'Grok',
+  maker: 'xAI',
+  host: 'api.x.ai',
+  added: false,
+  keyPath: null,
+  models: [],
+  warning: null,
+  error: null,
+};
 
 const BROWSERS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -187,14 +203,14 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the seven
+ * The script that stands in for Rust inside the page. It answers the eight
  * calls the pictures need and refuses the rest, a download and a change of
- * makers among them. Asked to start the engine, it starts nothing and gives
- * the reason it was handed, by default that the engine's program was not
- * found. Asked to start the stack, it starts nothing and says the stack is
- * running. The outbound gate is off, as it is on a first run. The makers are
- * picked as the app picks them before the person does, and the engine's
- * report holds only their models.
+ * makers among them. Grok is not added. Asked to start the engine, it starts
+ * nothing and gives the reason it was handed, by default that the engine's
+ * program was not found. Asked to start the stack, it starts nothing and says
+ * the stack is running. The outbound gate is off, as it is on a first run.
+ * The makers are picked as the app picks them before the person does, and
+ * the engine's report holds only their models.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
@@ -203,6 +219,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
     const sessions = ${JSON.stringify(sessions)};
     const notStarted = ${JSON.stringify(start)};
     const stack = ${JSON.stringify(stack)};
+    const grok = ${JSON.stringify(GROK_NOT_ADDED)};
     const forMakers = ${forMakers};
     const makersStatus = ${makersStatus};
     const latestAnswers = ${latestAnswers};
@@ -212,6 +229,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
+      outside_status: () => grok,
       list_sessions: () =>
         sessions.map((entry) => ({
           id: entry.id,
@@ -382,8 +400,9 @@ async function takePicture(send, address, scene, engine, sessions) {
   if (scene.top) {
     await inPage(send, tab, `document.querySelector('.thread').scrollTop = 0`);
   }
-  if (scene.settings) {
-    await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Settings').click()`);
+  if (scene.page) {
+    const label = JSON.stringify(PAGE_BUTTONS[scene.page]);
+    await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${label}).click()`);
     await until(send, tab, `document.querySelectorAll('.makers > li').length > 0`, 'the model makers');
     // Scrolled to the first maker, the picture holds every maker on the list.
     await inPage(send, tab, `document.querySelector('.makers > li').scrollIntoView({ block: 'start' })`);

@@ -24,6 +24,7 @@ import {
   graderFor,
   gradesLine,
   groups,
+  installLine,
   isOutside,
   keptPicks,
   listedLine,
@@ -94,8 +95,10 @@ const outsidePath = ref("");
 // The model picked in Settings to grade the answers: its id, "" for no
 // grading, or null until one is picked.
 const graderPick = ref(rememberedGrader());
-const settingsOpen = ref(false);
-const settingsTitle = ref(null);
+// What the main pane shows: "chat", "installers", or "settings".
+const page = ref("chat");
+// The open page's title, which takes the focus when the page opens.
+const pageTitle = ref(null);
 let updateTimer = 0;
 
 let chatId = "";
@@ -130,7 +133,7 @@ const graderChoice = computed({
 // A grader picked that is not on hand now, such as Grok with the gate off.
 const graderAway = computed(() => (graderPick.value && !grader.value ? graderPick.value : ""));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && chosen.value.length > 0);
-// With Grok to ask, the first run's downloads wait in Settings.
+// With Grok to ask, the first run's downloads wait on the Installers page.
 const offers = computed(() => (outsideModels.value.length ? [] : firstRunOffers(engine.value)));
 const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
@@ -361,16 +364,26 @@ async function setMaker(name, on, box) {
   await checkEngine();
 }
 
-async function openSettings() {
-  settingsOpen.value = true;
-  nextTick(() => settingsTitle.value?.focus());
+/**
+ * Opens Installers or Settings in place of the chat. Both show the makers, and
+ * Installers shows Grok, as Rust keeps them, so each asks Rust afresh.
+ */
+async function openPage(name) {
+  page.value = name;
+  nextTick(() => pageTitle.value?.focus());
   await readMakers();
   await readOutside();
 }
 
-function closeSettings() {
-  settingsOpen.value = false;
+/** Back to the chat. */
+function closePage() {
+  page.value = "chat";
   focusComposer();
+}
+
+/** A button in the side bar opens its page, or closes it when it is open. */
+function togglePage(name) {
+  return page.value === name ? closePage() : openPage(name);
 }
 
 /**
@@ -444,10 +457,10 @@ async function openUpdate(part) {
 /**
  * Downloads one model from the app's list, then starts the engine with it.
  * Rust checks every file as it arrives and moves the model into place only
- * when all of it is there.
+ * when all of it is there. Gives back whether the whole model is in place.
  */
 async function download(offer) {
-  if (downloading.value) return;
+  if (downloading.value) return false;
   downloading.value = offer.id;
   progress.value = { done: 0, total: offer.bytes };
   stoppedNote.value = "";
@@ -456,11 +469,13 @@ async function download(offer) {
   channel.onmessage = (update) => {
     progress.value = update;
   };
+  let whole = false;
   try {
     const report = await invoke("download_model", { id: offer.id, onProgress: channel });
     if (report.stopped) stoppedNote.value = `The download of ${offer.name} stopped, and none of it was kept.`;
     // With the model in place, the engine can start with it.
     if (report.whole) await Promise.all([checkEngine(), readMakers()]);
+    whole = report.whole === true;
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -468,6 +483,18 @@ async function download(offer) {
     progress.value = null;
     stopping.value = false;
   }
+  return whole;
+}
+
+/**
+ * "one click from an installers page would be good". Install downloads the
+ * model, then adds its maker if it was not added, so the model shows at the
+ * top of the window. A download that stopped or failed leaves the makers as
+ * they were.
+ */
+async function install(maker, offer) {
+  if (!(await download(offer))) return;
+  if (!pickedMakers(makers.value).includes(maker)) await setMaker(maker, true);
 }
 
 async function cancelDownload() {
@@ -508,7 +535,7 @@ async function persist() {
 function newChat() {
   if (busy.value) return;
   current.value = blankSession();
-  settingsOpen.value = false;
+  page.value = "chat";
   problem.value = "";
   askTrash.value = "";
   focusComposer();
@@ -516,7 +543,7 @@ function newChat() {
 
 async function openSession(id) {
   if (busy.value) return;
-  settingsOpen.value = false;
+  page.value = "chat";
   if (id === current.value.id) return;
   problem.value = "";
   askTrash.value = "";
@@ -857,8 +884,16 @@ onBeforeUnmount(() => {
         <button
           class="wide"
           type="button"
-          :aria-current="settingsOpen ? 'page' : undefined"
-          @click="settingsOpen ? closeSettings() : openSettings()"
+          :aria-current="page === 'installers' ? 'page' : undefined"
+          @click="togglePage('installers')"
+        >
+          Installers
+        </button>
+        <button
+          class="wide"
+          type="button"
+          :aria-current="page === 'settings' ? 'page' : undefined"
+          @click="togglePage('settings')"
         >
           Settings
         </button>
@@ -905,49 +940,32 @@ onBeforeUnmount(() => {
           <button class="link" type="button" @click="updateLater = update.version">Later</button>
         </div>
       </section>
-      <section v-if="settingsOpen" class="settings" aria-labelledby="settings-title" @keydown.esc="closeSettings">
+      <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
         <header class="bar">
-          <h2 id="settings-title" ref="settingsTitle" tabindex="-1">Settings</h2>
-          <button type="button" @click="closeSettings">Back to the chat</button>
+          <h2 id="installers-title" ref="pageTitle" tabindex="-1">Installers</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
-          <h3>Model makers</h3>
+          <h3>Models to run here</h3>
           <p class="quiet">
-            The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
+            Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
+            top of the window. Nothing downloads until you press Install.
           </p>
           <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so nothing can download yet.</span>
+            <span>The outbound gate is off, so nothing can install yet.</span>
             <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
           </p>
-          <ul class="makers" aria-label="Model makers">
+          <ul class="makers" aria-label="Models to install">
             <li v-for="maker in makers" :key="maker.name" class="maker">
               <div class="maker-head">
                 <span class="maker-name">{{ maker.name }}</span>
-                <button
-                  v-if="maker.picked"
-                  type="button"
-                  :aria-label="`Remove ${maker.name}`"
-                  :disabled="makersLocked || !canRemove(makers, maker.name)"
-                  @click="setMaker(maker.name, false)"
-                >
-                  Remove
-                </button>
-                <button
-                  v-else
-                  class="primary"
-                  type="button"
-                  :aria-label="`Add ${maker.name}`"
-                  :disabled="makersLocked"
-                  @click="setMaker(maker.name, true)"
-                >
-                  Add
-                </button>
+                <span v-if="!maker.picked" class="quiet small">Not added</span>
               </div>
               <ul class="maker-models">
                 <li v-for="entry in maker.models" :key="entry.name" class="offer">
                   <span class="offer-text">
                     <span class="offer-name">{{ entry.name }}</span>
-                    <span class="quiet small">{{ listedLine(entry) }}</span>
+                    <span class="quiet small">{{ installLine(maker, entry) }}</span>
                   </span>
                   <template v-if="entry.offer && downloading === entry.offer.id">
                     <span class="offer-progress">
@@ -961,19 +979,27 @@ onBeforeUnmount(() => {
                     <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
                   </template>
                   <button
-                    v-else-if="maker.picked && entry.offer && !entry.onDisk"
+                    v-else-if="entry.onDisk && !maker.picked"
                     type="button"
-                    :aria-label="`Download ${entry.name}`"
-                    :disabled="Boolean(downloading) || !gate"
-                    @click="download(entry.offer)"
+                    :aria-label="`Show ${entry.name}`"
+                    :disabled="makersLocked"
+                    @click="setMaker(maker.name, true)"
                   >
-                    Download
+                    Show
+                  </button>
+                  <button
+                    v-else-if="entry.offer && !entry.onDisk"
+                    type="button"
+                    :aria-label="`Install ${entry.name}`"
+                    :disabled="makersLocked || !gate"
+                    @click="install(maker.name, entry.offer)"
+                  >
+                    Install
                   </button>
                 </li>
               </ul>
             </li>
           </ul>
-          <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
           <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
           <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
 
@@ -1025,6 +1051,58 @@ onBeforeUnmount(() => {
             </form>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+        </div>
+      </section>
+      <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
+        <header class="bar">
+          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
+        </header>
+        <div class="settings-body">
+          <h3>Model makers</h3>
+          <p class="quiet">
+            The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
+          </p>
+          <p class="quiet small">
+            To install a model or add Grok, go to the
+            <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+          </p>
+          <ul class="makers" aria-label="Model makers">
+            <li v-for="maker in makers" :key="maker.name" class="maker">
+              <div class="maker-head">
+                <span class="maker-name">{{ maker.name }}</span>
+                <button
+                  v-if="maker.picked"
+                  type="button"
+                  :aria-label="`Remove ${maker.name}`"
+                  :disabled="makersLocked || !canRemove(makers, maker.name)"
+                  @click="setMaker(maker.name, false)"
+                >
+                  Remove
+                </button>
+                <button
+                  v-else
+                  class="primary"
+                  type="button"
+                  :aria-label="`Add ${maker.name}`"
+                  :disabled="makersLocked"
+                  @click="setMaker(maker.name, true)"
+                >
+                  Add
+                </button>
+              </div>
+              <ul class="maker-models">
+                <li v-for="entry in maker.models" :key="entry.name" class="offer">
+                  <span class="offer-text">
+                    <span class="offer-name">{{ entry.name }}</span>
+                    <span class="quiet small">{{ listedLine(entry) }}</span>
+                  </span>
+                </li>
+              </ul>
+            </li>
+          </ul>
+          <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
+          <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
 
           <h3 class="gap-above">Grading</h3>
           <p class="quiet">
@@ -1054,7 +1132,7 @@ onBeforeUnmount(() => {
           </p>
         </div>
       </section>
-      <header v-show="!settingsOpen" class="bar">
+      <header v-show="page === 'chat'" class="bar">
         <h2>{{ current.title || "New chat" }}</h2>
         <div class="picks" role="group" aria-label="Models that answer">
           <span v-if="models.length" class="quiet small picks-label">Ask</span>
@@ -1076,7 +1154,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <section v-show="!settingsOpen" ref="thread" class="thread" @scroll="onScroll">
+      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll">
         <div v-if="!current.messages.length" class="empty">
           <div v-if="offers.length" class="first-run">
             <p class="lead">Pick a model to start.</p>
@@ -1131,6 +1209,10 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+            <p class="quiet small">
+              More models, and Grok, are on the
+              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            </p>
           </div>
           <template v-else>
             <p class="lead">Ask anything.</p>
@@ -1178,13 +1260,13 @@ onBeforeUnmount(() => {
         </article>
       </section>
 
-      <!-- Shown under Settings too, where a download can fail. -->
+      <!-- Shown on the Installers page too, where a download can fail. -->
       <p v-if="problem" class="problem" role="alert">
         {{ problem }}
         <button class="link" type="button" @click="problem = ''">Dismiss</button>
       </p>
 
-      <footer v-show="!settingsOpen" class="compose">
+      <footer v-show="page === 'chat'" class="compose">
         <div class="box">
           <textarea
             ref="composer"
@@ -1330,6 +1412,11 @@ button.link {
   padding: 0 0.25rem;
   color: var(--accent);
   text-decoration: underline;
+}
+
+/* A link inside a sentence sits in it like a word. */
+button.link.in-text {
+  padding: 0;
 }
 
 :focus-visible {

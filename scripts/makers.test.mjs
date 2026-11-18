@@ -114,7 +114,9 @@ test('Settings adds or removes a maker in one click, and is reached from the foo
   // Brad, 2026-11-17: "in settings they can one click more of them if they
   // want."
   const app = read(APP);
-  const settings = app.slice(app.indexOf('<section v-if="settingsOpen" class="settings"'), app.indexOf('</section>', app.indexOf('class="settings"')));
+  const start = app.indexOf('<section v-if="page === \'settings\'" class="settings"');
+  assert.ok(start >= 0, 'the window has lost its Settings page');
+  const settings = app.slice(start, app.indexOf('</section>', start));
   for (const part of [
     '<h3>Model makers</h3>',
     ':aria-label="`Remove ${maker.name}`"',
@@ -131,10 +133,10 @@ test('Settings adds or removes a maker in one click, and is reached from the foo
   assert.match(settings, /Removing a maker leaves its\s+models on this computer\./, 'Settings no longer says removing a maker deletes nothing');
 
   const foot = app.slice(app.indexOf('<footer class="engine"'), app.indexOf('</footer>', app.indexOf('<footer class="engine"')));
-  const settingsButton = foot.indexOf('@click="settingsOpen ? closeSettings() : openSettings()"');
+  const settingsButton = foot.indexOf('@click="togglePage(\'settings\')"');
   assert.ok(settingsButton >= 0, 'the foot of the window has lost its Settings button');
   assert.ok(settingsButton < foot.indexOf('Check for updates'), 'Settings no longer sits above Check for updates');
-  assert.match(functionOf(app, 'openSettings'), /await readMakers\(\);/, 'Settings opens without asking which makers are picked');
+  assert.match(functionOf(app, 'openPage'), /await readMakers\(\);/, 'Settings opens without asking which makers are picked');
 });
 
 test('a saved chat still names a model whose maker was removed', () => {
