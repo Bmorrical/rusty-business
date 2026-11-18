@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::makers::Makers;
+
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const DEFAULT_MAX_TOKENS: u32 = 4096;
 
@@ -95,16 +97,41 @@ struct CatalogEntry {
     needle: &'static str,
     name: &'static str,
     maker: &'static str,
+    license: &'static str,
     context: u32,
 }
 
 /// The allow-list. A model the engine holds that is not here is never shown
-/// and never accepted. The first one the engine has is the default.
+/// and never accepted. The first one the engine has is the default. The
+/// person picks which makers' models they see (`makers.rs`).
 const CATALOG: &[CatalogEntry] = &[
-    CatalogEntry { needle: "phi-4", name: "Phi-4", maker: "Microsoft", context: 16_384 },
-    CatalogEntry { needle: "gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI", context: 131_072 },
-    CatalogEntry { needle: "nemotron-3.5-lightning", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", context: 262_144 },
+    CatalogEntry { needle: "phi-4", name: "Phi-4", maker: "Microsoft", license: "MIT", context: 16_384 },
+    CatalogEntry { needle: "gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI", license: "Apache 2.0", context: 131_072 },
+    CatalogEntry { needle: "nemotron-3.5-lightning", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", license: "OpenMDW 1.1", context: 262_144 },
+    CatalogEntry { needle: "gemma-4-26b-a4b", name: "Gemma 4 26B", maker: "Google", license: "Apache 2.0", context: 262_144 },
+    CatalogEntry { needle: "llama-3.1-8b-instruct", name: "Llama 3.1 8B", maker: "Meta", license: "Llama 3.1 Community License", context: 131_072 },
 ];
+
+/// The makers on the list, in the list's order, each once.
+pub fn makers() -> Vec<&'static str> {
+    let mut makers: Vec<&'static str> = Vec::new();
+    for entry in CATALOG {
+        if !makers.contains(&entry.maker) {
+            makers.push(entry.maker);
+        }
+    }
+    makers
+}
+
+/// A maker's models on the list, each with its license.
+pub fn models_by(maker: &str) -> Vec<(&'static str, &'static str)> {
+    CATALOG.iter().filter(|entry| entry.maker == maker).map(|entry| (entry.name, entry.license)).collect()
+}
+
+/// The license of a model on the list, by its name.
+pub fn license_of(name: &str) -> Option<&'static str> {
+    CATALOG.iter().find(|entry| entry.name == name).map(|entry| entry.license)
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +172,9 @@ pub struct EngineStatus {
     pub url: String,
     pub reachable: bool,
     pub models: Vec<ModelInfo>,
+    /// Models the engine holds from makers the person did not pick. The page
+    /// never offers them, but a saved chat still names the model that wrote it.
+    pub set_aside: Vec<ModelInfo>,
     /// Models the engine holds that are not on the list.
     pub hidden: usize,
     /// Models on the list that are on this computer's disk, whether or not
@@ -193,6 +223,7 @@ fn first_status() -> EngineStatus {
         url: DEFAULT_BASE_URL.to_string(),
         reachable: false,
         models: Vec::new(),
+        set_aside: Vec::new(),
         hidden: 0,
         on_disk: crate::models::on_disk(),
         offers: crate::downloads::offers(),
@@ -201,14 +232,30 @@ fn first_status() -> EngineStatus {
     }
 }
 
+/// Leaves in only the models of the makers the person picked: on the
+/// engine, on the disk, and offered. A model of a maker not picked is still
+/// on the list, so it is not counted as hidden; the engine's are set aside.
+fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
+    let served = status.models.clone();
+    makers.keep_picked(&mut status.models, |model| &model.maker);
+    status.set_aside = served.into_iter().filter(|model| !status.models.contains(model)).collect();
+    makers.keep_picked(&mut status.on_disk, |model| &model.maker);
+    makers.keep_picked(&mut status.offers, |offer| &offer.maker);
+    status
+}
+
 #[tauri::command]
-pub async fn engine_status() -> Result<EngineStatus, String> {
+pub async fn engine_status(makers: tauri::State<'_, Makers>) -> Result<EngineStatus, String> {
+    Ok(for_makers(status_now().await, &makers))
+}
+
+async fn status_now() -> EngineStatus {
     let mut status = first_status();
     let base = match base_url() {
         Ok(base) => base,
         Err(error) => {
             status.error = Some(error);
-            return Ok(status);
+            return status;
         }
     };
     status.url = base.clone();
@@ -220,7 +267,7 @@ pub async fn engine_status() -> Result<EngineStatus, String> {
         }
         Err(error) => status.error = Some(error),
     }
-    Ok(status)
+    status
 }
 
 // ---------------------------------------------------------------------------
@@ -696,14 +743,36 @@ mod tests {
             "mlx-community/gemma-3-27b-it-qat-4bit",
             "mlx-community/gpt-oss-20b-MXFP4-Q8",
             "mlx-community/Llama-3.1-8B-Instruct-4bit",
+            "mlx-community/Qwen3-30B-A3B-4bit",
+            "mlx-community/gemma-4-26b-a4b-it-4bit",
         ]
         .iter()
         .map(|id| id.to_string())
         .collect();
         let models = allowed_models(&ids);
         let makers: Vec<&str> = models.iter().map(|model| model.maker.as_str()).collect();
-        assert_eq!(makers, ["Microsoft", "OpenAI", "NVIDIA"]);
-        assert!(models.iter().all(|model| !model.id.to_lowercase().contains("gemma") && !model.id.to_lowercase().contains("llama")));
+        assert_eq!(makers, ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
+        let names: Vec<&str> = models.iter().map(|model| model.name.as_str()).collect();
+        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+        // Only the model named on the list: not an older Gemma, and no model
+        // from a maker that is not on it.
+        assert!(models.iter().all(|model| !model.id.contains("gemma-3") && !model.id.contains("Qwen")));
+    }
+
+    // Brad, 2026-11-17: "user can pick google, gemini, meta from the app if
+    // they want those instead." Gemma is Google's model that runs here; its
+    // hosted one comes with the outside engines.
+    #[test]
+    fn the_list_names_each_maker_once_with_each_models_license() {
+        assert_eq!(makers(), ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
+        assert_eq!(models_by("Microsoft"), [("Phi-4", "MIT")]);
+        assert_eq!(models_by("OpenAI"), [("gpt-oss 20B", "Apache 2.0")]);
+        assert_eq!(models_by("NVIDIA"), [("Nemotron 3.5 Lightning", "OpenMDW 1.1")]);
+        assert_eq!(models_by("Google"), [("Gemma 4 26B", "Apache 2.0")]);
+        assert_eq!(models_by("Meta"), [("Llama 3.1 8B", "Llama 3.1 Community License")]);
+        assert_eq!(models_by("Acme"), []);
+        assert_eq!(license_of("Gemma 4 26B"), Some("Apache 2.0"));
+        assert_eq!(license_of("Gemma 3 27B"), None);
     }
 
     #[test]
@@ -742,8 +811,40 @@ mod tests {
         assert_eq!(offered, crate::downloads::offers());
         if cfg!(target_os = "macos") {
             let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
-            assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
+            assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
         }
+    }
+
+    #[test]
+    fn only_the_picked_makers_models_are_reported() {
+        // Brad, 2026-11-17: "user can pick google, gemini, meta from the app
+        // if they want those instead."
+        let folder = std::env::temp_dir().join(format!("rusty-engine-makers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let makers = Makers::new(folder.join("makers"), &[]);
+        makers.set(&["Google".to_string(), "Meta".to_string()]).unwrap();
+        let model = |name: &str, maker: &str| ModelInfo { id: format!("someone/{name}"), name: name.to_string(), maker: maker.to_string(), context: 8 };
+        let offer = |name: &str, maker: &str| crate::downloads::Offer {
+            id: format!("someone/{name}"),
+            name: name.to_string(),
+            maker: maker.to_string(),
+            license: "MIT".to_string(),
+            bytes: 1,
+        };
+        let mut status = first_status();
+        status.models = vec![model("Phi-4", "Microsoft"), model("Gemma 4 26B", "Google")];
+        status.hidden = 2;
+        status.on_disk = vec![model("Phi-4", "Microsoft"), model("Llama 3.1 8B", "Meta")];
+        status.offers = vec![offer("Gemma 4 26B", "Google"), offer("gpt-oss 20B", "OpenAI"), offer("Llama 3.1 8B", "Meta")];
+        let shown = for_makers(status, &makers);
+        let names = |models: &[ModelInfo]| models.iter().map(|model| model.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&shown.models), ["Gemma 4 26B"]);
+        assert_eq!(names(&shown.set_aside), ["Phi-4"], "a saved chat still names the model that wrote it");
+        assert_eq!(names(&shown.on_disk), ["Llama 3.1 8B"]);
+        let offered: Vec<&str> = shown.offers.iter().map(|offer| offer.name.as_str()).collect();
+        assert_eq!(offered, ["Gemma 4 26B", "Llama 3.1 8B"]);
+        assert_eq!(shown.hidden, 2, "a model of a maker not picked is on the list, so it is not hidden");
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]

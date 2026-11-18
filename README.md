@@ -37,9 +37,11 @@ Select a picture to open it full size.
 | ----------------------------------------- | ---------- |
 | [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
 
-| No engine answering | The first run: pick a model |
-| ------------------- | --------------------------- |
-| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button that waits for the outbound gate, a Turn on the gate button above them, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
+| No engine answering | The first run: pick makers, then a model |
+| ------------------- | ---------------------------------------- |
+| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
+
+[![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true)
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -51,19 +53,21 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 
 ### Why choose Rusty Business™
 
-- **A short list, on purpose.** It knows three models, from Microsoft, OpenAI,
-  and NVIDIA. A model that is not on the list is never shown and never
-  accepted, even when the engine holds it. Ollama's library is far larger, and
-  open to models from many makers.
+- **A short list, on purpose.** It knows five models, one each from Microsoft,
+  OpenAI, NVIDIA, Google, and Meta. It shows the models of the makers you
+  pick: Microsoft to begin with, and any others you tick on a first run or
+  add in Settings with one click. A model that is not on the list is never
+  shown and never accepted, even when the engine holds it. Ollama's library
+  is far larger, and open to models from many makers.
 - **Local first, behind a gate.** A chat needs nothing outside your
   computer. The page has no way to call out, and the Rust behind it refuses
   an engine address that is not on this computer. An engine the app starts
   listens on this computer only, and is told to stay offline. Everything
   else waits for the outbound gate, a switch at the foot of the window that
   is off until you turn it on; turning it off stops what is under way. With
-  the gate on, the app reaches out in three places. On a first run, Download
-  brings the model you pick from Hugging Face, over https and from nowhere
-  else. The first time it starts the stack, Docker downloads the stack's
+  the gate on, the app reaches out in three places. On a first run or in
+  Settings, Download brings the model you pick from Hugging Face, over https
+  and from nowhere else. The first time it starts the stack, Docker downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
   out. Nothing you type goes with any of them. There is no account, no
@@ -85,8 +89,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   model. None is signed yet, so a Mac or a Windows computer warns once before
   it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
-  it. Rusty Business™ downloads one of its three models on a first run, when
-  none of them is on the computer yet, and offers no others.
+  it. Rusty Business™ downloads only the five on its list: one on a first
+  run, and the others from Settings once their maker is picked.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
   a model.
@@ -117,7 +121,7 @@ run models on your own computer. Here are the three side by side.
 | Runs a model on | A Mac with Apple silicon; Windows and Linux get the window, with no engine yet | macOS, Windows, and Linux | macOS, Windows, and Linux |
 | How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
 | What does the work | Apple silicon's GPU, through MLX | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
-| Models | Three, on a fixed list; any other is refused | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
+| Models | Five, on a fixed list, from the makers you pick; any other is refused | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
 | A model too big for memory | Not run; it runs only what your computer can | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
 | For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
@@ -186,11 +190,16 @@ matches its pins.
 beside it, in that folder. The download above is that `.dmg`, built on
 GitHub's Mac by the Release workflow after a green gate.
 
-On a first run, with none of its models on the computer, the app lists them
-with their download sizes. Turn on the outbound gate, at the foot of the
-window, and Download brings the one you pick from Hugging Face; the app then
-starts the engine with it. The gate stays as you leave it, and a chat works
-with it on or off.
+On a first run, with none of its models on the computer, the app lists the
+models of the makers you tick, Microsoft to begin with, with their download
+sizes. Turn on the outbound gate, at the foot of the window, and Download
+brings the one you pick from Hugging Face; the app then starts the engine
+with it. The gate stays as you leave it, and a chat works with it on or off.
+
+Settings, above Check for updates, adds or removes a maker with one click,
+and downloads any of a picked maker's models that are not on the computer
+yet. Removing a maker hides its models and deletes nothing: they stay on the
+computer, and saved chats still name them. One maker always stays picked.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
@@ -374,9 +383,7 @@ next.
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer and the gate is on. It does not put Docker there. The chat does not need the
   stack yet.
-- **One model, on a first run.** The app offers its models only while none
-  of them is on the computer, and downloads one at a time. A second model
-  has to be downloaded by hand.
+- **One download at a time.** The app downloads one model, then the next.
 - **Words only.** It takes no pictures and no files, and it shows an answer as
   plain text. (On the roadmap: Pictures.)
 - **A short list of models.** That is on purpose. A model that is not on the

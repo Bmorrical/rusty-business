@@ -23,6 +23,7 @@
         "context": 262144
       }
     ],
+    "setAside": [],
     "hidden": 2,
     "onDisk": [
       {
@@ -49,19 +50,36 @@
         "id": "mlx-community/phi-4-4bit",
         "name": "Phi-4",
         "maker": "Microsoft",
+        "license": "MIT",
         "bytes": 8256384748
       },
       {
         "id": "mlx-community/gpt-oss-20b-MXFP4-Q8",
         "name": "gpt-oss 20B",
         "maker": "OpenAI",
+        "license": "Apache 2.0",
         "bytes": 12104215835
       },
       {
         "id": "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
         "name": "Nemotron 3.5 Lightning",
         "maker": "NVIDIA",
+        "license": "OpenMDW 1.1",
         "bytes": 17792581692
+      },
+      {
+        "id": "mlx-community/gemma-4-26b-a4b-it-4bit",
+        "name": "Gemma 4 26B",
+        "maker": "Google",
+        "license": "Apache 2.0",
+        "bytes": 15373586252
+      },
+      {
+        "id": "mlx-community/Llama-3.1-8B-Instruct-4bit",
+        "name": "Llama 3.1 8B",
+        "maker": "Meta",
+        "license": "Llama 3.1 Community License",
+        "bytes": 4534808112
       }
     ],
     "error": null,

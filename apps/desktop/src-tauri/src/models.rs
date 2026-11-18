@@ -274,11 +274,11 @@ mod tests {
 
     #[test]
     fn a_model_off_the_list_is_never_reported() {
-        // Brad, on which models this project runs: "I want us only models, not
-        // meta or google". The list holds on the disk as it does on the engine.
+        // Only the models on the app's list are reported. The list holds on
+        // the disk as it does on the engine.
         let hub = scratch_hub();
         download(&hub, "mlx-community/gemma-3-27b-it-qat-4bit", 12);
-        download(&hub, "mlx-community/Llama-3.1-8B-Instruct-4bit", 1);
+        download(&hub, "mlx-community/Qwen3-30B-A3B-4bit", 1);
         assert_eq!(models_in(&hub), Vec::new());
 
         download(&hub, PHI, 2);
@@ -396,7 +396,7 @@ mod tests {
         download(&hub, PHI, 2);
         let half = download(&hub, GPT_OSS, 3);
         not_arrived(&half.join(shard(1, 3)));
-        download(&hub, "mlx-community/Llama-3.1-8B-Instruct-4bit", 1);
+        download(&hub, "mlx-community/Qwen3-30B-A3B-4bit", 1);
 
         let before = everything_in(&hub);
         assert_eq!(names(&models_in(&hub)), ["Phi-4"]);
@@ -449,6 +449,7 @@ mod tests {
             url: engine::DEFAULT_BASE_URL.to_string(),
             reachable: false,
             models: Vec::new(),
+            set_aside: Vec::new(),
             hidden: 0,
             on_disk: models_in(&hub),
             offers: Vec::new(),

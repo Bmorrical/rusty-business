@@ -6,8 +6,9 @@
 //
 // Rust is not running here, so the page's calls to it are answered from
 // docs/screenshots/chats.json: what the app reported about the engine on one
-// computer, and replies the three models gave there, recorded once. Nothing
-// is sent to a model while the pictures are made, and no engine is started.
+// computer with every maker picked, and replies the three models there gave,
+// recorded once. Nothing is sent to a model while the pictures are made, and
+// no engine is started.
 //
 // Needs Google Chrome or Chromium (CHROME names the binary when it is not in
 // a usual place) and the page built first. `make screenshots` does both.
@@ -35,9 +36,9 @@ export const SCALE = 2;
 
 /**
  * One picture each. `open` is the id of the saved chat to show, `thinking`
- * opens that chat's thinking, `engine: 'off'` is the app with no engine
- * answering, and `engine: 'first-run'` is the app on a computer with none of
- * its models yet.
+ * opens that chat's thinking, `settings` opens Settings, `engine: 'off'` is
+ * the app with no engine answering, and `engine: 'first-run'` is the app on a
+ * computer with none of its models yet.
  */
 export const SCENES = [
   { file: 'chat.png', scheme: 'dark', engine: 'on', open: 'nails' },
@@ -45,6 +46,7 @@ export const SCENES = [
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
+  { file: 'settings.png', scheme: 'light', engine: 'on', settings: true },
 ];
 
 const BROWSERS = [
@@ -78,9 +80,58 @@ export function sessionsFrom(chats, now = new Date()) {
   });
 }
 
+/** The maker picked when nothing else is, as in makers.rs. */
+export const FIRST_MAKER = 'Microsoft';
+
+/** The makers on the app's list, in its order, as the recorded downloads name them. */
+export function makersOf(report) {
+  return [...new Set(report.offers.map((offer) => offer.maker))];
+}
+
+/**
+ * The makers picked before the person picks any, as makers.rs has it:
+ * Microsoft, and the maker of every model of the app's already on the disk.
+ */
+export function pickedAtFirst(report) {
+  const wanted = [FIRST_MAKER, ...report.onDisk.map((model) => model.maker)];
+  return makersOf(report).filter((maker) => wanted.includes(maker));
+}
+
+/**
+ * The report with only the picked makers' models, as engine.rs gives it: the
+ * engine's other models are set aside, so saved chats still name them. The
+ * stand-in carries this function into the page, so it uses nothing else.
+ */
+export function forMakers(report, picked) {
+  const mine = (list) => list.filter((model) => picked.includes(model.maker));
+  const setAside = report.models.filter((model) => !picked.includes(model.maker));
+  return { ...report, models: mine(report.models), setAside, onDisk: mine(report.onDisk), offers: mine(report.offers) };
+}
+
+/**
+ * Every maker on the app's list with its models, as makers_status gives it.
+ * The recording offers every model on the list, so its offers are the list.
+ * The stand-in carries this function into the page, so it uses nothing else.
+ */
+export function makersStatus(report, picked) {
+  const names = [...new Set(report.offers.map((offer) => offer.maker))];
+  return names.map((name) => ({
+    name,
+    picked: picked.includes(name),
+    models: report.offers
+      .filter((offer) => offer.maker === name)
+      .map((offer) => ({
+        name: offer.name,
+        license: offer.license,
+        onDisk: report.onDisk.some((model) => model.name === offer.name),
+        offer,
+      })),
+  }));
+}
+
 /** What the app reports when nothing answers at the engine's address. */
 export function engineOff(engine) {
-  return { ...engine, reachable: false, models: [], hidden: 0, error: 'The engine is not answering.' };
+  return { ...engine, reachable: false, models: [], setAside: [], hidden: 0, error: 'The engine is not answering.' };
 }
 
 /**
@@ -133,21 +184,27 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the six
- * calls the pictures need and refuses the rest, a download among them. Asked
- * to start the engine, it starts nothing and gives the reason it was handed,
- * by default that the engine's program was not found. Asked to start the
- * stack, it starts nothing and says the stack is running. The outbound gate
- * is off, as it is on a first run.
+ * The script that stands in for Rust inside the page. It answers the seven
+ * calls the pictures need and refuses the rest, a download and a change of
+ * makers among them. Asked to start the engine, it starts nothing and gives
+ * the reason it was handed, by default that the engine's program was not
+ * found. Asked to start the stack, it starts nothing and says the stack is
+ * running. The outbound gate is off, as it is on a first run. The makers are
+ * picked as the app picks them before the person does, and the engine's
+ * report holds only their models.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
     const engine = ${JSON.stringify(engine)};
+    const picked = ${JSON.stringify(pickedAtFirst(engine))};
     const sessions = ${JSON.stringify(sessions)};
     const notStarted = ${JSON.stringify(start)};
     const stack = ${JSON.stringify(stack)};
+    const forMakers = ${forMakers};
+    const makersStatus = ${makersStatus};
     const answers = {
-      engine_status: () => engine,
+      engine_status: () => forMakers(engine, picked),
+      makers_status: () => makersStatus(engine, picked),
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
@@ -317,6 +374,12 @@ async function takePicture(send, address, scene, engine, sessions) {
   if (scene.thinking) {
     await inPage(send, tab, `document.querySelector('details.thinking').open = true`);
     await inPage(send, tab, `document.querySelector('.thread').scrollTop = 0`);
+  }
+  if (scene.settings) {
+    await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Settings').click()`);
+    await until(send, tab, `document.querySelectorAll('.makers > li').length > 0`, 'the model makers');
+    // Scrolled to the first maker, the picture holds every maker on the list.
+    await inPage(send, tab, `document.querySelector('.makers > li').scrollIntoView({ block: 'start' })`);
   }
 
   // Wait for the fonts, then for two frames, so the picture is of a settled page.
