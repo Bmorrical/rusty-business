@@ -1,5 +1,6 @@
 mod downloads;
 mod engine;
+mod gate;
 mod models;
 mod sessions;
 mod stack;
@@ -23,7 +24,10 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(starter::Starter::new(data.join("engine.log")));
-            app.manage(stack::Stack::new(data.join("stack"), data.join("stack.log"), stack::FRONT_DOOR_PORT));
+            // The outbound gate: off until the person turns it on.
+            let gate = gate::Gate::new(data.join("gate"));
+            app.manage(stack::Stack::new(data.join("stack"), data.join("stack.log"), stack::FRONT_DOOR_PORT, gate.clone()));
+            app.manage(gate);
             // What a download left when the app last quit part way is thrown away.
             let downloads = downloads::Downloads::new(data.join("downloads"));
             downloads.clear();
@@ -44,6 +48,8 @@ pub fn run() {
             sessions::trash_session,
             update::check_update,
             update::open_update,
+            gate::gate_status,
+            gate::set_gate,
         ])
         .build(context)
         .expect("error while building tauri application");

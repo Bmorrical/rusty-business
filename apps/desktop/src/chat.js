@@ -214,3 +214,13 @@ export function checkedLine(update, current) {
   if (update?.version) return updateLine(update);
   return current ? `Rusty Business™ ${current} is the newest version.` : "This is the newest version.";
 }
+
+/**
+ * The line under the outbound gate's switch. A chat with a model on this
+ * computer works either way; only what reaches past it waits for the gate.
+ */
+export function gateLine(open) {
+  return open
+    ? "Gate on. The app may go online to check for updates, download models, and start the stack."
+    : "Gate off. Nothing leaves this computer.";
+}

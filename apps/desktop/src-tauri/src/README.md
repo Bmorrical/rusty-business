@@ -6,6 +6,7 @@ The desktop app's Rust code.
 | ------------- | -------------------------------------------------------------------- |
 | `main.rs`     | The program's entry. It only calls `run`                             |
 | `lib.rs`      | Builds the Tauri app and lists every command the page may call       |
+| `gate.rs`     | The outbound gate: the switch, off until the person turns it on, and every client that reaches past this computer |
 | `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, streams a chat, and separates thinking from the answer |
 | `models.rs`   | The models already on this computer: reads the Hugging Face cache folder and reports the app's models that are whole there |
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
@@ -14,7 +15,17 @@ The desktop app's Rust code.
 | `sessions.rs` | Saved chats: one JSON file each. Trash moves a file; nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
 
-Three rules live in `engine.rs`, each with tests:
+Three rules live in `gate.rs`, each with tests:
+
+- The gate is off until the person turns it on, and it stays as they left
+  it. Anything but a kept "on" reads as off.
+- Every connection past this computer is made there, and only while the gate
+  is on, over https, with no proxy. The one other client in the app speaks
+  to the model engine on this computer.
+- Turning the gate off stops what is under way: the check for a new version,
+  a model download, and a start of the stack.
+
+Three more live in `engine.rs`, each with tests:
 
 - Prompts never leave the computer. Only loopback addresses are accepted,
   with no proxy and no redirects.

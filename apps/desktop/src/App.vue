@@ -13,6 +13,7 @@ import {
   formatSize,
   formatWindow,
   fullness,
+  gateLine,
   onDiskLine,
   quickest,
   requestMessages,
@@ -58,6 +59,9 @@ const updateOpened = ref("");
 const updateProblem = ref("");
 const updateChecking = ref(false);
 const updateChecked = ref("");
+const gate = ref(false);
+const gateBusy = ref(false);
+const gateNote = ref("");
 let updateTimer = 0;
 
 let chatId = "";
@@ -135,6 +139,42 @@ async function checkEngine() {
       checkAgain = false;
       checkEngine();
     }
+  }
+}
+
+/**
+ * "there is a hard switch / circuit breaker to hard stop all outbound
+ * communication, user can turn it on to use their inference", and "off by
+ * default, everything stops". Rust keeps the gate and holds every connection
+ * past this computer to it; the page only shows it and turns it on or off.
+ */
+async function readGate() {
+  try {
+    gate.value = (await invoke("gate_status")) === true;
+  } catch {
+    gate.value = false;
+  }
+}
+
+async function setGate(open) {
+  if (gateBusy.value) return;
+  gateBusy.value = true;
+  gateNote.value = "";
+  try {
+    gate.value = (await invoke("set_gate", { open })) === true;
+  } catch (error) {
+    // The gate changed but could not be kept for next time; Rust says so.
+    gateNote.value = String(error);
+    await readGate();
+  } finally {
+    gateBusy.value = false;
+  }
+  // With the gate on, what waited for it goes ahead, and a line saying the
+  // gate is off is gone.
+  if (gate.value) {
+    updateChecked.value = "";
+    checkStack();
+    checkUpdate();
   }
 }
 
@@ -420,6 +460,8 @@ function replyNote(turn) {
 onMounted(async () => {
   if (!inApp) return;
   window.addEventListener("focus", checkEngine);
+  // While the gate is off, Rust starts no stack and asks for no new version.
+  await readGate();
   // The stack can take minutes, so the page does not wait for it.
   checkStack();
   // So does the check for a new version, which asks GitHub.
@@ -501,13 +543,28 @@ onBeforeUnmount(() => {
         <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
         <template v-else-if="stack">
           <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-          <button class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
+          <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
         <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
           {{ updateChecking ? "Checking..." : "Check for updates" }}
         </button>
         <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
-        <p class="quiet small">Nothing you type leaves this computer.</p>
+        <div class="gate">
+          <button
+            class="switch"
+            type="button"
+            role="switch"
+            :aria-checked="gate"
+            aria-describedby="gate-line"
+            :disabled="gateBusy"
+            @click="setGate(!gate)"
+          >
+            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+            Outbound gate
+          </button>
+          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
+          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+        </div>
       </footer>
     </aside>
 
@@ -549,6 +606,10 @@ onBeforeUnmount(() => {
           <div v-if="offers.length" class="first-run">
             <p class="lead">Pick a model to start.</p>
             <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
+            <p v-if="!gate" class="gate-ask">
+              <span>The outbound gate is off, so nothing can download yet.</span>
+              <button class="primary" type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            </p>
             <ul class="offers" aria-label="Models to download">
               <li v-for="offer in offers" :key="offer.id" class="offer">
                 <span class="offer-text">
@@ -570,9 +631,9 @@ onBeforeUnmount(() => {
                 </template>
                 <button
                   v-else
-                  :class="{ primary: offer.id === quick }"
+                  :class="{ primary: gate && offer.id === quick }"
                   type="button"
-                  :disabled="Boolean(downloading)"
+                  :disabled="Boolean(downloading) || !gate"
                   @click="download(offer)"
                 >
                   Download
@@ -804,9 +865,11 @@ code {
   padding: 1rem;
 }
 
+/* The saved chats keep room for one and a half chats, however tall the
+   footer under them grows. */
 .sessions {
   flex: 1;
-  min-height: 0;
+  min-height: 5rem;
   overflow-y: auto;
 }
 
@@ -864,9 +927,13 @@ code {
   font-size: 0.9rem;
 }
 
+/* On a short window the footer scrolls, so the gate's switch at its foot can
+   always be reached. */
 .engine {
   display: grid;
   gap: 0.4rem;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0.9rem 1rem;
   border-top: 1px solid var(--line);
   font-size: 0.9rem;
@@ -886,6 +953,71 @@ code {
 
 .dot.off {
   background: var(--bad);
+}
+
+/* The outbound gate: a switch, off until the person turns it on. */
+.gate {
+  display: grid;
+  gap: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+button.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.3rem 0;
+  border: 0;
+  background: none;
+  font-weight: 600;
+  text-align: left;
+}
+
+.track {
+  position: relative;
+  flex: none;
+  width: 2.2rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color 0.15s;
+}
+
+.knob {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition: transform 0.15s;
+}
+
+.switch[aria-checked="true"] .track {
+  background: var(--good);
+}
+
+.switch[aria-checked="true"] .knob {
+  transform: translateX(0.95rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .knob {
+    transition: none;
+  }
+}
+
+.gate-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0;
 }
 
 .hint {

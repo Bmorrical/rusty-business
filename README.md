@@ -17,10 +17,11 @@
 [Roadmap](#roadmap) · [Security](#security) · [License](#license)
 
 A desktop window for chatting with models that run on your own computer, and
-the start of the servers that will sit behind it. Nothing you type leaves the
-machine.
+the start of the servers that will sit behind it. It is local first: a chat
+with a model here needs nothing from outside, and nothing leaves the computer
+until you turn on the outbound gate.
 
-**Status:** version 0.4.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.5.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
 command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -34,11 +35,11 @@ Select a picture to open it full size.
 
 | A model's thinking, apart from its answer | A new chat |
 | ----------------------------------------- | ---------- |
-| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, and the stack line reading Stack on 127.0.0.1:4700](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
+| [![A chat with gpt-oss 20B in the dark theme, with the model's thinking opened above its answer about standing on the top step of a stepladder](docs/screenshots/thinking.png)](docs/screenshots/thinking.png?raw=true) | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) |
 
 | No engine answering | The first run: pick a model |
 | ------------------- | --------------------------- |
-| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
+| [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) | [![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button that waits for the outbound gate, a Turn on the gate button above them, and Phi-4 marked as the quickest to start](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -54,18 +55,19 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   and NVIDIA. A model that is not on the list is never shown and never
   accepted, even when the engine holds it. Ollama's library is far larger, and
   open to models from many makers.
-- **A window that cannot reach past your computer.** That is how it is built,
-  not a setting. The page has no way to call out, and the Rust behind it
-  refuses an engine address that is not on this computer. An engine the app
-  starts listens on this computer only, and is told to stay offline. The app
-  itself reaches out in three places. On a first run, Download brings the
-  model you pick from Hugging Face, over https and from nowhere else. The
-  first time it starts the stack, Docker downloads the stack's images. When
-  the window opens, once a day while it stays open, and when you click Check
-  for updates, the app asks GitHub
-  whether a new version is out. Nothing you type goes with any of them. There
-  is no account, no sign-in,
-  and nothing in the cloud. Ollama keeps your prompts on your computer too
+- **Local first, behind a gate.** A chat needs nothing outside your
+  computer. The page has no way to call out, and the Rust behind it refuses
+  an engine address that is not on this computer. An engine the app starts
+  listens on this computer only, and is told to stay offline. Everything
+  else waits for the outbound gate, a switch at the foot of the window that
+  is off until you turn it on; turning it off stops what is under way. With
+  the gate on, the app reaches out in three places. On a first run, Download
+  brings the model you pick from Hugging Face, over https and from nowhere
+  else. The first time it starts the stack, Docker downloads the stack's
+  images. When the window opens, once a day while it stays open, and when
+  you click Check for updates, the app asks GitHub whether a new version is
+  out. Nothing you type goes with any of them. There is no account, no
+  sign-in, and nothing in the cloud. Ollama keeps your prompts on your computer too
   when a model runs there. It also offers models that run in its cloud, with
   a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
@@ -142,8 +144,8 @@ says what is in it.
 | [docs](docs)                         | Pictures the READMEs show, and the [screenshots](docs/screenshots) |                                                          |
 | [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app, the Windows installer, and the Linux packages |
 
-The chat window starts the stack when Docker is on the computer, and does not
-use it yet: it talks only to the model engine on this computer. The stack is
+The chat window starts the stack when Docker is on the computer and the
+outbound gate is on, and does not use it yet: it talks only to the model engine on this computer. The stack is
 the ground the next features stand on.
 
 ## Run the chat window (macOS)
@@ -185,8 +187,10 @@ beside it, in that folder. The download above is that `.dmg`, built on
 GitHub's Mac by the Release workflow after a green gate.
 
 On a first run, with none of its models on the computer, the app lists them
-with their download sizes. Download brings the one you pick from Hugging
-Face, and the app then starts the engine with it.
+with their download sizes. Turn on the outbound gate, at the foot of the
+window, and Download brings the one you pick from Hugging Face; the app then
+starts the engine with it. The gate stays as you leave it, and a chat works
+with it on or off.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
@@ -207,10 +211,10 @@ where it is installed. To start one yourself, in another terminal:
 mlx_lm.server --port 8080
 ```
 
-When Docker is on the computer, the app also starts the stack, opening
-Docker Desktop first when it is not running. It pulls the API and the worker
-from GitHub's container registry, so nothing is built, and the first start
-downloads it all, which takes a few minutes. A stack from `make up` that is
+When Docker is on the computer and the gate is on, the app also starts the
+stack, opening Docker Desktop first when it is not running. It pulls the API
+and the worker from GitHub's container registry, so nothing is built, and the
+first start downloads it all, which takes a few minutes. A stack from `make up` that is
 already running is used as it is.
 
 More in [apps/desktop](apps/desktop), including where the app looks for the
@@ -365,16 +369,16 @@ next.
 - **A new version is a download.** When one is out, the window says so, and
   Download opens this system's file from the release in your browser. The
   app does not install it: you do, as the first time. Check for updates,
-  under the saved chats, asks at any time. There is no switch to
-  turn the check off.
+  under the saved chats, asks at any time. While the outbound gate is off,
+  the app does not ask, and the button says to turn the gate on.
 - **It does not install Docker.** The app starts the stack when Docker is
-  on the computer. It does not put Docker there. The chat does not need the
+  on the computer and the gate is on. It does not put Docker there. The chat does not need the
   stack yet.
 - **One model, on a first run.** The app offers its models only while none
   of them is on the computer, and downloads one at a time. A second model
   has to be downloaded by hand.
 - **Words only.** It takes no pictures and no files, and it shows an answer as
-  plain text.
+  plain text. (On the roadmap: Pictures.)
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the

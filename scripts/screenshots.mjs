@@ -133,11 +133,12 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the five
+ * The script that stands in for Rust inside the page. It answers the six
  * calls the pictures need and refuses the rest, a download among them. Asked
  * to start the engine, it starts nothing and gives the reason it was handed,
  * by default that the engine's program was not found. Asked to start the
- * stack, it starts nothing and says the stack is running.
+ * stack, it starts nothing and says the stack is running. The outbound gate
+ * is off, as it is on a first run.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
@@ -149,6 +150,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       engine_status: () => engine,
       start_engine: () => notStarted,
       start_stack: () => stack,
+      gate_status: () => false,
       list_sessions: () =>
         sessions.map((entry) => ({
           id: entry.id,
