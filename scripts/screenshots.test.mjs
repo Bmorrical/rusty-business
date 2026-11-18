@@ -703,11 +703,12 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   const source = read(OUTSIDE);
   const idOf = source.slice(source.indexOf('    fn id(self) -> &\'static str {'), source.indexOf('\n    }\n', source.indexOf('    fn id(self) -> &\'static str {')));
   const ids = [...idOf.matchAll(/Self::\w+ => "(\w+)",/g)].map(([, id]) => id);
-  assert.ok(source.includes('const ALL: [Self; 3] = [Self::Xai, Self::OpenAi, Self::Anthropic];'), 'outside.rs gives the engines in another order');
+  assert.ok(source.includes('const ALL: [Self; 4] = [Self::Xai, Self::OpenAi, Self::Anthropic, Self::Google];'), 'outside.rs gives the engines in another order');
   assert.deepEqual(OUTSIDE_NOT_ADDED.map((entry) => entry.id), ids, 'the stand-in gives engines outside.rs does not, or in another order');
   assert.ok(read(OUTSIDE).includes(`pub const XAI_HOST: &str = "${OUTSIDE_NOT_ADDED[0].host}";`), 'the stand-in gives Grok a host outside.rs does not ask');
   assert.ok(read(OUTSIDE).includes(`pub const OPENAI_HOST: &str = "${OUTSIDE_NOT_ADDED[1].host}";`), 'the stand-in gives GPT a host outside.rs does not ask');
   assert.ok(read(OUTSIDE).includes(`pub const ANTHROPIC_HOST: &str = "${OUTSIDE_NOT_ADDED[2].host}";`), 'the stand-in gives Claude a host outside.rs does not ask');
+  assert.ok(read(OUTSIDE).includes(`pub const GOOGLE_HOST: &str = "${OUTSIDE_NOT_ADDED[3].host}";`), 'the stand-in gives Gemini a host outside.rs does not ask');
 
   // A call that would send, save, trash, or download has no place in a picture.
   for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside']) {

@@ -1,5 +1,5 @@
-//! Engines outside this computer: Grok by xAI, GPT by OpenAI, and Claude by
-//! Anthropic.
+//! Engines outside this computer: Grok by xAI, GPT by OpenAI, Claude by
+//! Anthropic, and Gemini by Google.
 //!
 //! It answers these asks: "user can add their outside inference, start with
 //! Grok and Grok ai. user adds it manually, they will need to provide or
@@ -45,6 +45,8 @@ pub const OPENAI_HOST: &str = "api.openai.com";
 const OPENAI_BASE: &str = "https://api.openai.com/v1";
 pub const ANTHROPIC_HOST: &str = "api.anthropic.com";
 const ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";
+pub const GOOGLE_HOST: &str = "generativelanguage.googleapis.com";
+const GOOGLE_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 /// The version of Anthropic's API the app speaks, sent with every call.
 const ANTHROPIC_VERSION: &str = "2026-10-21";
@@ -76,6 +78,10 @@ const KEY_LONGEST: usize = 256;
 const NOT_FOR_CHAT: [&str; 13] =
     ["audio", "realtime", "tts", "transcribe", "image", "search", "instruct", "codex", "pro", "deep", "research", "embedding", "moderation"];
 
+/// The words in a Gemini model's id that mark it as one that does not answer
+/// text in a chat: pictures, sound, live talk, or tools of its own.
+const GEMINI_NOT_FOR_CHAT: [&str; 8] = ["embedding", "image", "tts", "audio", "native", "live", "computer", "robotics"];
+
 // ---------------------------------------------------------------------------
 // The engines
 // ---------------------------------------------------------------------------
@@ -86,11 +92,12 @@ enum Engine {
     Xai,
     OpenAi,
     Anthropic,
+    Google,
 }
 
 impl Engine {
     /// Every one, in the order the page shows them.
-    const ALL: [Self; 3] = [Self::Xai, Self::OpenAi, Self::Anthropic];
+    const ALL: [Self; 4] = [Self::Xai, Self::OpenAi, Self::Anthropic, Self::Google];
 
     /// The page's name for it.
     fn id(self) -> &'static str {
@@ -98,6 +105,7 @@ impl Engine {
             Self::Xai => "xai",
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
+            Self::Google => "google",
         }
     }
 
@@ -107,6 +115,7 @@ impl Engine {
             Self::Xai => "xai:",
             Self::OpenAi => "openai:",
             Self::Anthropic => "anthropic:",
+            Self::Google => "google:",
         }
     }
 
@@ -115,6 +124,7 @@ impl Engine {
             Self::Xai => "Grok",
             Self::OpenAi => "GPT",
             Self::Anthropic => "Claude",
+            Self::Google => "Gemini",
         }
     }
 
@@ -123,6 +133,7 @@ impl Engine {
             Self::Xai => "xAI",
             Self::OpenAi => "OpenAI",
             Self::Anthropic => "Anthropic",
+            Self::Google => "Google",
         }
     }
 
@@ -131,6 +142,7 @@ impl Engine {
             Self::Xai => XAI_HOST,
             Self::OpenAi => OPENAI_HOST,
             Self::Anthropic => ANTHROPIC_HOST,
+            Self::Google => GOOGLE_HOST,
         }
     }
 
@@ -139,41 +151,51 @@ impl Engine {
             Self::Xai => XAI_BASE,
             Self::OpenAi => OPENAI_BASE,
             Self::Anthropic => ANTHROPIC_BASE,
+            Self::Google => GOOGLE_BASE,
         }
     }
 
-    /// The most models kept from its maker's list. OpenAI and Anthropic list
-    /// years of models, so only their newest are kept.
+    /// The most models kept from its maker's list. OpenAI, Anthropic, and
+    /// Google list years of models, so only their newest are kept.
     fn most_models(self) -> usize {
         match self {
             Self::Xai => 30,
-            Self::OpenAi | Self::Anthropic => 12,
+            Self::OpenAi | Self::Anthropic | Self::Google => 12,
         }
     }
 
     /// The call with the person's key on it, the way its maker asks for it.
-    /// xAI and OpenAI take it as a bearer token; Anthropic takes it in its own
-    /// header, with the version of its API.
+    /// xAI and OpenAI take it as a bearer token. Anthropic and Google each
+    /// take it in a header of their own, Anthropic with the version of its
+    /// API. The key never goes in an address.
     fn signed(self, builder: reqwest::RequestBuilder, key: &Key) -> reqwest::RequestBuilder {
-        match self {
-            Self::Xai | Self::OpenAi => builder.bearer_auth(&key.0),
-            // read_key takes printable ASCII alone, so the key always makes a
-            // header. It is marked sensitive, so nothing prints it.
-            Self::Anthropic => match reqwest::header::HeaderValue::from_str(&key.0) {
-                Ok(mut value) => {
-                    value.set_sensitive(true);
-                    builder.header("x-api-key", value).header("anthropic-version", ANTHROPIC_VERSION)
-                }
-                Err(_) => builder,
-            },
+        let (header, version) = match self {
+            Self::Xai | Self::OpenAi => return builder.bearer_auth(&key.0),
+            Self::Anthropic => ("x-api-key", Some(ANTHROPIC_VERSION)),
+            Self::Google => ("x-goog-api-key", None),
+        };
+        // read_key takes printable ASCII alone, so the key always makes a
+        // header. It is marked sensitive, so nothing prints it.
+        let Ok(mut value) = reqwest::header::HeaderValue::from_str(&key.0) else {
+            return builder;
+        };
+        value.set_sensitive(true);
+        let signed = builder.header(header, value);
+        match version {
+            Some(version) => signed.header("anthropic-version", version),
+            None => signed,
         }
     }
 
-    /// Where a chat is asked.
-    fn chat_path(self) -> &'static str {
+    /// Where a chat with `model` is asked. Google names the model in the
+    /// address, and streams only when the address asks it to. The model is
+    /// one the engine listed, so it holds only letters, digits, `.`, `_`, and
+    /// `-`, and cannot change the address.
+    fn chat_url(self, model: &str) -> String {
         match self {
-            Self::Xai | Self::OpenAi => "chat/completions",
-            Self::Anthropic => "messages",
+            Self::Xai | Self::OpenAi => format!("{}/chat/completions", self.base()),
+            Self::Anthropic => format!("{}/messages", self.base()),
+            Self::Google => format!("{}/models/{model}:streamGenerateContent?alt=sse", self.base()),
         }
     }
 
@@ -196,13 +218,14 @@ impl Engine {
                 Self::Xai => id.starts_with("grok-"),
                 Self::OpenAi => openai_fits(id),
                 Self::Anthropic => id.starts_with("claude-"),
+                Self::Google => gemini_fits(id),
             }
     }
 
     /// A model's name as the page shows it.
     fn name_of(self, id: &str) -> String {
         match self {
-            Self::Xai => id.split('-').filter(|word| !word.is_empty()).map(capital).collect::<Vec<_>>().join(" "),
+            Self::Xai | Self::Google => id.split('-').filter(|word| !word.is_empty()).map(capital).collect::<Vec<_>>().join(" "),
             Self::OpenAi => openai_name(id),
             Self::Anthropic => claude_name(id),
         }
@@ -259,6 +282,11 @@ impl Engine {
 
     fn elsewhere(self) -> String {
         format!("{} answered from somewhere else.", self.maker())
+    }
+
+    /// What an answer says when it ends before the engine has finished.
+    fn broke(self) -> String {
+        format!("{} stopped answering part way through.", self.name())
     }
 
     /// What an answer says when the model turned the question down.
@@ -323,6 +351,24 @@ fn claude_name(id: &str) -> String {
         number = digits;
     }
     std::iter::once("Claude".to_string()).chain(words).collect::<Vec<_>>().join(" ")
+}
+
+/// "gemini-3.5-flash" and "gemini-2.5-flash-lite" fit. A pinned or dated copy,
+/// such as "gemini-2.0-flash-001" or "gemini-2.5-flash-preview-09-2025", does
+/// not, nor does a model for pictures or sound, as "gemini-2.5-flash-image" is.
+fn gemini_fits(id: &str) -> bool {
+    id.strip_prefix("gemini-").is_some_and(|rest| {
+        rest.split('-').all(|word| !word.is_empty() && !GEMINI_NOT_FOR_CHAT.contains(&word) && !(word.len() >= 3 && word.bytes().all(|byte| byte.is_ascii_digit())))
+    })
+}
+
+/// A Gemini model's version, as the 3.5 in "gemini-3.5-flash" or the 3 in
+/// "gemini-3-pro-preview". None for a name with no version, such as
+/// "gemini-flash-latest".
+fn gemini_version(id: &str) -> Option<(u32, u32)> {
+    let version = id.strip_prefix("gemini-")?.split('-').next()?;
+    let (major, minor) = version.split_once('.').unwrap_or((version, "0"));
+    Some((major.parse().ok()?, minor.parse().ok()?))
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +555,36 @@ fn anthropic_models(answer: &[u8]) -> Result<Vec<Found>, String> {
     Ok(models)
 }
 
+/// The Gemini models for text in Google's list, each once, newest first, with
+/// their windows. Google gives no dates, so the version sorts them: models of
+/// one version, and those with none, keep the list's order, the ones with no
+/// version last.
+fn google_models(answer: &[u8]) -> Result<Vec<Found>, String> {
+    let engine = Engine::Google;
+    let value: Value = serde_json::from_slice(answer).map_err(|_| engine.unreadable())?;
+    let listed = value.get("models").and_then(Value::as_array).ok_or_else(|| engine.unreadable())?;
+    let mut found: Vec<Found> = Vec::new();
+    for entry in listed {
+        let Some(id) = entry.get("name").and_then(Value::as_str).and_then(|name| name.strip_prefix("models/")) else {
+            continue;
+        };
+        let chat = entry
+            .get("supportedGenerationMethods")
+            .and_then(Value::as_array)
+            .is_some_and(|methods| methods.iter().any(|method| method.as_str() == Some("generateContent")));
+        if chat && engine.fits(id) && !found.iter().any(|kept| kept.id == id) {
+            let context = entry.get("inputTokenLimit").and_then(Value::as_u64).map_or(0, |context| u32::try_from(context).unwrap_or(u32::MAX));
+            found.push(Found { id: id.to_string(), context });
+        }
+    }
+    found.sort_by_key(|kept| std::cmp::Reverse(gemini_version(&kept.id)));
+    found.truncate(engine.most_models());
+    if found.is_empty() {
+        return Err(engine.none_listed());
+    }
+    Ok(found)
+}
+
 // ---------------------------------------------------------------------------
 // Asking an engine
 // ---------------------------------------------------------------------------
@@ -533,6 +609,9 @@ fn status_error(engine: Engine, code: u16) -> String {
     let maker = engine.maker();
     match code {
         401 | 403 => format!("{maker} did not take the key ({code}). Check the key file."),
+        // Google answers 400 for a key it does not take, and for an account
+        // the Gemini API is not set up for.
+        400 if engine == Engine::Google => format!("{maker} turned the call down (400). Check the key file and your {maker} account."),
         402 => format!("{maker} says the account needs credits or billing set up (402). Check your {maker} account."),
         404 => format!("{maker} answered 404. It may no longer offer that model: refresh {}'s models on the Installers page.", engine.name()),
         429 => format!("{maker} says too many requests, or no credits left (429). Wait a moment, or check your {maker} account."),
@@ -586,6 +665,8 @@ async fn find_models(engine: Engine, client: &reqwest::Client, key: &Key) -> Res
         Engine::OpenAi => Ok(openai_models(&list(engine, client, key, "models").await?)?.into_iter().map(|id| Found { id, context: 0 }).collect()),
         // Anthropic lists 20 a page unless asked for more.
         Engine::Anthropic => anthropic_models(&list(engine, client, key, "models?limit=100").await?),
+        // Google lists 50 a page unless asked for more, and 1,000 at most.
+        Engine::Google => google_models(&list(engine, client, key, "models?pageSize=1000").await?),
     }
 }
 
@@ -632,6 +713,8 @@ struct KeptFile {
     openai: Kept,
     #[serde(default)]
     anthropic: Kept,
+    #[serde(default)]
+    google: Kept,
 }
 
 impl KeptFile {
@@ -640,6 +723,7 @@ impl KeptFile {
             Engine::Xai => &self.xai,
             Engine::OpenAi => &self.openai,
             Engine::Anthropic => &self.anthropic,
+            Engine::Google => &self.google,
         }
     }
 
@@ -648,6 +732,7 @@ impl KeptFile {
             Engine::Xai => &mut self.xai,
             Engine::OpenAi => &mut self.openai,
             Engine::Anthropic => &mut self.anthropic,
+            Engine::Google => &mut self.google,
         }
     }
 
@@ -811,12 +896,13 @@ pub async fn run_chat(
             "max_completion_tokens": most,
         }),
         Engine::Anthropic => claude_body(model, request, most)?,
+        Engine::Google => gemini_body(request, most)?,
     };
     // The gate first: with it off, the key is not even read.
     let client = client(engine, gate)?;
     let path = outside.key_path(engine).ok_or_else(|| engine.not_added())?;
     let key = read_key(&path)?;
-    let sending = engine.signed(client.post(format!("{}/{}", engine.base(), engine.chat_path())), &key).json(&body).send();
+    let sending = engine.signed(client.post(engine.chat_url(model)), &key).json(&body).send();
     drop(key);
     let response = tokio::select! {
         _ = cancel.changed() => return Ok(ChatDone { stopped: true, ..ChatDone::default() }),
@@ -845,17 +931,18 @@ async fn read_answer<B: AsRef<[u8]>, E>(
         gate.closed().await;
         engine.gate_went_off()
     };
-    let broke = format!("{} stopped answering part way through.", engine.name());
-    match engine {
-        Engine::Xai | Engine::OpenAi => engine::read_reply(reply, cancel, gate_off, emit, &broke).await,
-        Engine::Anthropic => {
-            let done = engine::read_stream(reply, cancel, gate_off, emit, &broke, claude_payload).await?;
-            if !done.stopped && done.finish_reason.as_deref() == Some("refusal") {
-                return Err(engine.declined());
-            }
-            Ok(done)
-        }
+    let broke = engine.broke();
+    let take: fn(&str, &mut ReplyStream, &mut ChatDone) -> Taken = match engine {
+        Engine::Xai | Engine::OpenAi => return engine::read_reply(reply, cancel, gate_off, emit, &broke).await,
+        Engine::Anthropic => claude_payload,
+        Engine::Google => gemini_payload,
+    };
+    let done = engine::read_stream(reply, cancel, gate_off, emit, &broke, take).await?;
+    // A refusal after Stop reads as stopped, since the person ended it.
+    if !done.stopped && done.finish_reason.as_deref() == Some("refusal") {
+        return Err(engine.declined());
     }
+    Ok(done)
 }
 
 // ---------------------------------------------------------------------------
@@ -865,13 +952,12 @@ async fn read_answer<B: AsRef<[u8]>, E>(
 /// What a chat says when Claude cannot take its turns.
 const CLAUDE_TURNS: &str = "Claude needs a chat that starts and ends with a message of yours.";
 
-/// The chat as Anthropic's API takes it. The system's words go on top, not
-/// in a turn. Empty turns are dropped, and two turns in a row from one side
-/// are joined, since each turn must answer the other. A chat that starts or
-/// ends with an answer is refused: Claude takes no answer to carry on.
-/// No temperature is sent, nor any setting for thinking, so each model
-/// thinks the way its maker made it.
-fn claude_body(model: &str, request: &ChatRequest, most: u32) -> Result<Value, String> {
+/// A chat as Anthropic's API and Google's take it: the system's words, joined,
+/// apart from the turns. Empty turns are dropped, and two turns in a row from
+/// one side are joined, since each turn must answer the other. A chat that
+/// starts or ends with an answer is refused with `refused`: neither engine
+/// takes an answer to carry on.
+fn turns<'chat>(request: &'chat ChatRequest, refused: &str) -> Result<(Option<String>, Vec<(&'chat str, String)>), String> {
     let mut system: Vec<&str> = Vec::new();
     let mut turns: Vec<(&str, String)> = Vec::new();
     for message in &request.messages {
@@ -893,8 +979,16 @@ fn claude_body(model: &str, request: &ChatRequest, most: u32) -> Result<Value, S
     }
     let user = |turn: Option<&(&str, String)>| turn.is_some_and(|(role, _)| *role == "user");
     if !user(turns.first()) || !user(turns.last()) {
-        return Err(CLAUDE_TURNS.to_string());
+        return Err(refused.to_string());
     }
+    Ok(((!system.is_empty()).then(|| system.join("\n\n")), turns))
+}
+
+/// The chat as Anthropic's API takes it, the system's words on top, not in a
+/// turn. No temperature is sent, nor any setting for thinking, so each model
+/// thinks the way its maker made it.
+fn claude_body(model: &str, request: &ChatRequest, most: u32) -> Result<Value, String> {
+    let (system, turns) = turns(request, CLAUDE_TURNS)?;
     let messages: Vec<Value> = turns.into_iter().map(|(role, content)| serde_json::json!({ "role": role, "content": content })).collect();
     let mut body = serde_json::json!({
         "model": model,
@@ -902,8 +996,8 @@ fn claude_body(model: &str, request: &ChatRequest, most: u32) -> Result<Value, S
         "messages": messages,
         "stream": true,
     });
-    if !system.is_empty() {
-        body["system"] = Value::from(system.join("\n\n"));
+    if let Some(system) = system {
+        body["system"] = Value::from(system);
     }
     Ok(body)
 }
@@ -969,6 +1063,94 @@ fn claude_error(kind: Option<&str>) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// How Gemini is asked
+// ---------------------------------------------------------------------------
+
+/// What a chat says when Gemini cannot take its turns.
+const GEMINI_TURNS: &str = "Gemini needs a chat that starts and ends with a message of yours.";
+
+/// The finish reasons and block reasons Google gives when Gemini will not
+/// answer, or will not go on.
+const GEMINI_REFUSALS: [&str; 9] =
+    ["SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION"];
+
+/// The chat as Google's API takes it. The system's words go on top, not in a
+/// turn, and an answer's turn is the model's. Google keeps no log of the
+/// call (`store: false`). No temperature is sent, nor any setting for
+/// thinking, so each model thinks the way Google made it.
+fn gemini_body(request: &ChatRequest, most: u32) -> Result<Value, String> {
+    let (system, turns) = turns(request, GEMINI_TURNS)?;
+    let contents: Vec<Value> = turns
+        .into_iter()
+        .map(|(role, text)| serde_json::json!({ "role": if role == "assistant" { "model" } else { "user" }, "parts": [{ "text": text }] }))
+        .collect();
+    let mut body = serde_json::json!({
+        "contents": contents,
+        "generationConfig": { "maxOutputTokens": most },
+        "store": false,
+    });
+    if let Some(system) = system {
+        body["systemInstruction"] = serde_json::json!({ "parts": [{ "text": system }] });
+    }
+    Ok(body)
+}
+
+/// One piece of Gemini's stream: the answer so far, in parts, with why it
+/// stopped and its counts once it has. A part Google marks as thought shows
+/// apart from the answer; its signature is never read. The stream has no end
+/// of its own, so it is read until Google closes it.
+fn gemini_payload(payload: &str, reply: &mut ReplyStream, done: &mut ChatDone) -> Taken {
+    let Ok(value) = serde_json::from_str::<Value>(payload) else {
+        return Ok((Vec::new(), false));
+    };
+    // What Google writes with an error is never shown.
+    if value.get("error").is_some() {
+        return Err(Engine::Google.broke());
+    }
+    // A question turned down before any answer says why here alone.
+    if value.pointer("/promptFeedback/blockReason").and_then(Value::as_str).is_some() {
+        done.finish_reason = Some("refusal".to_string());
+    }
+    done.prompt_tokens = tokens_at(&value, "/usageMetadata/promptTokenCount").or(done.prompt_tokens);
+    let answer = tokens_at(&value, "/usageMetadata/candidatesTokenCount");
+    let thought = tokens_at(&value, "/usageMetadata/thoughtsTokenCount");
+    if answer.is_some() || thought.is_some() {
+        done.completion_tokens = Some(answer.unwrap_or(0).saturating_add(thought.unwrap_or(0)));
+    }
+    let Some(candidate) = value.pointer("/candidates/0") else {
+        return Ok((Vec::new(), false));
+    };
+    let mut events = Vec::new();
+    for part in candidate.pointer("/content/parts").and_then(Value::as_array).into_iter().flatten() {
+        let Some(text) = part.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        if part.get("thought").and_then(Value::as_bool) == Some(true) {
+            events.extend(reply.push_reasoning(text));
+        } else {
+            events.extend(reply.push_content(text));
+        }
+    }
+    if let Some(reason) = candidate.get("finishReason").and_then(Value::as_str) {
+        done.finish_reason = Some(gemini_finish(reason));
+    }
+    Ok((events, false))
+}
+
+/// Why Gemini stopped, in the words the other engines use: "stop" when it
+/// finished, "length" when it ran out of room, and "refusal" when Google
+/// would not let it answer. Any other reason is kept as Google gives it.
+fn gemini_finish(reason: &str) -> String {
+    match reason {
+        "STOP" => "stop",
+        "MAX_TOKENS" => "length",
+        refused if GEMINI_REFUSALS.contains(&refused) => "refusal",
+        other => other,
+    }
+    .to_string()
+}
+
+// ---------------------------------------------------------------------------
 // What the page asks for
 // ---------------------------------------------------------------------------
 
@@ -1017,10 +1199,12 @@ mod tests {
     const FAKE_KEY: &str = "xai-not-a-real-key-only-for-these-tests-0123456789";
     const FAKE_OPENAI_KEY: &str = "sk-not-a-real-key-only-for-these-tests-0123456789";
     const FAKE_ANTHROPIC_KEY: &str = "sk-ant-not-a-real-key-only-for-these-tests-0123456789";
+    const FAKE_GOOGLE_KEY: &str = "AIza-not-a-real-key-only-for-these-tests-0123456789";
 
     const XAI: Engine = Engine::Xai;
     const OPENAI: Engine = Engine::OpenAi;
     const ANTHROPIC: Engine = Engine::Anthropic;
+    const GOOGLE: Engine = Engine::Google;
 
     fn folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir().join(format!("rusty-outside-{name}-{}", std::process::id()));
@@ -1087,6 +1271,7 @@ mod tests {
         assert_eq!(named(&told[0]), ["xai", "Grok", "xAI", "api.x.ai"]);
         assert_eq!(named(&told[1]), ["openai", "GPT", "OpenAI", "api.openai.com"]);
         assert_eq!(named(&told[2]), ["anthropic", "Claude", "Anthropic", "api.anthropic.com"]);
+        assert_eq!(named(&told[3]), ["google", "Gemini", "Google", "generativelanguage.googleapis.com"]);
 
         // Not in any message, whatever goes wrong.
         let mut errors = vec![
@@ -1107,7 +1292,7 @@ mod tests {
     fn a_key_pasted_where_the_path_goes_is_refused_and_not_kept() {
         let place = folder("pasted");
         let outside = Outside::new(place.join("outside.json"));
-        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY), (ANTHROPIC, FAKE_ANTHROPIC_KEY)] {
+        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY), (ANTHROPIC, FAKE_ANTHROPIC_KEY), (GOOGLE, FAKE_GOOGLE_KEY)] {
             for pasted in [key, &format!("  {key}\n"), "xai-abc/def"] {
                 let error = block_on(outside.add(engine, &Gate::at(true), pasted)).unwrap_err();
                 assert_eq!(error, engine.whole_path());
@@ -1189,7 +1374,7 @@ mod tests {
     fn with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read() {
         let place = folder("gate");
         let outside = Outside::new(place.join("outside.json"));
-        for (engine, model) in [(XAI, "grok-4.7"), (OPENAI, "gpt-5-mini"), (ANTHROPIC, "claude-opus-5-5")] {
+        for (engine, model) in [(XAI, "grok-4.7"), (OPENAI, "gpt-5-mini"), (ANTHROPIC, "claude-opus-5-5"), (GOOGLE, "gemini-3.5-flash")] {
             // A path to no file at all: reading it would say so.
             outside.change(engine, |kept| kept.key_path = Some(place.join("no-such-key"))).unwrap();
             outside.change(engine, |kept| kept.models = found(model)).unwrap();
@@ -1203,6 +1388,7 @@ mod tests {
         }
         assert_eq!(OPENAI.gate_off(), "The gate is off. Turn it on to ask GPT.");
         assert_eq!(ANTHROPIC.gate_off(), "The gate is off. Turn it on to ask Claude.");
+        assert_eq!(GOOGLE.gate_off(), "The gate is off. Turn it on to ask Gemini.");
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1220,8 +1406,10 @@ mod tests {
         let mut empty = request("xai:grok-4.7");
         empty.messages.clear();
         assert_eq!(chat(&Gate::at(true), &outside, &empty).unwrap_err(), "There is nothing to send.");
-        assert!(is_outside("xai:grok-4.7") && is_outside("openai:gpt-5") && is_outside("anthropic:claude-opus-5-5"));
+        assert!(is_outside("xai:grok-4.7") && is_outside("openai:gpt-5") && is_outside("anthropic:claude-opus-5-5") && is_outside("google:gemini-3.5-flash"));
         assert!(!is_outside("mlx-community/phi-4-4bit") && !is_outside("grok-4.7") && !is_outside("claude-opus-5-5") && !is_outside("Anthropic:claude-opus-5-5"));
+        // Google's models on this computer, such as Gemma, stay local.
+        assert!(!is_outside("gemini-3.5-flash") && !is_outside("Google:gemini-3.5-flash") && !is_outside("mlx-community/gemma-4-26b-4bit"));
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1233,6 +1421,7 @@ mod tests {
         outside.change(XAI, |kept| kept.models = found("grok-4.7")).unwrap();
         outside.change(OPENAI, |kept| kept.models = found("gpt-5-mini")).unwrap();
         outside.change(ANTHROPIC, |kept| kept.models = found("claude-opus-5-5")).unwrap();
+        outside.change(GOOGLE, |kept| kept.models = found("gemini-3.5-flash")).unwrap();
         // Each engine's model, named as another's, is refused before the
         // gate or the key is looked at.
         for (model, engine) in [
@@ -1242,17 +1431,27 @@ mod tests {
             ("anthropic:grok-4.7", ANTHROPIC),
             ("openai:claude-opus-5-5", OPENAI),
             ("xai:claude-opus-5-5", XAI),
+            ("google:claude-opus-5-5", GOOGLE),
+            ("google:grok-4.7", GOOGLE),
+            ("anthropic:gemini-3.5-flash", ANTHROPIC),
+            ("openai:gemini-3.5-flash", OPENAI),
         ] {
             assert_eq!(chat(&Gate::at(false), &outside, &request(model)).unwrap_err(), engine.not_listed(), "{model}");
         }
         // Each as its own reaches the gate.
-        for (model, engine) in [("openai:gpt-5-mini", OPENAI), ("xai:grok-4.7", XAI), ("anthropic:claude-opus-5-5", ANTHROPIC)] {
+        for (model, engine) in [
+            ("openai:gpt-5-mini", OPENAI),
+            ("xai:grok-4.7", XAI),
+            ("anthropic:claude-opus-5-5", ANTHROPIC),
+            ("google:gemini-3.5-flash", GOOGLE),
+        ] {
             assert_eq!(chat(&Gate::at(false), &outside, &request(model)).unwrap_err(), engine.gate_off(), "{model}");
         }
         assert_eq!(Engine::of_model("openai:gpt-5-mini"), Some((OPENAI, "gpt-5-mini")));
         assert_eq!(Engine::of_model("xai:grok-4.7"), Some((XAI, "grok-4.7")));
         assert_eq!(Engine::of_model("anthropic:claude-opus-5-5"), Some((ANTHROPIC, "claude-opus-5-5")));
-        assert_eq!(Engine::of_model("google:gemini"), None);
+        assert_eq!(Engine::of_model("google:gemini-3.5-flash"), Some((GOOGLE, "gemini-3.5-flash")));
+        assert_eq!(Engine::of_model("meta:llama-5"), None);
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1261,7 +1460,8 @@ mod tests {
         assert_eq!(Engine::named("xai"), Ok(XAI));
         assert_eq!(Engine::named("openai"), Ok(OPENAI));
         assert_eq!(Engine::named("anthropic"), Ok(ANTHROPIC));
-        for unknown in ["", "XAI", "OpenAI", "Anthropic", "claude", "google", "gemini", "openai ", "anthropic ", "../xai"] {
+        assert_eq!(Engine::named("google"), Ok(GOOGLE));
+        for unknown in ["", "XAI", "OpenAI", "Anthropic", "Google", "claude", "gemini", "meta", "openai ", "google ", "../xai"] {
             assert_eq!(Engine::named(unknown), Err(UNKNOWN.to_string()), "{unknown:?}");
         }
         // Each engine's names stand apart.
@@ -1286,6 +1486,7 @@ mod tests {
             "https://127.0.0.1/v1",
             "https://api.openai.com/v1",
             "https://api.anthropic.com/v1",
+            "https://generativelanguage.googleapis.com/v1beta",
         ] {
             assert!(!XAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
         }
@@ -1316,6 +1517,7 @@ mod tests {
             "https://notapi.openai.com/v1",
             "https://api.x.ai/v1",
             "https://api.anthropic.com/v1",
+            "https://generativelanguage.googleapis.com/v1beta",
         ] {
             assert!(!OPENAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
         }
@@ -1326,9 +1528,9 @@ mod tests {
     fn claude_is_asked_at_anthropics_api_alone_over_https() {
         assert_eq!(ANTHROPIC_BASE, "https://api.anthropic.com/v1");
         assert_eq!(ANTHROPIC_BASE, format!("https://{ANTHROPIC_HOST}/v1"));
-        assert_eq!(format!("{}/{}", ANTHROPIC.base(), ANTHROPIC.chat_path()), "https://api.anthropic.com/v1/messages");
-        assert_eq!(format!("{}/{}", OPENAI.base(), OPENAI.chat_path()), "https://api.openai.com/v1/chat/completions");
-        assert_eq!(format!("{}/{}", XAI.base(), XAI.chat_path()), "https://api.x.ai/v1/chat/completions");
+        assert_eq!(ANTHROPIC.chat_url("claude-opus-5-5"), "https://api.anthropic.com/v1/messages");
+        assert_eq!(OPENAI.chat_url("gpt-5-mini"), "https://api.openai.com/v1/chat/completions");
+        assert_eq!(XAI.chat_url("grok-4.7"), "https://api.x.ai/v1/chat/completions");
         assert!(ANTHROPIC.owns(&reqwest::Url::parse("https://api.anthropic.com/v1/messages").unwrap()));
         for away in [
             "http://api.anthropic.com/v1/messages",
@@ -1340,6 +1542,7 @@ mod tests {
             "https://notapi.anthropic.com/v1",
             "https://api.openai.com/v1",
             "https://api.x.ai/v1",
+            "https://generativelanguage.googleapis.com/v1beta",
         ] {
             assert!(!ANTHROPIC.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
         }
@@ -1348,10 +1551,7 @@ mod tests {
     // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
     #[test]
     fn claude_is_signed_with_its_own_header() {
-        let signed = |engine: Engine, key: &str| {
-            let url = format!("{}/{}", engine.base(), engine.chat_path());
-            engine.signed(client(engine, &Gate::at(true)).unwrap().post(url), &Key(key.into())).build().unwrap()
-        };
+        let signed = |engine: Engine, key: &str| engine.signed(client(engine, &Gate::at(true)).unwrap().post(engine.chat_url("a-model")), &Key(key.into())).build().unwrap();
         let asked = signed(ANTHROPIC, FAKE_ANTHROPIC_KEY);
         let headers = asked.headers();
         let key = headers.get("x-api-key").expect("the key goes in x-api-key");
@@ -1369,10 +1569,68 @@ mod tests {
             assert_eq!(bearer.to_str().unwrap(), format!("Bearer {key}"));
             assert!(bearer.is_sensitive());
             assert!(asked.headers().get("x-api-key").is_none() && asked.headers().get("anthropic-version").is_none());
+            assert!(asked.headers().get("x-goog-api-key").is_none());
         }
+        // Nor does Google.
+        let asked = signed(GOOGLE, FAKE_GOOGLE_KEY);
+        assert!(asked.headers().get("x-api-key").is_none() && asked.headers().get("anthropic-version").is_none());
+        assert!(signed(ANTHROPIC, FAKE_ANTHROPIC_KEY).headers().get("x-goog-api-key").is_none());
         // A key that cannot go in a header is not sent at all.
         for bad in ["sk-ant-bad\nkey", "sk-ant-bad\u{7f}key"] {
             assert!(signed(ANTHROPIC, bad).headers().get("x-api-key").is_none(), "{bad:?}");
+        }
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn gemini_is_asked_at_googles_api_alone_over_https() {
+        assert_eq!(GOOGLE_BASE, "https://generativelanguage.googleapis.com/v1beta");
+        assert_eq!(GOOGLE_BASE, format!("https://{GOOGLE_HOST}/v1beta"));
+        let asked = GOOGLE.chat_url("gemini-3.5-flash");
+        assert_eq!(asked, "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse");
+        assert!(GOOGLE.owns(&reqwest::Url::parse(&asked).unwrap()));
+        for away in [
+            "http://generativelanguage.googleapis.com/v1beta/models",
+            "https://generativelanguage.googleapis.com:8443/v1beta",
+            "https://someone@generativelanguage.googleapis.com/v1beta",
+            "https://generativelanguage.googleapis.com.example.com/v1beta",
+            "https://googleapis.com/v1beta",
+            "https://aiplatform.googleapis.com/v1",
+            "https://notgenerativelanguage.googleapis.com/v1beta",
+            "https://gemini.google.com/v1beta",
+            "https://api.anthropic.com/v1",
+            "https://api.openai.com/v1",
+            "https://api.x.ai/v1",
+        ] {
+            assert!(!GOOGLE.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
+        }
+        // Google names the model in the address, so only a model it listed
+        // goes there, and no listed model can move it.
+        for odd in ["gemini-3.5-flash/../../x", "gemini-3.5-flash?key=x", "gemini-3.5-flash:generateContent", "gemini-3.5 flash", "gemini-3.5-flash#x", "gemini-3.5-flash%2F"] {
+            assert!(!GOOGLE.fits(odd), "{odd}");
+        }
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn gemini_is_signed_with_its_own_header() {
+        let signed = |key: &str| GOOGLE.signed(client(GOOGLE, &Gate::at(true)).unwrap().post(GOOGLE.chat_url("gemini-3.5-flash")), &Key(key.into())).build().unwrap();
+        let asked = signed(FAKE_GOOGLE_KEY);
+        let headers = asked.headers();
+        let key = headers.get("x-goog-api-key").expect("the key goes in x-goog-api-key");
+        assert_eq!(key.to_str().unwrap(), FAKE_GOOGLE_KEY);
+        assert!(key.is_sensitive(), "the key would show in a debug print");
+        assert!(headers.get(reqwest::header::AUTHORIZATION).is_none());
+        assert!(headers.get("x-api-key").is_none() && headers.get("anthropic-version").is_none());
+        // Never in the address, where anything along the way could keep it.
+        let url = asked.url();
+        assert_eq!(url.as_str(), "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:streamGenerateContent?alt=sse");
+        assert!(url.query_pairs().all(|(name, value)| name == "alt" && value == "sse"), "{url}");
+        // A key that cannot go in a header is not sent at all.
+        for bad in ["AIza-bad\nkey", "AIza-bad\u{7f}key"] {
+            let asked = signed(bad);
+            assert!(asked.headers().get("x-goog-api-key").is_none(), "{bad:?}");
+            assert!(!asked.url().as_str().contains("bad"), "{bad:?}");
         }
     }
 
@@ -1652,6 +1910,205 @@ mod tests {
         assert_eq!(claude_error(None), "Claude stopped answering part way through.");
     }
 
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn googles_list_gives_gemini_models_newest_first_with_their_names() {
+        let chat = serde_json::json!(["generateContent", "countTokens"]);
+        let listed = serde_json::json!({ "models": [
+            { "name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash", "inputTokenLimit": 1_048_576, "outputTokenLimit": 65_536, "supportedGenerationMethods": chat },
+            { "name": "models/gemini-3.5-flash", "inputTokenLimit": 1_048_576, "supportedGenerationMethods": chat },
+            { "name": "models/gemini-flash-latest", "inputTokenLimit": 1_048_576, "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-flash-lite", "inputTokenLimit": 1_048_576, "supportedGenerationMethods": chat },
+            { "name": "models/gemini-3-pro-preview", "inputTokenLimit": 99_999_999_999_u64, "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-pro", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-3.5-flash", "inputTokenLimit": 7, "supportedGenerationMethods": chat },
+            // Pinned or dated copies.
+            { "name": "models/gemini-2.0-flash-001", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-flash-preview-09-2025", "supportedGenerationMethods": chat },
+            // Models for pictures, sound, live calls, or other work.
+            { "name": "models/gemini-2.5-flash-image", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-flash-preview-tts", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-flash-native-audio-latest", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-live-2.5-flash", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-2.5-computer-use-preview", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-robotics-er-1.5-preview", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"] },
+            { "name": "models/gemini-embedding-exp", "supportedGenerationMethods": chat },
+            // Listed, but not for a chat.
+            { "name": "models/gemini-4-flash", "supportedGenerationMethods": ["countTokens"] },
+            { "name": "models/gemini-4-pro", "supportedGenerationMethods": "generateContent" },
+            { "name": "models/gemini-4-ultra" },
+            // Not Gemini, or not names at all.
+            { "name": "models/gemma-4-26b-it", "supportedGenerationMethods": chat },
+            { "name": "models/imagen-4.0-generate-001", "supportedGenerationMethods": ["predict"] },
+            { "name": "gemini-3.5-pro", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-<b>", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-3.5-flash/../x", "supportedGenerationMethods": chat },
+            { "name": "models/gemini-", "supportedGenerationMethods": chat },
+            { "name": "models/gemini--flash", "supportedGenerationMethods": chat },
+            { "name": format!("models/gemini-{}", "x".repeat(100)), "supportedGenerationMethods": chat },
+            { "name": 7, "supportedGenerationMethods": chat },
+            { "displayName": "no name", "supportedGenerationMethods": chat },
+        ], "nextPageToken": "more" });
+        let models = google_models(listed.to_string().as_bytes()).unwrap();
+        let ids: Vec<&str> = models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["gemini-3.5-flash", "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-flash-latest"]);
+        let contexts: Vec<u32> = models.iter().map(|model| model.context).collect();
+        assert_eq!(contexts, [1_048_576, u32::MAX, 1_048_576, 1_048_576, 0, 1_048_576]);
+        assert_eq!(google_models(b"not json").unwrap_err(), "Google's list of models could not be read.");
+        assert_eq!(google_models(br#"{"data":[]}"#).unwrap_err(), GOOGLE.unreadable());
+        assert_eq!(google_models(br#"{"models":[]}"#).unwrap_err(), "Google listed no Gemini models for text.");
+        assert_eq!(google_models(br#"{"models":[{"name":"models/gemma-4-26b-it","supportedGenerationMethods":["generateContent"]}]}"#).unwrap_err(), GOOGLE.none_listed());
+        // Only the newest are kept, by number, not by letter: 49 before 9.
+        let many: Vec<Value> = (0..50).map(|n| serde_json::json!({ "name": format!("models/gemini-{n}.0-flash"), "supportedGenerationMethods": ["generateContent"] })).collect();
+        let newest = google_models(serde_json::json!({ "models": many }).to_string().as_bytes()).unwrap();
+        assert_eq!(newest.len(), GOOGLE.most_models());
+        assert_eq!(newest.first().map(|model| model.id.as_str()), Some("gemini-49.0-flash"));
+        assert_eq!(newest.last().map(|model| model.id.as_str()), Some("gemini-38.0-flash"));
+        assert_eq!((gemini_version("gemini-3.5-flash"), gemini_version("gemini-3-pro-preview"), gemini_version("gemini-flash-latest")), (Some((3, 5)), Some((3, 0)), None));
+
+        for (id, name) in [
+            ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+            ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
+            ("gemini-3-pro-preview", "Gemini 3 Pro Preview"),
+            ("gemini-flash-latest", "Gemini Flash Latest"),
+        ] {
+            assert_eq!(GOOGLE.name_of(id), name, "{id}");
+        }
+        assert_eq!(
+            Found { id: "gemini-3.5-flash".into(), context: 1_048_576 }.info(GOOGLE),
+            ModelInfo { id: "google:gemini-3.5-flash".into(), name: "Gemini 3.5 Flash".into(), maker: "Google".into(), context: 1_048_576 }
+        );
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn gemini_is_asked_with_the_system_on_top_and_turns_that_take_turns() {
+        let message = |role: &str, content: &str| engine::ChatMessage { role: role.into(), content: content.into() };
+        let asked = |messages: Vec<engine::ChatMessage>| ChatRequest { model: "google:gemini-3.5-flash".into(), messages, max_tokens: None };
+        let long = asked(vec![
+            message("system", " Be brief. "),
+            message("system", "   "),
+            message("user", "What is 2+2?"),
+            message("assistant", "4"),
+            message("assistant", ""),
+            message("assistant", "Anything else?"),
+            message("system", "Use plain words."),
+            message("user", "And 3+3?"),
+            message("user", "Thanks."),
+        ]);
+        let body = gemini_body(&long, engine::DEFAULT_MAX_TOKENS).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "contents": [
+                    { "role": "user", "parts": [{ "text": "What is 2+2?" }] },
+                    { "role": "model", "parts": [{ "text": "4\n\nAnything else?" }] },
+                    { "role": "user", "parts": [{ "text": "And 3+3?\n\nThanks." }] },
+                ],
+                "systemInstruction": { "parts": [{ "text": "Be brief.\n\nUse plain words." }] },
+                "generationConfig": { "maxOutputTokens": 4096 },
+                "store": false,
+            })
+        );
+        // No setting each model makes its own: no temperature, no thinking.
+        // The model goes in the address, not here.
+        let mut names: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["contents", "generationConfig", "store", "systemInstruction"]);
+        assert_eq!(body["generationConfig"].as_object().unwrap().keys().collect::<Vec<_>>(), ["maxOutputTokens"]);
+        // No system, no system field, and Google keeps no log either way.
+        let plain = gemini_body(&request("google:gemini-3.5-flash"), 100).unwrap();
+        assert!(plain.get("systemInstruction").is_none());
+        assert_eq!((&plain["generationConfig"]["maxOutputTokens"], &plain["store"]), (&Value::from(100), &Value::Bool(false)));
+        // A chat that starts or ends with an answer, or has no turn, is refused.
+        for messages in [
+            vec![message("assistant", "Hello."), message("user", "Hi.")],
+            vec![message("user", "Hi."), message("assistant", "Hello.")],
+            vec![message("system", "Be brief."), message("user", "  ")],
+        ] {
+            assert_eq!(gemini_body(&asked(messages), 100).unwrap_err(), GEMINI_TURNS);
+        }
+        // And before the gate, or the key, is looked at.
+        let place = folder("gemini-turns");
+        let outside = Outside::new(place.join("outside.json"));
+        outside.change(GOOGLE, |kept| kept.models = found("gemini-3.5-flash")).unwrap();
+        let ends_with_an_answer = asked(vec![message("user", "Hi."), message("assistant", "Hello.")]);
+        assert_eq!(chat(&Gate::at(false), &outside, &ends_with_an_answer).unwrap_err(), GEMINI_TURNS);
+        assert_eq!(chat(&Gate::at(false), &outside, &asked(vec![message("user", "Hi.")])).unwrap_err(), GOOGLE.gate_off());
+        fs::remove_dir_all(&place).unwrap();
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn geminis_stream_is_read_as_it_comes() {
+        let data = |value: Value| format!("data: {value}\r\n\r\n");
+        let parts = |parts: Value| serde_json::json!({ "candidates": [{ "content": { "parts": parts, "role": "model" }, "index": 0 }] });
+        let text = |text: &str| data(parts(serde_json::json!([{ "text": text }])));
+        let finished = |reason: &str| data(serde_json::json!({ "candidates": [{ "content": { "parts": [], "role": "model" }, "finishReason": reason }] }));
+        let read = |pieces: Vec<Result<String, std::io::Error>>| {
+            let (_stop, mut cancelled) = watch::channel(false);
+            let mut heard = String::new();
+            let reply = futures_util::stream::iter(pieces.into_iter().map(|piece| piece.map(String::into_bytes)));
+            let done = block_on(read_answer(GOOGLE, &Gate::at(true), reply, &mut cancelled, |event| heard.push_str(&format!("{event:?}"))));
+            (done, heard)
+        };
+
+        let (done, heard) = read(vec![
+            Ok(data(parts(serde_json::json!([{ "text": "Two and two.", "thought": true }])))),
+            Ok("data: not json\n\n".to_string()),
+            Ok(data(serde_json::json!({ "candidates": [{ "content": { "parts": [{ "text": "2+2 ", "thoughtSignature": "c2lnbmVk" }, { "thoughtSignature": "c2lnbmVk" }], "role": "model" } }], "usageMetadata": { "promptTokenCount": 20 } }))),
+            Ok(data(parts(serde_json::json!([{ "text": "is ", "thought": false }])))),
+            Ok(data(serde_json::json!({
+                "candidates": [{ "content": { "parts": [{ "text": "4." }], "role": "model" }, "finishReason": "STOP" }],
+                "usageMetadata": { "promptTokenCount": 20, "candidatesTokenCount": 5, "thoughtsTokenCount": 7, "totalTokenCount": 32 },
+                "modelVersion": "gemini-3.5-flash",
+            }))),
+        ]);
+        let done = done.unwrap();
+        assert_eq!((done.thinking.as_str(), done.answer.as_str()), ("Two and two.", "2+2 is 4."));
+        assert_eq!((done.prompt_tokens, done.completion_tokens, done.finish_reason.as_deref()), (Some(20), Some(12), Some("stop")));
+        assert!(!heard.contains("c2lnbmVk"), "{heard}");
+        // Counts too big to hold read as the most there can be.
+        let (done, _) = read(vec![Ok(data(serde_json::json!({ "usageMetadata": { "candidatesTokenCount": u32::MAX, "thoughtsTokenCount": 7 } })))]);
+        assert_eq!(done.unwrap().completion_tokens, Some(u32::MAX));
+        let (done, _) = read(vec![Ok(data(serde_json::json!({ "usageMetadata": { "thoughtsTokenCount": 7 } })))]);
+        assert_eq!(done.unwrap().completion_tokens, Some(7));
+        // A piece with no counts, after one with them, keeps the counts.
+        let counted = data(serde_json::json!({ "usageMetadata": { "promptTokenCount": 20, "candidatesTokenCount": 5 } }));
+        let done = read(vec![Ok(counted), Ok(text("4."))]).0.unwrap();
+        assert_eq!((done.prompt_tokens, done.completion_tokens), (Some(20), Some(5)));
+
+        // Out of room reads as the other engines say it.
+        for (reason, said) in [("STOP", "stop"), ("MAX_TOKENS", "length"), ("MALFORMED_FUNCTION_CALL", "MALFORMED_FUNCTION_CALL"), ("OTHER", "OTHER")] {
+            let (done, _) = read(vec![Ok(text("2+2")), Ok(finished(reason))]);
+            assert_eq!(done.unwrap().finish_reason.as_deref(), Some(said), "{reason}");
+        }
+
+        // A refusal is said plainly, after what came before it, whether the
+        // answer or the question was turned down. The reasons are named here,
+        // not read from the list the code keeps, so one dropped from it fails.
+        let refusals = ["SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION"];
+        assert_eq!(GEMINI_REFUSALS.len(), refusals.len());
+        for reason in refusals {
+            let (done, heard) = read(vec![Ok(text("I can ")), Ok(finished(reason))]);
+            assert_eq!(done.unwrap_err(), "Gemini declined to answer this one.", "{reason}");
+            assert!(heard.contains("I can"), "{heard}");
+        }
+        let blocked = data(serde_json::json!({ "promptFeedback": { "blockReason": "OTHER" }, "usageMetadata": { "promptTokenCount": 9 } }));
+        assert_eq!(read(vec![Ok(blocked)]).0.unwrap_err(), GOOGLE.declined());
+
+        // An error part way through, or a stream cut short, is said plainly,
+        // and what Google writes with it is never shown.
+        let error = data(serde_json::json!({ "error": { "code": 500, "message": "the words sent were: secret", "status": "INTERNAL" } }));
+        let cut = Err(std::io::Error::other("the words sent were: secret"));
+        for pieces in [vec![Ok(text("2+2")), Ok(error)], vec![Ok(text("2+2")), cut]] {
+            let said_back = read(pieces).0.unwrap_err();
+            assert_eq!(said_back, "Gemini stopped answering part way through.");
+            assert!(!said_back.contains("secret"));
+        }
+    }
+
     #[test]
     fn xais_refusals_are_said_plainly() {
         assert_eq!(status_error(XAI, 401), "xAI did not take the key (401). Check the key file.");
@@ -1666,6 +2123,13 @@ mod tests {
         assert_eq!(status_error(ANTHROPIC, 402), "Anthropic says the account needs credits or billing set up (402). Check your Anthropic account.");
         assert_eq!(status_error(ANTHROPIC, 529), "Anthropic is not answering right now (529).");
         assert!(status_error(ANTHROPIC, 404).contains("refresh Claude's models on the Installers page"));
+        // Google answers 400 for a key it does not take, or an account not set up for its API.
+        assert_eq!(status_error(GOOGLE, 400), "Google turned the call down (400). Check the key file and your Google account.");
+        assert_eq!(status_error(XAI, 400), "xAI answered 400.");
+        assert_eq!(status_error(GOOGLE, 403), "Google did not take the key (403). Check the key file.");
+        assert!(status_error(GOOGLE, 404).contains("refresh Gemini's models on the Installers page"));
+        assert_eq!(status_error(GOOGLE, 429), "Google says too many requests, or no credits left (429). Wait a moment, or check your Google account.");
+        assert_eq!(status_error(GOOGLE, 503), "Google is not answering right now (503).");
         let chunks = |sizes: &[usize]| futures_util::stream::iter(sizes.iter().map(|size| Ok::<_, ()>(vec![b'x'; *size])).collect::<Vec<_>>());
         assert_eq!(block_on(read_capped(XAI, chunks(&[400, 600]), 1000)).unwrap().len(), 1000);
         assert_eq!(block_on(read_capped(XAI, chunks(&[400, 601]), 1000)).unwrap_err(), "xAI's answer was too large.");
@@ -1679,6 +2143,7 @@ mod tests {
             let data = match engine {
                 Engine::Xai | Engine::OpenAi => serde_json::json!({ "choices": [{ "delta": { "content": text } }] }),
                 Engine::Anthropic => serde_json::json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": text } }),
+                Engine::Google => serde_json::json!({ "candidates": [{ "content": { "parts": [{ "text": text }], "role": "model" } }] }),
             };
             Ok::<_, std::io::Error>(format!("data: {data}\n\n").into_bytes())
         };
@@ -1703,7 +2168,7 @@ mod tests {
         }
 
         // Stop keeps what came.
-        for engine in [OPENAI, ANTHROPIC] {
+        for engine in [OPENAI, ANTHROPIC, GOOGLE] {
             let (stop, mut stopped) = watch::channel(false);
             let stopper = std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(200));
@@ -1716,21 +2181,25 @@ mod tests {
             drop(stopper.join().unwrap());
         }
 
-        // Stop after Claude says it declines, but before its stream ends,
-        // reads as stopped: the person ended the turn.
-        let declining = serde_json::json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" }, "usage": { "output_tokens": 3 } });
-        let declined = Ok::<_, std::io::Error>(format!("data: {declining}\n\n").into_bytes());
-        let reply = futures_util::stream::iter(vec![piece(ANTHROPIC, "I can "), declined]).chain(futures_util::stream::pending());
-        let (stop, mut stopped) = watch::channel(false);
-        let stopper = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            let _ = stop.send(true);
-            stop
-        });
-        let done = block_on(read_answer(ANTHROPIC, &Gate::at(true), reply, &mut stopped, |_| {})).unwrap();
-        assert!(done.stopped);
-        assert_eq!((done.answer.as_str(), done.finish_reason.as_deref()), ("I can", Some("refusal")));
-        drop(stopper.join().unwrap());
+        // Stop after Claude or Gemini says it declines, but before its
+        // stream ends, reads as stopped: the person ended the turn.
+        for (engine, declining) in [
+            (ANTHROPIC, serde_json::json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" }, "usage": { "output_tokens": 3 } })),
+            (GOOGLE, serde_json::json!({ "candidates": [{ "content": { "parts": [] }, "finishReason": "SAFETY" }] })),
+        ] {
+            let declined = Ok::<_, std::io::Error>(format!("data: {declining}\n\n").into_bytes());
+            let reply = futures_util::stream::iter(vec![piece(engine, "I can "), declined]).chain(futures_util::stream::pending());
+            let (stop, mut stopped) = watch::channel(false);
+            let stopper = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                let _ = stop.send(true);
+                stop
+            });
+            let done = block_on(read_answer(engine, &Gate::at(true), reply, &mut stopped, |_| {})).unwrap();
+            assert!(done.stopped, "{engine:?}");
+            assert_eq!((done.answer.as_str(), done.finish_reason.as_deref()), ("I can", Some("refusal")), "{engine:?}");
+            drop(stopper.join().unwrap());
+        }
     }
 
     #[test]
@@ -1792,18 +2261,21 @@ mod tests {
         assert_eq!(kept.xai, Kept { key_path: Some(PathBuf::from("/keys/xai")), models: found("grok-4.7") });
         assert_eq!(kept.openai, Kept::default());
         assert_eq!(kept.anthropic, Kept::default());
+        assert_eq!(kept.google, Kept::default());
         // Only each engine's own models, each once, are kept.
         fs::write(
             &file,
             r#"{"xai":{"keyPath":"relative/key","models":[{"id":"grok-4.7","context":1},{"id":"grok-4.7"},{"id":"../x"},{"id":"phi-4"},{"id":"gpt-5"}]},
                "openai":{"keyPath":"/keys/openai","models":[{"id":"gpt-5"},{"id":"grok-4.7"},{"id":"gpt-image-1"},{"id":"gpt-5"}]},
-               "anthropic":{"keyPath":"/keys/anthropic","models":[{"id":"claude-opus-5-5","context":1000000},{"id":"gpt-5"},{"id":"claude-opus-5-5"},{"id":"claude-<b>"}]}}"#,
+               "anthropic":{"keyPath":"/keys/anthropic","models":[{"id":"claude-opus-5-5","context":1000000},{"id":"gpt-5"},{"id":"claude-opus-5-5"},{"id":"claude-<b>"}]},
+               "google":{"keyPath":"/keys/google","models":[{"id":"gemini-3.5-flash","context":1048576},{"id":"gpt-5"},{"id":"gemini-3.5-flash"},{"id":"gemini-<b>"},{"id":"gemini-2.5-flash-image"}]}}"#,
         )
         .unwrap();
         let kept = Outside::new(file.clone()).lock().clone();
         assert_eq!(kept.xai, Kept { key_path: None, models: vec![Found { id: "grok-4.7".into(), context: 1 }] });
         assert_eq!(kept.openai, Kept { key_path: Some(PathBuf::from("/keys/openai")), models: found("gpt-5") });
         assert_eq!(kept.anthropic, Kept { key_path: Some(PathBuf::from("/keys/anthropic")), models: vec![Found { id: "claude-opus-5-5".into(), context: 1_000_000 }] });
+        assert_eq!(kept.google, Kept { key_path: Some(PathBuf::from("/keys/google")), models: vec![Found { id: "gemini-3.5-flash".into(), context: 1_048_576 }] });
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -1823,6 +2295,12 @@ mod tests {
     #[ignore = "asks Anthropic itself with the key at RUSTY_ANTHROPIC_KEY_FILE; run with --ignored"]
     fn claude_answers_two_plus_two() {
         answers_two_plus_two(ANTHROPIC, "RUSTY_ANTHROPIC_KEY_FILE");
+    }
+
+    #[test]
+    #[ignore = "asks Google itself with the key at RUSTY_GOOGLE_KEY_FILE; run with --ignored"]
+    fn gemini_answers_two_plus_two() {
+        answers_two_plus_two(GOOGLE, "RUSTY_GOOGLE_KEY_FILE");
     }
 
     fn answers_two_plus_two(engine: Engine, variable: &str) {

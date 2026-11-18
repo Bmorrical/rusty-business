@@ -401,9 +401,10 @@ export function installLine(maker, model) {
 
 /**
  * The starts of the model ids that name an outside engine's models: Grok's,
- * asked at xAI, GPT's, asked at OpenAI, and Claude's, asked at Anthropic.
+ * asked at xAI, GPT's, asked at OpenAI, Claude's, asked at Anthropic, and
+ * Gemini's, asked at Google.
  */
-export const OUTSIDE_PREFIXES = ["xai:", "openai:", "anthropic:"];
+export const OUTSIDE_PREFIXES = ["xai:", "openai:", "anthropic:", "google:"];
 
 /** True for a model asked outside this computer. */
 export function isOutside(id) {

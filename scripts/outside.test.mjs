@@ -1,5 +1,5 @@
-// The engines outside this computer, Grok by xAI, GPT by OpenAI, and Claude
-// by Anthropic, checked on every test run.
+// The engines outside this computer, Grok by xAI, GPT by OpenAI, Claude by
+// Anthropic, and Gemini by Google, checked on every test run.
 //
 // They answer the asks that started them: "user can add their outside
 // inference, start with Grok and Grok ai. user adds it manually, they will
@@ -45,11 +45,16 @@ const RUST_TESTS = [
   'gpt_is_asked_at_openais_api_alone_over_https',
   'claude_is_asked_at_anthropics_api_alone_over_https',
   'claude_is_signed_with_its_own_header',
+  'gemini_is_asked_at_googles_api_alone_over_https',
+  'gemini_is_signed_with_its_own_header',
   'xais_list_gives_grok_models_for_text_with_their_names',
   'openais_list_gives_gpt_models_for_text_newest_first_with_their_names',
   'anthropics_list_gives_claude_models_newest_first_with_their_names',
+  'googles_list_gives_gemini_models_newest_first_with_their_names',
   'claude_is_asked_with_the_system_on_top_and_turns_that_take_turns',
+  'gemini_is_asked_with_the_system_on_top_and_turns_that_take_turns',
   'claudes_stream_is_read_as_it_comes',
+  'geminis_stream_is_read_as_it_comes',
   'xais_refusals_are_said_plainly',
   'turning_the_gate_off_stops_grok_part_way_through',
   'removing_grok_forgets_the_path_and_keeps_the_models',
@@ -99,15 +104,20 @@ test('the key stays in Rust: never sent to the page, never logged, never kept by
   assert.ok(kept.includes('key_path: Option<PathBuf>'), 'the app no longer keeps the path');
   assert.doesNotMatch(kept.replace(/key_path/g, ''), /key/i, 'the app keeps the key');
   // The key goes out only as the request's own sign-in, marked as sensitive
-  // so nothing prints it: a bearer token for xAI and OpenAI, Anthropic's own
-  // header for Claude. Every call is signed in one place, and an answer's
-  // words are never read back into an error.
+  // so nothing prints it: a bearer token for xAI and OpenAI, and a header of
+  // their own for Anthropic and Google. It never goes in an address. Every
+  // call is signed in one place, and an answer's words are never read back
+  // into an error.
   const signed = rustFunction(source, 'signed');
-  assert.ok(signed.includes('Self::Xai | Self::OpenAi => builder.bearer_auth(&key.0),'), 'xAI or OpenAI is signed another way');
-  assert.ok(signed.includes('reqwest::header::HeaderValue::from_str(&key.0)'), 'Claude is signed another way');
-  assert.match(signed, /value\.set_sensitive\(true\);\s+builder\.header\("x-api-key", value\)/, "Claude's key is sent without being marked as sensitive");
+  assert.ok(signed.includes('Self::Xai | Self::OpenAi => return builder.bearer_auth(&key.0),'), 'xAI or OpenAI is signed another way');
+  assert.ok(signed.includes('Self::Anthropic => ("x-api-key", Some(ANTHROPIC_VERSION)),'), 'Claude is signed another way');
+  assert.ok(signed.includes('Self::Google => ("x-goog-api-key", None),'), 'Gemini is signed another way');
+  assert.ok(signed.includes('reqwest::header::HeaderValue::from_str(&key.0)'), 'Claude or Gemini is signed another way');
+  assert.match(signed, /value\.set_sensitive\(true\);\s+let signed = builder\.header\(header, value\);/, "Claude's or Gemini's key is sent without being marked as sensitive");
   assert.equal(source.match(/key\.0/g)?.length, 2, 'the key is read somewhere new');
   assert.equal(source.match(/x-api-key/g)?.length, 1, "Claude's header is set somewhere new");
+  assert.equal(source.match(/x-goog-api-key/g)?.length, 1, "Gemini's header is set somewhere new");
+  assert.ok(!/[?&]key=/.test(source), 'a key could now go in an address');
   assert.equal(source.match(/engine\s*\.signed\(/g)?.length, 2, 'a call is signed somewhere new');
   assert.ok(!source.includes('.text()'), "an error could now repeat a maker's own words");
 });
@@ -120,23 +130,32 @@ test("each engine is asked at its maker's API alone, over https, and only while 
   assert.ok(source.includes('pub const OPENAI_HOST: &str = "api.openai.com";'), "OpenAI's host has moved");
   assert.ok(source.includes('const ANTHROPIC_BASE: &str = "https://api.anthropic.com/v1";'), "Anthropic's address has moved");
   assert.ok(source.includes('pub const ANTHROPIC_HOST: &str = "api.anthropic.com";'), "Anthropic's host has moved");
+  assert.ok(source.includes('const GOOGLE_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";'), "Google's address has moved");
+  assert.ok(source.includes('pub const GOOGLE_HOST: &str = "generativelanguage.googleapis.com";'), "Google's host has moved");
   // Each engine has one address and one host, the ones above.
-  assert.match(rustFunction(source, 'base'), /Self::Xai => XAI_BASE,\s+Self::OpenAi => OPENAI_BASE,\s+Self::Anthropic => ANTHROPIC_BASE,\s+\}/, 'an engine is asked at another address');
-  assert.match(rustFunction(source, 'host'), /Self::Xai => XAI_HOST,\s+Self::OpenAi => OPENAI_HOST,\s+Self::Anthropic => ANTHROPIC_HOST,\s+\}/, 'an engine answers from another host');
+  assert.match(rustFunction(source, 'base'), /Self::Xai => XAI_BASE,\s+Self::OpenAi => OPENAI_BASE,\s+Self::Anthropic => ANTHROPIC_BASE,\s+Self::Google => GOOGLE_BASE,\s+\}/, 'an engine is asked at another address');
+  assert.match(rustFunction(source, 'host'), /Self::Xai => XAI_HOST,\s+Self::OpenAi => OPENAI_HOST,\s+Self::Anthropic => ANTHROPIC_HOST,\s+Self::Google => GOOGLE_HOST,\s+\}/, 'an engine answers from another host');
   // Nothing outside the code can point an engine somewhere else.
   const reads = source.match(/env::var(?:_os)?\("[A-Z_]+"\)/g) ?? [];
   assert.deepEqual(reads, ['env::var_os("HOME")', 'env::var_os("USERPROFILE")'], `${OUTSIDE} reads a setting that could move an engine`);
-  assert.equal(source.match(/format!\("\{\}\/[^"]*", engine\.base\(\)[,)]/g)?.length, 2, 'an engine is asked at an address not built on its base');
-  assert.equal(source.match(/engine\.base\(\)/g)?.length, 2, 'an engine is asked at an address built some other way');
+  assert.equal(source.match(/format!\("\{\}\/[^"]*", engine\.base\(\)\)/g)?.length, 1, 'a list is asked at an address not built on its base');
+  assert.equal(source.match(/engine\.base\(\)/g)?.length, 1, 'a list is asked at an address built some other way');
+  assert.equal(source.match(/format!\("\{\}\/[^"]*", self\.base\(\)\)/g)?.length, 3, 'a chat is asked at an address not built on its base');
+  assert.equal(source.match(/self\.base\(\)/g)?.length, 3, 'a chat is asked at an address built some other way');
   // Where a chat is asked is fixed in the code, one path for each engine.
-  assert.match(rustFunction(source, 'chat_path'), /Self::Xai \| Self::OpenAi => "chat\/completions",\s+Self::Anthropic => "messages",\s+\}/, 'a chat is asked at another path');
-  // So is where each list is asked. Anthropic gives 20 models a page unless
-  // asked for more, so its list is asked for 100 at once.
+  // Google names the model in the path, so only a model it listed goes there.
+  assert.match(
+    rustFunction(source, 'chat_url'),
+    /Self::Xai \| Self::OpenAi => format!\("\{\}\/chat\/completions", self\.base\(\)\),\s+Self::Anthropic => format!\("\{\}\/messages", self\.base\(\)\),\s+Self::Google => format!\("\{\}\/models\/\{model\}:streamGenerateContent\?alt=sse", self\.base\(\)\),\s+\}/,
+    'a chat is asked at another path',
+  );
+  // So is where each list is asked. Anthropic gives 20 models a page and
+  // Google 50, unless asked for more, so each list is asked for at once.
   const finding = rustFunction(source, 'find_models');
-  for (const path of ['"language-models"', '"models"', '"models?limit=100"']) {
+  for (const path of ['"language-models"', '"models"', '"models?limit=100"', '"models?pageSize=1000"']) {
     assert.ok(finding.includes(`key, ${path}).await`), `no list is asked at ${path}`);
   }
-  assert.equal(finding.match(/list\(engine, client, key, "/g)?.length, 4, 'a list is asked at a path not fixed in the code');
+  assert.equal(finding.match(/list\(engine, client, key, "/g)?.length, 5, 'a list is asked at a path not fixed in the code');
 
   const client = rustFunction(source, 'client');
   assert.match(client, /\{\s+gate\.client\(&engine\.gate_off\(\),/, "an engine's client does not go through the gate");
@@ -159,7 +178,10 @@ test("each engine is asked at its maker's API alone, over https, and only while 
   }
   // A model goes only to the engine that listed it.
   const chat = rustFunction(source, 'run_chat');
-  assert.ok(chat.indexOf('outside.knows(engine, model)') < chat.indexOf('client(engine, gate)?'), 'a model is asked before it is checked against its engine\'s list');
+  const known = chat.indexOf('outside.knows(engine, model)');
+  assert.ok(known >= 0, "a model is no longer checked against its engine's list");
+  assert.ok(known < chat.indexOf('client(engine, gate)?'), 'a model is asked before it is checked against its engine\'s list');
+  assert.ok(known < chat.indexOf('engine.chat_url(model)'), "a model goes in Google's address before it is checked against its list");
 });
 
 test('an outside engine waits for no turn, and the app knows its commands', () => {

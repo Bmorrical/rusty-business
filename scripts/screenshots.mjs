@@ -61,6 +61,7 @@ export const OUTSIDE_NOT_ADDED = [
   { id: 'xai', name: 'Grok', maker: 'xAI', host: 'api.x.ai', added: false, keyPath: null, models: [], warning: null, error: null },
   { id: 'openai', name: 'GPT', maker: 'OpenAI', host: 'api.openai.com', added: false, keyPath: null, models: [], warning: null, error: null },
   { id: 'anthropic', name: 'Claude', maker: 'Anthropic', host: 'api.anthropic.com', added: false, keyPath: null, models: [], warning: null, error: null },
+  { id: 'google', name: 'Gemini', maker: 'Google', host: 'generativelanguage.googleapis.com', added: false, keyPath: null, models: [], warning: null, error: null },
 ];
 
 const BROWSERS = [
