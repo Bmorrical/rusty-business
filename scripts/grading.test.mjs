@@ -81,7 +81,7 @@ test('Settings lets the user pick the grader, or none, and says what goes to xAI
   const app = read(APP);
   const start = app.indexOf('<h3 class="gap-above">Grading</h3>');
   assert.ok(start >= 0, 'Settings has lost the pick of the grader');
-  const settings = app.slice(start, app.indexOf('<header v-show="!settingsOpen"', start));
+  const settings = app.slice(start, app.indexOf('</section>', start));
   for (const part of [
     'for="grader"',
     '<select id="grader" v-model="graderChoice" :disabled="busy">',

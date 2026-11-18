@@ -382,6 +382,16 @@ export function listedLine(model) {
   return `${model.license} · no download for this computer`;
 }
 
+/**
+ * Under a model on the Installers page: the line Settings gives it, and, for
+ * a model on this computer whose maker is not added, that it shows once its
+ * maker is.
+ */
+export function installLine(maker, model) {
+  const line = listedLine(model);
+  return model.onDisk && !maker.picked ? `${line}, shown once ${maker.name} is added` : line;
+}
+
 /** The start of a model id that names one of Grok's models, asked at xAI. */
 export const OUTSIDE_PREFIX = "xai:";
 

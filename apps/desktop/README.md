@@ -32,15 +32,19 @@ Select the picture to open it full size. The rest of the set is in
   engine holds that is not on the list is never shown and never accepted.
 - **Model makers**, picked on a first run, Microsoft to begin with, and in
   Settings, which adds or removes one with one click. One maker always stays
-  picked. Settings also downloads a picked maker's model that is not on this
-  computer yet, with the gate on. Removing a maker hides its models and
-  deletes nothing, and saved chats still name them.
-- **Grok, by xAI**, added in Settings under Outside engines with the path to
-  a file that holds your own xAI key. With the gate on, the app finds Grok's
-  models, and they join the buttons at the top of the window, marked online,
-  to answer alone or beside the models here. The key never reaches the page.
-  Remove forgets the path, leaves the file as it is, and saved chats still
-  name Grok's models.
+  picked. Removing a maker hides its models and deletes nothing, and saved
+  chats still name them.
+- **An Installers page**, at the foot of the window above Settings, that
+  lists every model on the list, from every maker, with its license and
+  download size. Install downloads one, with the gate on, then adds its
+  maker so it shows at the top of the window. A model already here whose
+  maker is not added has a Show button instead.
+- **Grok, by xAI**, added on the Installers page under Outside engines with
+  the path to a file that holds your own xAI key. With the gate on, the app
+  finds Grok's models, and they join the buttons at the top of the window,
+  marked online, to answer alone or beside the models here. The key never
+  reaches the page. Remove forgets the path, leaves the file as it is, and
+  saved chats still name Grok's models.
 - **Grading**, once several models have answered. One model, Grok until
   another is picked in Settings under Grading, grades each answer from A to
   F and sums them up. It reads the question and the answers, numbered and

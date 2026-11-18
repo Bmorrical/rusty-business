@@ -14,8 +14,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **An installers page.** One click installs a model to run here, or sets up
-  Claude or OpenAI's models.
+- **OpenAI and Claude, outside this computer.** On the Installers page, you
+  give the path to your own OpenAI or Anthropic key, the way Grok is added,
+  and GPT or Claude answers through the outbound gate.
 
 ## Later
 
@@ -80,21 +81,27 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   what is under way. A chat with a model here works either way.
 - **Model makers you choose.** On a first run, you tick one maker or more,
   with Microsoft ticked to start. Settings adds or removes a maker with one
-  click. The list now holds five models, Google's Gemma 4 26B and Meta's
-  Llama 3.1 8B among them. Removing a maker hides its models and deletes
-  nothing, and saved chats still name them.
+  click, and Install or Show on the Installers page adds one. The list now
+  holds five models, Google's Gemma 4 26B and Meta's Llama 3.1 8B among
+  them. Removing a maker hides its models and deletes nothing, and saved
+  chats still name them.
 - **One question, many models.** Pick one model or several at the top of
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time, and
   Stop asks no more of them.
-- **Grok, the first engine outside this computer.** In Settings, you give
-  the path to a file that holds your own xAI key. The app reads the key
-  there when it asks Grok, never shows it to the page, and sends it over
-  https only to xAI's API, and only while the outbound gate is on. Grok
-  answers alone or as one of several, and a chip at the top says it is
+- **Grok, the first engine outside this computer.** On the Installers page,
+  you give the path to a file that holds your own xAI key. The app reads
+  the key there when it asks Grok, never shows it to the page, and sends it
+  over https only to xAI's API, and only while the outbound gate is on.
+  Grok answers alone or as one of several, and a chip at the top says it is
   asked online.
 - **Grading and a summary.** Once every answer is in, one model grades each
   from A to F and sums them up, reading the question and the answers,
   numbered and without the models' names. Grok grades until another model is
   picked in Settings, where No grading turns it off. A round not graded yet
   has a button to grade it.
+- **An installers page.** Every model on the list, from every maker, is one
+  Install away, with its license and download size. Install downloads it,
+  with the outbound gate on, then adds its maker, so it shows at the top of
+  the window. A model already here whose maker is not added has a Show
+  button instead. Grok is added there too.
