@@ -49,6 +49,10 @@ I want to hear about:
   xAI's API, over https, following no redirect. The key never reaches the
   page, a log, or a saved chat, and the app never changes or removes the
   file.
+- A grade by Grok sends xAI the question and every answer to it, those from
+  the models on this computer too, and only while the gate is on. The
+  grader reads no model's name. Settings picks a model on this computer to
+  grade instead, or none.
 - The app refuses an engine address that is not on this computer, and an
   engine it starts listens on this computer only.
 - The app downloads only the models on its list, only from Hugging Face over

@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  answerRoom,
   answersLine,
+  canGrade,
   canRemove,
   chatModels,
   checkedLine,
   chipDetail,
+  CUT_MARK,
   dayLabel,
   downloaded,
   downloadLine,
@@ -17,6 +20,12 @@ import {
   fullest,
   fullness,
   gateLine,
+  GRADE_INSTRUCTIONS,
+  GRADE_ROLE,
+  gradedAnswers,
+  gradeMessages,
+  graderFor,
+  gradesLine,
   groups,
   isOutside,
   keptPicks,
@@ -25,13 +34,16 @@ import {
   looksLikePath,
   meterLine,
   moreLine,
+  nameAnswers,
   namesLine,
   onDiskLine,
   OUTSIDE_PREFIX,
   outsideModelsLine,
+  parseGrades,
   pickedMakers,
   quickest,
   requestMessages,
+  roundGrades,
   savedTurn,
   shouldStart,
   showsStartHint,
@@ -550,4 +562,161 @@ test("Settings names Grok's models, or that none is found yet", () => {
   assert.equal(outsideModelsLine({ name: "Grok", models: [GROK, GROK_UNKNOWN] }), "Grok's models: Grok 4 and Grok Mini.");
   assert.equal(outsideModelsLine({ name: "Grok", models: [] }), "No Grok models found yet.");
   assert.equal(outsideModelsLine(null), "No Grok models found yet.");
+});
+
+// Brad, 2026-11-17: "The results are graded and summarized by grok after all
+// the results are in", and "I should be able to pick which engine does the
+// grading".
+const GRADED = [
+  { role: "user", content: "Why do nails rust?" },
+  { role: "assistant", content: "Oxygen and water.", model: PHI },
+  { role: "assistant", content: "Iron oxidizes.", model: GPT },
+  { role: GRADE_ROLE, content: "Answer 1: B. Right.\nAnswer 2: A. Names the reaction.\nSummary: Both agree.", model: GROK.id },
+  { role: "user", content: "How do I stop it?" },
+];
+
+test("a round's grade sits with its answers and is never one of them", () => {
+  const rounds = groups(GRADED);
+  assert.deepEqual(rounds[0].answers, [GRADED[1], GRADED[2]]);
+  assert.equal(rounds[0].grade, GRADED[3]);
+  assert.equal(rounds[1].grade, null);
+  // A second grade of the same round is not read.
+  assert.equal(groups([...GRADED.slice(0, 4), { role: GRADE_ROLE, content: "Again.", model: PHI }])[0].grade, GRADED[3]);
+  // The models that answered are the chat's models, never the grader.
+  assert.deepEqual(latestAnswers(GRADED.slice(0, 4)), [PHI, GPT]);
+  // A grade is saved as a turn of its own, with the model that graded.
+  assert.deepEqual(savedTurn({ ...GRADED[3], thinking: "", pending: true }), { role: GRADE_ROLE, content: GRADED[3].content, model: GROK.id });
+});
+
+test("a grade is never sent to a model as part of the chat", () => {
+  for (const id of [PHI, GPT, NEMO, undefined]) {
+    const sent = requestMessages(GRADED, id);
+    assert.ok(sent.every((message) => !message.content.includes("Answer 1: B")), `${id} was sent the grade`);
+    assert.equal(sent.at(-1).content, "How do I stop it?");
+  }
+});
+
+test("only answers from several models, not graded yet, are graded", () => {
+  const [round] = groups(GRADED);
+  assert.equal(canGrade(round), false, "a graded round is graded again");
+  const ungraded = { ...round, grade: null };
+  assert.equal(canGrade(ungraded), true);
+  assert.deepEqual(gradedAnswers(ungraded), [GRADED[1], GRADED[2]]);
+  assert.equal(canGrade({ ...ungraded, answers: [GRADED[1]] }), false, "one answer is graded");
+  // An answer that never began is not one to grade.
+  const empty = { role: "assistant", content: "  ", model: NEMO };
+  assert.deepEqual(gradedAnswers({ ...ungraded, answers: [GRADED[1], empty, GRADED[2]] }), [GRADED[1], GRADED[2]]);
+  assert.equal(canGrade({ ...ungraded, answers: [GRADED[1], empty] }), false);
+  assert.equal(canGrade(null), false);
+});
+
+test("the grader reads the question and the answers, numbered, with no model's name", () => {
+  const [system, user] = gradeMessages(" Why do nails rust? ", ["Oxygen and water.", " Iron oxidizes. "]);
+  assert.deepEqual(system, { role: "system", content: GRADE_INSTRUCTIONS });
+  assert.deepEqual(user, { role: "user", content: "Question:\nWhy do nails rust?\n\nAnswer 1:\nOxygen and water.\n\nAnswer 2:\nIron oxidizes." });
+  assert.equal(gradeMessages("Q", ["a", "b"]).length, 2);
+  for (const words of ["A to F", "Summary", "names of the models", CUT_MARK]) {
+    assert.ok(GRADE_INSTRUCTIONS.includes(words), `the grader is not told about ${words}`);
+  }
+});
+
+test("each answer is cut to fit the grader's window, evenly", () => {
+  // A window not known, as with some of Grok's, cuts nothing.
+  assert.equal(answerRoom(2, 0), Infinity);
+  assert.equal(answerRoom(0, 16_384), Infinity);
+  // Room for 6,000 tokens, less 5,120 kept free, at 3 characters a token,
+  // less the question, shared by 2.
+  assert.equal(answerRoom(2, 6_000, 40), 1_300);
+  // However small the window, each answer keeps its first 600 characters.
+  assert.equal(answerRoom(4, 4_096), 600);
+  const long = "x".repeat(5_000);
+  const [, user] = gradeMessages("Q", [long, "Short."], 6_000);
+  assert.equal(answerRoom(2, 6_000, 1), 1_319);
+  assert.equal(user.content, `Question:\nQ\n\nAnswer 1:\n${"x".repeat(1_319)}\n${CUT_MARK}\n\nAnswer 2:\nShort.`);
+  // A cut never splits a character in two, even at an odd count.
+  const [, emoji] = gradeMessages("Q", ["🙂".repeat(2_000), "Fine."], 6_000);
+  assert.ok(emoji.content.includes(`${"🙂".repeat(1_319)}\n${CUT_MARK}`), "the cut is not counted in characters");
+  assert.doesNotMatch(emoji.content, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  assert.equal(gradeMessages("Q", [long, "b"], 0)[1].content.includes(CUT_MARK), false);
+});
+
+test("the grades and the summary are read from the grader's reply", () => {
+  assert.deepEqual(parseGrades("Answer 1: B. Right, but short.\nAnswer 2: A-. Clear and complete.\nSummary: Both name oxygen. Answer 2 is best.", 2), {
+    grades: [
+      { letter: "B", why: "Right, but short." },
+      { letter: "A-", why: "Clear and complete." },
+    ],
+    summary: "Both name oxygen. Answer 2 is best.",
+    summed: true,
+  });
+  // Bold, bullets, list numbers, dashes, and the word Grade.
+  const marked = parseGrades("Here you go.\n**Answer 1:** **C+** — Too long.\n- Answer 2 - Grade: F, Wrong.\n3. Answer #3 (B): Fine.\n\n## Summary\nThey differ.\n\nAnswer 3 is best.", 3);
+  assert.deepEqual(marked.grades, [
+    { letter: "C+", why: "Too long." },
+    { letter: "F", why: "Wrong." },
+    { letter: "B", why: "Fine." },
+  ]);
+  assert.equal(marked.summary, "They differ.\n\nAnswer 3 is best.");
+  // A word is not a grade, a number with no answer is left out, and the first grade stands.
+  const odd = parseGrades("Answer 1: Accurate and clear.\nAnswer 1: a fine one\nAnswer 3: A. None.\nAnswer 0: A.\nAnswer 2: D.\nAnswer 2: A. Again.", 2);
+  assert.deepEqual(odd.grades, [null, { letter: "D", why: "" }]);
+  assert.equal(odd.summary, "Answer 1: Accurate and clear.\nAnswer 1: a fine one", "what was not a grade is lost");
+  // After the Summary line, everything is the summary, even a line like a grade.
+  assert.equal(parseGrades("Summary:\nAnswer 1: A clear winner.", 1).summary, "Answer 1: A clear winner.");
+  // A reply in no form the page knows is shown whole.
+  assert.deepEqual(parseGrades("Both are fine.", 2), { grades: [null, null], summary: "Both are fine.", summed: false });
+  assert.deepEqual(parseGrades(undefined, undefined), { grades: [], summary: "", summed: false });
+});
+
+test("each answer shows its own grade, and the summary waits for its line", () => {
+  const empty = { role: "assistant", content: "", model: NEMO };
+  const round = { ...groups(GRADED)[0] };
+  round.answers = [round.answers[0], empty, round.answers[1]];
+  const read = roundGrades(round);
+  assert.deepEqual(read.grades, [{ letter: "B", why: "Right." }, null, { letter: "A", why: "Names the reaction." }]);
+  assert.equal(read.summary, "Both agree.");
+  assert.deepEqual(roundGrades({ answers: [empty] }), { grades: [null], summary: "" });
+  // While the grade arrives, half a line is not shown as the summary.
+  const arriving = { ...round, grade: { role: GRADE_ROLE, content: "Answer 1: B. Right.\nAnsw", pending: true } };
+  assert.equal(roundGrades(arriving).summary, "");
+  assert.deepEqual(roundGrades(arriving).grades[0], { letter: "B", why: "Right." });
+  const summing = { ...round, grade: { role: GRADE_ROLE, content: "Answer 1: B.\nSummary: Bo", pending: true } };
+  assert.equal(roundGrades(summing).summary, "Bo");
+  assert.equal(roundGrades({ ...arriving, grade: { ...arriving.grade, pending: false } }).summary, "Answ");
+});
+
+test("the page names the model behind each answer the grader numbered", () => {
+  const names = { [PHI]: "Phi-4", [GPT]: "gpt-oss 20B" };
+  const nameOf = (id) => names[id] ?? "";
+  const empty = { role: "assistant", content: "", model: NEMO };
+  const round = { ...groups(GRADED)[0] };
+  // The empty answer was not numbered, so Answer 2 is still gpt-oss's.
+  round.answers = [round.answers[0], empty, round.answers[1]];
+  round.grade = {
+    role: GRADE_ROLE,
+    content: "Answer 1: B. Shorter than Answer 2.\nAnswer 2: A. Names the reaction.\nSummary: Answer 2 is best; answer #1 agrees. Answer 3 and Answer 12 are not here. Answer 1 (Phi-4) was named already.",
+  };
+  const read = roundGrades(round, nameOf);
+  assert.equal(
+    read.summary,
+    "Answer 2 (gpt-oss 20B) is best; answer #1 (Phi-4) agrees. Answer 3 and Answer 12 are not here. Answer 1 (Phi-4) was named already.",
+  );
+  assert.deepEqual(read.grades, [{ letter: "B", why: "Shorter than Answer 2 (gpt-oss 20B)." }, null, { letter: "A", why: "Names the reaction." }]);
+  // A model not on hand has no name to add, and with no names nothing changes.
+  assert.equal(nameAnswers("Answer 1 is fine.", [{ model: "gone" }], nameOf), "Answer 1 is fine.");
+  assert.equal(roundGrades(round).summary, "Answer 2 is best; answer #1 agrees. Answer 3 and Answer 12 are not here. Answer 1 (Phi-4) was named already.");
+  // The grader itself is never sent a name.
+  assert.doesNotMatch(gradeMessages("Q", ["One.", "Two."], 0)[1].content, /Phi|gpt/);
+});
+
+test("Grok grades until another model is picked, and none when No grading is", () => {
+  const phi = { id: PHI, name: "Phi-4" };
+  assert.equal(graderFor(null, [phi, GROK, GROK_UNKNOWN]), GROK);
+  assert.equal(graderFor(undefined, [phi]), null, "a model on this computer grades without being picked");
+  assert.equal(graderFor("", [phi, GROK]), null, "No grading still grades");
+  assert.equal(graderFor(PHI, [phi, GROK]), phi);
+  // A grader picked that is not on hand, as Grok with the gate off, grades nothing.
+  assert.equal(graderFor(GROK.id, [phi]), null);
+  assert.equal(graderFor(null, undefined), null);
+  assert.equal(gradesLine(GROK), "Grok 4 grades the answers once all are in.");
 });

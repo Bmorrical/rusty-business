@@ -161,9 +161,10 @@ test('the page sends only the path, keeps none of it, and offers Grok only with 
   assert.ok(change.includes('pickModels(picked.value);'), "the models picked no longer follow Grok's");
   assert.ok(pageFunction(app, 'setGate').includes('pickModels(picked.value);'), "Grok's models stay picked once the gate is off");
 
-  // Nothing about the key or its path is kept by the page.
+  // Nothing about the key or its path is kept by the page: only the models
+  // picked to answer, and the one picked to grade.
   const storage = app.match(/localStorage\.setItem\("[^"]*"/g) ?? [];
-  assert.deepEqual(storage, ['localStorage.setItem("models"'], 'the page keeps something new in its storage');
+  assert.deepEqual(storage, ['localStorage.setItem("models"', 'localStorage.setItem("grader"'], 'the page keeps something new in its storage');
   assert.ok(!/sessionStorage|indexedDB|document\.cookie/.test(app), 'the page keeps something in another store');
 
   // The box for the path: labelled, and not checked, filled in, or changed

@@ -76,8 +76,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   out. Nothing you type goes with any of these three. The fourth is Grok:
   once you add it in Settings, with the path to a file that holds your own
   xAI key, a question you ask Grok goes to xAI's API, over https and to
-  nowhere else, with the key. The key stays in its file and never reaches
-  the page. There is no account and no sign-in. Ollama keeps your prompts on
+  nowhere else, with the key. When Grok grades, the question and every
+  answer go too, those from this computer included. The key stays in its
+  file and never reaches the page. There is no account and no sign-in. Ollama keeps your prompts on
   your computer too when a model runs there. It also offers models that run
   in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
@@ -87,6 +88,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time. Grok,
   once added, can be one of them, or answer alone.
+- **Answers graded and summed up.** Once every answer is in, one model grades
+  each from A to F and sums them up. It reads the question and the answers,
+  numbered and without the models' names. Grok grades until you pick another
+  model, or No grading, in Settings.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
   is.
@@ -212,6 +217,13 @@ engines, give the path to that file and click Add. With the gate on, the app
 finds Grok's models, and they join the ones at the top of the window, marked
 online. The app keeps the path, never the key, and Remove forgets the path
 and leaves the file as it is.
+
+When several models answer, Grok grades their answers once all are in: a
+letter under each, and a summary below them. The grader sees the answers by
+number only; the page puts each model's name after its number. In Settings,
+Grading picks another model to grade, or No grading. A grade by Grok sends
+xAI the question and every answer, so a grade by a model on this computer
+keeps it all here.
 
 Settings, above Check for updates, adds or removes a maker with one click,
 and downloads any of a picked maker's models that are not on the computer
@@ -407,6 +419,8 @@ next.
 - **One engine outside this computer.** Grok, by xAI, is the only one so
   far, and the app asks it through the chat API that xAI now calls legacy.
   (On the roadmap: Grok through xAI's newer API.)
+- **A grade reads one question.** The grader reads the question and its
+  answers, not the chat before them.
 - **Words only.** It takes no pictures and no files, and it shows an answer as
   plain text. (On the roadmap: Pictures.)
 - **A short list of models.** That is on purpose. A model that is not on the

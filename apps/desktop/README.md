@@ -41,6 +41,13 @@ Select the picture to open it full size. The rest of the set is in
   to answer alone or beside the models here. The key never reaches the page.
   Remove forgets the path, leaves the file as it is, and saved chats still
   name Grok's models.
+- **Grading**, once several models have answered. One model, Grok until
+  another is picked in Settings under Grading, grades each answer from A to
+  F and sums them up. It reads the question and the answers, numbered and
+  without the models' names. Each answer shows its letter, the summary sits
+  below them, and a round not graded yet has a button to grade it. Where the
+  grader wrote "Answer 2", the page adds the name of the model that wrote it.
+  No grading turns it off.
 - **The models on this computer**, named when the engine is not answering.
   The app looks in the Hugging Face cache folder, where the engine keeps the
   models it has downloaded. It only reads there, it keeps no list of its own,
