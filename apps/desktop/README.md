@@ -5,7 +5,7 @@ Rust (Tauri 2), and the page is Vue 3. It is local first: a chat needs nothing
 outside the computer, and nothing leaves it until you turn on the outbound
 gate.
 
-[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
+[![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
 Select the picture to open it full size. The rest of the set is in
 [docs/screenshots](../../docs/screenshots).
@@ -19,9 +19,16 @@ Select the picture to open it full size. The rest of the set is in
   way. A chat with a model here works either way.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
-- **Model picker** limited to a short list: Phi-4 (Microsoft), gpt-oss 20B
-  (OpenAI), Nemotron 3.5 Lightning (NVIDIA), Gemma 4 26B (Google), and
-  Llama 3.1 8B (Meta). It shows the models of the makers picked. A model the
+- **One model or several.** The models sit at the top of the window, one
+  button each, and any number of them can be picked; one always stays
+  picked. Each picked model answers the same question, and the answers sit
+  side by side. The models on this computer take turns, since the engine
+  holds one at a time, and each sees only its own side of the chat. Stop
+  ends the answer under way and asks no more models. A reopened chat picks
+  the models that answered its latest question.
+- **A short list of models:** Phi-4 (Microsoft), gpt-oss 20B (OpenAI),
+  Nemotron 3.5 Lightning (NVIDIA), Gemma 4 26B (Google), and Llama 3.1 8B
+  (Meta). The window shows the models of the makers picked. A model the
   engine holds that is not on the list is never shown and never accepted.
 - **Model makers**, picked on a first run, Microsoft to begin with, and in
   Settings, which adds or removes one with one click. One maker always stays
@@ -52,7 +59,8 @@ Select the picture to open it full size. The rest of the set is in
   engine with it. With it off, the picker offers to turn it on.
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
-- **A context meter** that shows how full the model's window is.
+- **A context meter** that shows how full the model's window is. When
+  several models answer, it shows the fullest window and names its model.
 - **A notice of each new version.** When the window opens, once a day while
   it stays open, and when you click Check for updates under the saved chats,
   the app asks GitHub for the newest release. When it is
