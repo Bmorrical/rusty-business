@@ -4,7 +4,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
+  answersLine,
   canRemove,
+  chatModels,
   checkedLine,
   dayLabel,
   downloaded,
@@ -13,9 +15,14 @@ import {
   formatCount,
   formatSize,
   formatWindow,
-  fullness,
+  fullest,
   gateLine,
+  groups,
+  keptPicks,
   listedLine,
+  meterLine,
+  moreLine,
+  namesLine,
   onDiskLine,
   pickedMakers,
   quickest,
@@ -28,11 +35,11 @@ import {
   startLine,
   titleFrom,
   tokensPerSecond,
-  tokensUsed,
   UPDATE_EVERY,
   updateDetail,
   updateLine,
   withMaker,
+  withPick,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -44,7 +51,7 @@ const starting = ref(false);
 const startNote = ref("");
 const stack = ref(null);
 const stackStarting = ref(false);
-const modelId = ref("");
+const picked = ref([]);
 const sessions = ref([]);
 const current = ref(blankSession());
 const draft = ref("");
@@ -74,6 +81,7 @@ const settingsTitle = ref(null);
 let updateTimer = 0;
 
 let chatId = "";
+let stopAll = false;
 let checkAgain = false;
 let stickToBottom = true;
 
@@ -82,10 +90,12 @@ function blankSession() {
 }
 
 const models = computed(() => engine.value?.models ?? []);
-const model = computed(() => models.value.find((entry) => entry.id === modelId.value) ?? null);
-const used = computed(() => tokensUsed(current.value.messages));
-const full = computed(() => fullness(used.value, model.value?.context));
-const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boolean(model.value));
+// The models a question goes to, in the list's order.
+const chosen = computed(() => models.value.filter((entry) => picked.value.includes(entry.id)));
+const many = computed(() => chosen.value.length > 1);
+const top = computed(() => fullest(current.value.messages, chosen.value));
+const rounds = computed(() => groups(current.value.messages));
+const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && chosen.value.length > 0);
 const offers = computed(() => firstRunOffers(engine.value));
 const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
@@ -94,29 +104,48 @@ const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/
 
 function remembered() {
   try {
-    return window.localStorage.getItem("model") ?? "";
+    const kept = JSON.parse(window.localStorage.getItem("models") ?? "null");
+    if (Array.isArray(kept)) return kept;
+    // Before several models could be asked, one was kept on its own.
+    const one = window.localStorage.getItem("model");
+    return one ? [one] : [];
   } catch {
-    return "";
+    return [];
   }
 }
 
-function remember(id) {
+function remember(ids) {
   try {
-    window.localStorage.setItem("model", id);
+    window.localStorage.setItem("models", JSON.stringify(ids));
   } catch {
     // The choice just is not kept for next time.
   }
 }
 
-function pickModel(preferred) {
+/**
+ * Picks the models a question goes to: the first of the lists given that
+ * names a model on hand, then the models picked last time, then the first
+ * model on hand.
+ */
+function pickModels(...preferred) {
   const ids = models.value.map((entry) => entry.id);
-  const choice = [preferred, modelId.value, remembered(), ids[0]].find((id) => id && ids.includes(id));
-  modelId.value = choice ?? "";
+  picked.value = keptPicks(ids, ...preferred, remembered(), ids.slice(0, 1));
 }
 
-watch(modelId, (id) => {
-  if (id) remember(id);
+watch(picked, (ids) => {
+  if (ids.length) remember(ids);
 });
+
+/**
+ * "the next step is user can run the same question in 1-nth models and checks
+ * the results of each one". One click adds a model to the question or takes
+ * it away; the last one stays.
+ */
+function togglePick(id) {
+  if (busy.value) return;
+  const ids = models.value.map((entry) => entry.id);
+  picked.value = withPick(picked.value, id, !picked.value.includes(id), ids);
+}
 
 async function checkEngine() {
   if (!inApp) return;
@@ -139,7 +168,7 @@ async function checkEngine() {
     } else {
       startNote.value = "";
     }
-    pickModel(current.value.model);
+    pickModels(picked.value, chatModels(current.value));
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -386,7 +415,7 @@ async function openSession(id) {
   askTrash.value = "";
   try {
     current.value = await invoke("load_session", { id });
-    pickModel(current.value.model);
+    pickModels(chatModels(current.value), picked.value);
     stickToBottom = true;
     scrollDown();
     focusComposer();
@@ -406,26 +435,67 @@ async function trashSession(id) {
   }
 }
 
+/**
+ * Asks each model picked the same question, in the list's order. "if they
+ * can't run asychronos then the models can iterate on the question": the
+ * engine holds one model at a time, so the models here take turns, each
+ * after the one before it, and Rust keeps any two from running at once. Each
+ * model reads the chat with its own earlier answers.
+ */
 async function send() {
   if (!canSend.value) return;
   const text = draft.value.trim();
   const session = current.value;
-  const chosen = model.value;
+  const asked = chosen.value;
   problem.value = "";
   if (!session.messages.length) session.title = titleFrom(text);
-  session.model = chosen.id;
+  session.model = asked[0].id;
   session.messages.push({ role: "user", content: text });
+  // What each model reads: the chat up to this question, and no other
+  // model's answer to it.
+  const history = session.messages.slice();
   draft.value = "";
   busy.value = true;
+  stopAll = false;
   stickToBottom = true;
   resizeComposer();
   scrollDown();
-  // Saved before the model answers, so the question survives a crash.
+  // Saved before the models answer, so the question survives a crash.
   await persist();
 
-  const messages = requestMessages(session.messages);
-  session.messages.push({ role: "assistant", content: "", thinking: "", model: chosen.id, pending: true });
-  const reply = session.messages[session.messages.length - 1];
+  const start = session.messages.length;
+  for (const entry of asked) {
+    session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true, waiting: true });
+  }
+  const replies = session.messages.slice(start);
+  const failed = [];
+  for (const [index, entry] of asked.entries()) {
+    // Stop ends the reply under way, and the models still waiting are not asked.
+    if (stopAll) break;
+    const reply = replies[index];
+    reply.waiting = false;
+    const error = await ask(reply, entry, requestMessages(history, entry.id));
+    // One model failing does not keep the next from answering.
+    if (error) failed.push(`${entry.name}: ${error}`);
+  }
+  for (const reply of replies) {
+    reply.pending = false;
+    reply.waiting = false;
+  }
+  // A reply that never began is not kept.
+  session.messages = session.messages.filter((turn) => !replies.includes(turn) || turn.content || turn.thinking);
+  busy.value = false;
+  if (failed.length) {
+    problem.value = failed.join("\n");
+    checkEngine();
+  }
+  await persist();
+  scrollDown();
+  focusComposer();
+}
+
+/** Streams one model's reply into `reply`. Gives back why it failed, or nothing. */
+async function ask(reply, entry, messages) {
   let finished = false;
   const channel = new Channel();
   channel.onmessage = (event) => {
@@ -442,7 +512,7 @@ async function send() {
   try {
     const done = await invoke("chat_stream", {
       chatId,
-      request: { model: chosen.id, messages, maxTokens: null },
+      request: { model: entry.id, messages, maxTokens: null },
       onEvent: channel,
     });
     finished = true;
@@ -453,23 +523,20 @@ async function send() {
     reply.seconds = done.seconds || undefined;
     reply.stopped = done.stopped;
     reply.cutShort = done.finishReason === "length";
+    return "";
   } catch (error) {
     finished = true;
-    problem.value = String(error);
-    checkEngine();
+    return String(error);
   } finally {
     reply.pending = false;
-    if (!reply.content && !reply.thinking) session.messages.pop();
     chatId = "";
-    busy.value = false;
-    await persist();
-    scrollDown();
-    focusComposer();
   }
 }
 
 function stop() {
-  if (busy.value && chatId) invoke("stop_chat", { chatId });
+  if (!busy.value) return;
+  stopAll = true;
+  if (chatId) invoke("stop_chat", { chatId });
 }
 
 function onKeydown(event) {
@@ -512,8 +579,15 @@ function modelName(id) {
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
-function replyNote(turn) {
-  const parts = [modelName(turn.model)];
+/** A saved chat's models: "Phi-4", or "Phi-4 and 2 more". */
+function sessionModels(entry) {
+  const ids = entry.models?.length ? entry.models : [entry.model];
+  return moreLine(ids.map(modelName)) || "model not on hand";
+}
+
+/** Under a reply: its model, unless a card above it names it, and its counts. */
+function replyNote(turn, named = true) {
+  const parts = [named ? modelName(turn.model) : ""];
   if (turn.completionTokens) parts.push(`${formatCount(turn.completionTokens)} tokens`);
   const speed = tokensPerSecond(turn);
   if (speed) parts.push(`${formatCount(speed)} a second`);
@@ -569,7 +643,7 @@ onBeforeUnmount(() => {
             <template v-else>
               <button class="session" type="button" :disabled="busy" @click="openSession(entry.id)">
                 <span class="session-title">{{ entry.title }}</span>
-                <span class="quiet small">{{ dayLabel(entry.updatedAt) }} · {{ modelName(entry.model) || "model not on hand" }}</span>
+                <span class="quiet small">{{ dayLabel(entry.updatedAt) }} · {{ sessionModels(entry) }}</span>
               </button>
               <button
                 class="trash"
@@ -738,15 +812,24 @@ onBeforeUnmount(() => {
       </section>
       <header v-show="!settingsOpen" class="bar">
         <h2>{{ current.title || "New chat" }}</h2>
-        <label class="picker">
-          <span class="quiet small">Model</span>
-          <select v-model="modelId" :disabled="busy || !models.length">
-            <option v-if="!models.length" value="">None on hand</option>
-            <option v-for="entry in models" :key="entry.id" :value="entry.id">
-              {{ entry.name }} · {{ entry.maker }} · {{ formatWindow(entry.context) }}
-            </option>
-          </select>
-        </label>
+        <div class="picks" role="group" aria-label="Models that answer">
+          <span v-if="models.length" class="quiet small picks-label">Ask</span>
+          <span v-else class="quiet small">No model on hand</span>
+          <button
+            v-for="entry in models"
+            :key="entry.id"
+            class="chip"
+            type="button"
+            :aria-pressed="picked.includes(entry.id)"
+            :disabled="busy"
+            :title="picked.length === 1 && picked[0] === entry.id ? 'One model always stays picked.' : undefined"
+            @click="togglePick(entry.id)"
+          >
+            <span class="chip-mark" aria-hidden="true">{{ picked.includes(entry.id) ? "✓" : "+" }}</span>
+            {{ entry.name }}
+            <span class="quiet small chip-detail">{{ entry.maker }} · {{ formatWindow(entry.context) }}</span>
+          </button>
+        </div>
       </header>
 
       <section v-show="!settingsOpen" ref="thread" class="thread" @scroll="onScroll">
@@ -807,27 +890,29 @@ onBeforeUnmount(() => {
           </div>
           <template v-else>
             <p class="lead">Ask anything.</p>
-            <p v-if="model" class="quiet">
-              {{ model.name }} by {{ model.maker }} answers, with room for {{ formatCount(model.context) }} tokens.
-            </p>
+            <p v-if="chosen.length" class="quiet">{{ answersLine(chosen) }}</p>
             <p v-else-if="starting" class="quiet">Starting the engine...</p>
             <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
           </template>
         </div>
 
-        <article v-for="(turn, index) in current.messages" :key="index" class="turn" :class="turn.role">
-          <template v-if="turn.role === 'user'">
-            <p class="bubble">{{ turn.content }}</p>
-          </template>
-          <template v-else>
-            <details v-if="turn.thinking" class="thinking">
-              <summary>{{ turn.pending && !turn.content ? "Thinking..." : "Thinking" }}</summary>
-              <p>{{ turn.thinking }}</p>
-            </details>
-            <p v-if="turn.content" class="answer">{{ turn.content }}</p>
-            <p v-else-if="turn.pending && !turn.thinking" class="quiet waiting">Waiting for the model...</p>
-            <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn) }}</p>
-          </template>
+        <article v-for="round in rounds" :key="round.key" class="round">
+          <div v-if="round.question" class="turn user">
+            <p class="bubble">{{ round.question.content }}</p>
+          </div>
+          <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
+            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
+              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <details v-if="turn.thinking" class="thinking">
+                <summary>{{ turn.pending && !turn.content ? "Thinking..." : "Thinking" }}</summary>
+                <p>{{ turn.thinking }}</p>
+              </details>
+              <p v-if="turn.content" class="answer">{{ turn.content }}</p>
+              <p v-else-if="turn.waiting" class="quiet waiting">Waits its turn.</p>
+              <p v-else-if="turn.pending && !turn.thinking" class="quiet waiting">Waiting for the model...</p>
+              <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
+            </section>
+          </div>
         </article>
       </section>
 
@@ -844,8 +929,8 @@ onBeforeUnmount(() => {
             v-model="draft"
             rows="1"
             aria-label="Your message"
-            :placeholder="model ? `Message ${model.name}` : 'No model on hand'"
-            :disabled="!model"
+            :placeholder="chosen.length ? `Message ${namesLine(chosen.map((entry) => entry.name))}` : 'No model on hand'"
+            :disabled="!chosen.length"
             @input="resizeComposer"
             @keydown="onKeydown"
           ></textarea>
@@ -853,11 +938,16 @@ onBeforeUnmount(() => {
           <button v-else class="primary" type="button" :disabled="!canSend" @click="send">Send</button>
         </div>
         <div class="meter">
-          <template v-if="model && used">
-            <progress :value="full" max="1" :class="{ near: full >= 0.8 }" aria-label="How full the model's window is"></progress>
+          <template v-if="top">
+            <progress
+              :value="top.full"
+              max="1"
+              :class="{ near: top.full >= 0.8 }"
+              :aria-label="many ? 'How full the fullest window is' : 'How full the model\'s window is'"
+            ></progress>
             <span class="quiet small">
-              {{ formatCount(used) }} of {{ formatCount(model.context) }} tokens
-              <template v-if="full >= 0.8"> · nearly full, start a new chat soon</template>
+              {{ meterLine(top, many) }}
+              <template v-if="top.full >= 0.8"> · nearly full, start a new chat soon</template>
             </span>
           </template>
           <span v-else class="quiet small">Return sends. Shift and Return starts a new line.</span>
@@ -1205,9 +1295,10 @@ button.switch {
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   padding: 0.7rem 1.25rem;
   border-bottom: 1px solid var(--line);
 }
@@ -1251,19 +1342,36 @@ button.switch {
   color: var(--bad);
 }
 
-.picker {
+/* The models a question goes to: one click picks one or lets it go. */
+.picks {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
-select {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  border-radius: 8px;
-  padding: 0.35rem 0.5rem;
-  max-width: 19rem;
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.chip-mark {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chip[aria-pressed="false"] .chip-mark {
+  color: var(--quiet);
 }
 
 .thread {
@@ -1421,6 +1529,38 @@ select {
   justify-items: end;
 }
 
+.answers {
+  max-width: 46rem;
+  margin: 0 auto 1.1rem;
+}
+
+.answers > .turn {
+  margin: 0;
+  max-width: none;
+}
+
+/* Several models' answers to one question, side by side. */
+.answers.many {
+  max-width: 72rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.answers.many > .turn {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  background: var(--page);
+}
+
+.card-head {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 .bubble,
 .answer,
 .thinking p {
@@ -1462,6 +1602,7 @@ select {
   border-radius: 8px;
   color: var(--bad);
   overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .compose {
@@ -1511,7 +1652,8 @@ progress.near {
     grid-template-columns: 12.5rem minmax(0, 1fr);
   }
 
-  .picker .quiet {
+  .picks-label,
+  .chip-detail {
     display: none;
   }
 }

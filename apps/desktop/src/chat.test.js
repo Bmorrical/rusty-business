@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  answersLine,
   canRemove,
+  chatModels,
   checkedLine,
   dayLabel,
   downloaded,
@@ -11,9 +13,16 @@ import {
   formatCount,
   formatSize,
   formatWindow,
+  fullest,
   fullness,
   gateLine,
+  groups,
+  keptPicks,
+  latestAnswers,
   listedLine,
+  meterLine,
+  moreLine,
+  namesLine,
   onDiskLine,
   pickedMakers,
   quickest,
@@ -32,6 +41,7 @@ import {
   tokensPerSecond,
   tokensUsed,
   withMaker,
+  withPick,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -381,4 +391,105 @@ test("each model in Settings gives its license, and its size or that it is here"
     listedLine({ name: "Llama 3.1 8B", license: "Llama 3.1 Community License", onDisk: false, offer: null }),
     "Llama 3.1 Community License · no download for this computer",
   );
+});
+
+const PHI = "mlx-community/phi-4-4bit";
+const GPT = "mlx-community/gpt-oss-20b-MXFP4-Q8";
+const NEMO = "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit";
+const ASKED = [
+  { role: "user", content: "Why do nails rust?" },
+  { role: "assistant", content: "Oxygen and water.", model: PHI, promptTokens: 17, completionTokens: 20 },
+  { role: "assistant", content: "Iron oxidizes.", model: GPT, promptTokens: 80, completionTokens: 300 },
+  { role: "user", content: "How do I stop it?" },
+  { role: "assistant", content: "Paint them.", model: GPT, promptTokens: 400, completionTokens: 40 },
+  { role: "assistant", content: "", model: NEMO },
+];
+
+// Brad, 2026-11-17: "the next step is user can run the same question in
+// 1-nth models and checks the results of each one".
+test("one question, many models: each answer sits with the question it answers", () => {
+  const rounds = groups(ASKED);
+  assert.equal(rounds.length, 2);
+  assert.equal(rounds[0].question, ASKED[0]);
+  assert.deepEqual(rounds[0].answers, [ASKED[1], ASKED[2]]);
+  assert.deepEqual(rounds[1].answers, [ASKED[4], ASKED[5]]);
+  // The chat's own turns, so a reply still arriving shows as it grows.
+  assert.equal(rounds[1].answers[1], ASKED[5]);
+  assert.deepEqual(groups([{ role: "assistant", content: "Hi." }])[0].question, null);
+  assert.deepEqual(groups(undefined), []);
+});
+
+test("each model reads one answer to each question, its own when it gave one", () => {
+  assert.deepEqual(requestMessages(ASKED, PHI), [
+    { role: "user", content: "Why do nails rust?" },
+    { role: "assistant", content: "Oxygen and water." },
+    { role: "user", content: "How do I stop it?" },
+    { role: "assistant", content: "Paint them." },
+  ]);
+  assert.deepEqual(requestMessages(ASKED.slice(0, 4), GPT).at(1), { role: "assistant", content: "Iron oxidizes." });
+  // Not asked the first time, a model reads the first answer; an empty one is skipped.
+  assert.deepEqual(requestMessages(ASKED.slice(0, 4), NEMO).at(1), { role: "assistant", content: "Oxygen and water." });
+  assert.deepEqual(requestMessages(ASKED, NEMO).at(-1), { role: "assistant", content: "Paint them." });
+  // The question being asked goes to each model with no other model's answer to it.
+  assert.deepEqual(requestMessages(ASKED.slice(0, 4), GPT).at(-1), { role: "user", content: "How do I stop it?" });
+});
+
+test("a model is picked or let go with one click, and one always stays", () => {
+  const ids = [PHI, GPT, NEMO];
+  assert.deepEqual(withPick([PHI], NEMO, true, ids), [PHI, NEMO]);
+  assert.deepEqual(withPick([NEMO, PHI], GPT, true, ids), [PHI, GPT, NEMO], "in the order of the models on hand");
+  assert.deepEqual(withPick([PHI, GPT], PHI, false, ids), [GPT]);
+  assert.deepEqual(withPick([PHI], PHI, false, ids), [PHI], "the last one picked stays");
+  assert.deepEqual(withPick(["gone"], PHI, true, ids), [PHI], "a model no longer on hand drops out");
+});
+
+test("a chat opens with the models that answered its latest question", () => {
+  assert.deepEqual(latestAnswers(ASKED), [GPT, NEMO]);
+  assert.deepEqual(latestAnswers(ASKED.slice(0, 3)), [PHI, GPT]);
+  assert.deepEqual(latestAnswers(ASKED.slice(0, 4)), [], "a question with no answer yet names none");
+  assert.deepEqual(latestAnswers(undefined), []);
+  // A model that answered twice, as after a retry, is named once.
+  const twice = [...ASKED, { role: "assistant", content: "Again.", model: GPT }];
+  assert.deepEqual(latestAnswers(twice), [GPT, NEMO]);
+  assert.deepEqual(chatModels({ model: PHI, messages: ASKED }), [GPT, NEMO]);
+  assert.deepEqual(chatModels({ model: PHI, messages: [{ role: "user", content: "Hi." }] }), [PHI]);
+  assert.deepEqual(chatModels(null), []);
+  // The first list that names a model on hand wins, kept to those on hand.
+  assert.deepEqual(keptPicks([PHI, GPT], [NEMO], [GPT, "gone", PHI], [PHI]), [PHI, GPT]);
+  assert.deepEqual(keptPicks([PHI], [], undefined), []);
+});
+
+test("the meter shows the fullest window of the models asked", () => {
+  const phi = { id: PHI, name: "Phi-4", context: 16_384 };
+  const gpt = { id: GPT, name: "gpt-oss 20B", context: 131_072 };
+  const nemo = { id: NEMO, name: "Nemotron 3.5 Lightning", context: 262_144 };
+  assert.equal(tokensUsed(ASKED, PHI), 37);
+  assert.equal(tokensUsed(ASKED, GPT), 440);
+  assert.equal(tokensUsed(ASKED, NEMO), null);
+  // 440 of 131,072 is fuller than 37 of 16,384.
+  const top = fullest(ASKED, [phi, gpt, nemo]);
+  assert.equal(top.model, gpt);
+  assert.equal(top.used, 440);
+  assert.equal(fullest(ASKED, [phi]).used, 37);
+  // A model that has not answered is counted by the chat's latest reply.
+  assert.equal(fullest(ASKED, [nemo]).used, 440);
+  assert.equal(fullest([], [phi]), null);
+  assert.equal(meterLine(top, false), "440 of 131,072 tokens");
+  assert.equal(meterLine(top, true), "Fullest window, gpt-oss 20B: 440 of 131,072 tokens");
+});
+
+test("the models asked are named in one line, with the Oxford comma", () => {
+  assert.equal(namesLine(["Phi-4"]), "Phi-4");
+  assert.equal(namesLine(["Phi-4", "gpt-oss 20B"]), "Phi-4 and gpt-oss 20B");
+  assert.equal(namesLine(["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]), "Phi-4, gpt-oss 20B, and Nemotron 3.5 Lightning");
+  assert.equal(namesLine([]), "");
+  assert.equal(moreLine(["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]), "Phi-4 and 2 more");
+  assert.equal(moreLine(["Phi-4", ""]), "Phi-4");
+  assert.equal(moreLine([]), "");
+  const phi = { name: "Phi-4", maker: "Microsoft", context: 16_384 };
+  assert.equal(answersLine([phi]), "Phi-4 by Microsoft answers, with room for 16,384 tokens.");
+  // Brad, 2026-11-17: "if they can't run asychronos then the models can
+  // iterate on the question".
+  assert.equal(answersLine([phi, { name: "gpt-oss 20B" }]), "Phi-4 and gpt-oss 20B answer in turn, side by side.");
+  assert.equal(answersLine([]), "");
 });

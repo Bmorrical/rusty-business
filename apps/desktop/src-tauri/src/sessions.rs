@@ -60,6 +60,24 @@ pub struct SessionSummary {
     pub model: String,
     pub updated_at: u64,
     pub turns: usize,
+    /// The models that answered the latest question, in the order they
+    /// answered, each once.
+    pub models: Vec<String>,
+}
+
+/// The models that answered the latest question: the replies after the last
+/// question, in order, each model once.
+pub fn latest_answers(messages: &[Turn]) -> Vec<String> {
+    let start = messages.iter().rposition(|turn| turn.role == "user").map(|at| at + 1).unwrap_or(0);
+    let mut models: Vec<String> = Vec::new();
+    for turn in &messages[start..] {
+        if let Some(model) = turn.model.as_ref().filter(|model| turn.role == "assistant" && !model.is_empty()) {
+            if !models.contains(model) {
+                models.push(model.clone());
+            }
+        }
+    }
+    models
 }
 
 pub struct Store {
@@ -127,6 +145,7 @@ impl Store {
                 model: session.model,
                 updated_at: session.updated_at,
                 turns: session.messages.len(),
+                models: latest_answers(&session.messages),
             });
         }
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -277,6 +296,47 @@ mod tests {
         assert_eq!(kept.len(), 1);
         let text = fs::read_to_string(kept[0].path()).unwrap();
         assert_eq!(serde_json::from_str::<Session>(&text).unwrap(), saved);
+    }
+
+    fn answer(model: &str, content: &str) -> Turn {
+        Turn { role: "assistant".to_string(), content: content.to_string(), model: Some(model.to_string()), ..Turn::default() }
+    }
+
+    // Brad, 2026-11-17: "the next step is user can run the same question in
+    // 1-nth models and checks the results of each one".
+    #[test]
+    fn the_list_names_every_model_that_answered_the_latest_question() {
+        let store = scratch_store();
+        let mut session = chat("Nails");
+        session.messages.push(Turn { role: "user".to_string(), content: "Why do nails rust?".to_string(), ..Turn::default() });
+        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Water and air."));
+        session.messages.push(answer("mlx-community/phi-4-4bit", "Oxygen."));
+        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Again."));
+        store.save(session).unwrap();
+        assert_eq!(
+            store.list().unwrap()[0].models,
+            ["mlx-community/gpt-oss-20b-MXFP4-Q8", "mlx-community/phi-4-4bit"],
+            "each model that answered, in order, once; the earlier question's answer is not counted",
+        );
+    }
+
+    #[test]
+    fn a_question_with_no_answer_yet_names_no_model() {
+        let mut messages = chat("Sums").messages;
+        assert!(latest_answers(&messages).is_empty(), "an answer saved without its model names none");
+        messages.push(answer("mlx-community/phi-4-4bit", "4."));
+        assert_eq!(latest_answers(&messages), ["mlx-community/phi-4-4bit"]);
+        messages.push(Turn { role: "user".to_string(), content: "And 3+3?".to_string(), ..Turn::default() });
+        assert!(latest_answers(&messages).is_empty());
+        // A saved file may hold any role; only an answer names its model.
+        messages.push(Turn {
+            role: "system".to_string(),
+            content: "Be short.".to_string(),
+            model: Some("mlx-community/phi-4-4bit".to_string()),
+            ..Turn::default()
+        });
+        assert!(latest_answers(&messages).is_empty(), "a turn that is no answer was counted");
+        assert!(latest_answers(&[]).is_empty());
     }
 
     #[test]

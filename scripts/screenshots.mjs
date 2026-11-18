@@ -7,8 +7,9 @@
 // Rust is not running here, so the page's calls to it are answered from
 // docs/screenshots/chats.json: what the app reported about the engine on one
 // computer with every maker picked, and replies the three models there gave,
-// recorded once. Nothing is sent to a model while the pictures are made, and
-// no engine is started.
+// recorded once. One of the chats puts the same question to all three.
+// Nothing is sent to a model while the pictures are made, and no engine is
+// started.
 //
 // Needs Google Chrome or Chromium (CHROME names the binary when it is not in
 // a usual place) and the page built first. `make screenshots` does both.
@@ -21,7 +22,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { titleFrom } from '../apps/desktop/src/chat.js';
+import { latestAnswers, titleFrom } from '../apps/desktop/src/chat.js';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const PAGE = path.join(REPO, 'apps/desktop/dist');
@@ -36,13 +37,15 @@ export const SCALE = 2;
 
 /**
  * One picture each. `open` is the id of the saved chat to show, `thinking`
- * opens that chat's thinking, `settings` opens Settings, `engine: 'off'` is
+ * opens that chat's thinking, `top` shows the chat from its first question
+ * rather than its last answer, `settings` opens Settings, `engine: 'off'` is
  * the app with no engine answering, and `engine: 'first-run'` is the app on a
  * computer with none of its models yet.
  */
 export const SCENES = [
   { file: 'chat.png', scheme: 'dark', engine: 'on', open: 'nails' },
-  { file: 'thinking.png', scheme: 'dark', engine: 'on', open: 'ladder', thinking: true },
+  { file: 'thinking.png', scheme: 'dark', engine: 'on', open: 'ladder', thinking: true, top: true },
+  { file: 'compare.png', scheme: 'light', engine: 'on', open: 'compare', top: true },
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
@@ -202,6 +205,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
     const stack = ${JSON.stringify(stack)};
     const forMakers = ${forMakers};
     const makersStatus = ${makersStatus};
+    const latestAnswers = ${latestAnswers};
     const answers = {
       engine_status: () => forMakers(engine, picked),
       makers_status: () => makersStatus(engine, picked),
@@ -213,6 +217,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
           id: entry.id,
           title: entry.title,
           model: entry.model,
+          models: latestAnswers(entry.messages),
           updatedAt: entry.updatedAt,
           turns: entry.messages.length,
         })),
@@ -373,6 +378,8 @@ async function takePicture(send, address, scene, engine, sessions) {
   }
   if (scene.thinking) {
     await inPage(send, tab, `document.querySelector('details.thinking').open = true`);
+  }
+  if (scene.top) {
     await inPage(send, tab, `document.querySelector('.thread').scrollTop = 0`);
   }
   if (scene.settings) {
