@@ -2,8 +2,9 @@
 //
 // It answers the ask that started it: "one click from an installers page would
 // be good". Each model on the app's list is one Install button away, whoever
-// its maker is, and Grok is added there too. Install downloads the model and
-// then adds its maker, so the model shows at the top of the window.
+// its maker is, and the outside engines are added there too. Install
+// downloads the model and then adds its maker, so the model shows at the top
+// of the window.
 //
 // Rust checks every file as it arrives, and its tests in engine.rs and
 // makers.rs check that. These fail when the side bar loses its Installers
@@ -56,7 +57,7 @@ test('the side bar opens the Installers page, above Settings and Check for updat
 
   const open = functionOf(app, 'openPage');
   assert.match(open, /await readMakers\(\);/, 'the page opens without asking Rust which models are here');
-  assert.match(open, /await readOutside\(\);/, 'the page opens without asking Rust about Grok');
+  assert.match(open, /await readOutside\(\);/, 'the page opens without asking Rust about the outside engines');
   assert.match(open, /nextTick\(\(\) => pageTitle\.value\?\.focus\(\)\);/, 'the page title no longer takes the focus');
   assert.match(functionOf(app, 'togglePage'), /page\.value === name \? closePage\(\) : openPage\(name\)/, 'a second click no longer goes back to the chat');
   assert.match(functionOf(app, 'closePage'), /page\.value = "chat";\s+focusComposer\(\);/, 'going back no longer returns to the chat');
@@ -113,14 +114,28 @@ test('Install adds the maker only once the whole model is here', () => {
   assert.match(download, /\n {2}return whole;\n\}/, 'download() no longer says whether the model is whole');
 });
 
-test('Grok is added on the Installers page, and nowhere else', () => {
+test('the outside engines are added on the Installers page, and nowhere else', () => {
+  // Brad, 2026-11-17: "and claude and codex/gpt and gemmini". GPT is added
+  // the way Grok is, on a card of its own beside Grok's.
   const app = read(APP);
   const page = pageOf(app, 'installers');
-  for (const part of ['<h3 class="gap-above">Outside engines</h3>', '<form v-else class="key-path" @submit.prevent="addOutside">', '{{ outsideNote }}', '<span>The outbound gate is off, so Grok cannot be asked.</span>']) {
+  for (const part of [
+    '<h3 class="gap-above">Outside engines</h3>',
+    'v-for="entry in outside"',
+    '<form v-else class="key-path" @submit.prevent="addOutside(entry.id)">',
+    'Path to your {{ entry.maker }} key file',
+    '{{ entry.name }} <span class="quiet small">by {{ entry.maker }}</span>',
+    '{{ outsideNotes[entry.id] }}',
+    '{{ outsideNote }}',
+    '<span>The outbound gate is off, so no outside engine can be asked.</span>',
+  ]) {
     assert.ok(page.includes(part), `the Installers page has lost ${part}`);
   }
-  assert.equal(app.split('class="key-path"').length, 2, 'the way to add Grok shows in more than one place');
-  assert.equal(app.split('id="grok-name"').length, 2, 'Grok has more than one card');
+  assert.equal(app.split('class="key-path"').length, 2, 'the way to add an engine shows in more than one place');
+  assert.equal(app.split('class="engine-card"').length, 2, 'the outside engines have cards in more than one place');
+  // Each card is named for its engine, so a screen reader says whose it is.
+  assert.ok(page.includes(':aria-labelledby="`${entry.id}-name`"') && page.includes(':id="`${entry.id}-name`"'), "a card no longer says whose it is");
+  assert.ok(page.includes(':aria-label="`Remove ${entry.name}`"'), 'Remove no longer says which engine it removes');
 });
 
 test('Settings changes the makers and points to the Installers page, but downloads nothing', () => {
@@ -129,12 +144,13 @@ test('Settings changes the makers and points to the Installers page, but downloa
   for (const part of ['download(', 'install(', '<progress', 'cancelDownload', 'stoppedNote', 'key-path']) {
     assert.ok(!settings.includes(part), `Settings has ${part} again; it belongs on the Installers page`);
   }
-  assert.match(settings, /To install a model or add Grok, go to the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'Settings no longer points to the Installers page');
+  assert.match(settings, /To install a model or add an outside engine, go to the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'Settings no longer points to the Installers page');
   assert.ok(settings.includes('id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>'), 'the Settings title no longer takes the focus');
 
-  // The first run points there too, for the models it does not offer and for Grok.
+  // The first run points there too, for the models it does not offer and for
+  // the outside engines.
   const first = app.slice(app.indexOf('<div v-if="offers.length" class="first-run">'), app.indexOf('<template v-else>', app.indexOf('class="first-run"')));
-  assert.match(first, /More models, and Grok, are on the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'the first run no longer points to the Installers page');
+  assert.match(first, /More models, and the outside engines, are on the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'the first run no longer points to the Installers page');
 });
 
 test('one page shows at a time, and a chat takes the window back', () => {

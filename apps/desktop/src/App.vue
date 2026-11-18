@@ -87,11 +87,15 @@ const gateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
-const outside = ref(null);
-// The change to Grok under way, by the name of its command, or "".
+// The outside engines, as Rust keeps them, in the Installers page's order.
+const outside = ref([]);
+// The change under way, as its command and the engine's id, or "".
 const outsideBusy = ref("");
+// Why the engines could not be read, and what each engine's last change said.
 const outsideNote = ref("");
-const outsidePath = ref("");
+const outsideNotes = ref({});
+// The path typed for each engine's key, by the engine's id.
+const outsidePaths = ref({});
 // The model picked in Settings to grade the answers: its id, "" for no
 // grading, or null until one is picked.
 const graderPick = ref(rememberedGrader());
@@ -110,8 +114,9 @@ function blankSession() {
   return { id: "", title: "", model: "", createdAt: 0, updatedAt: 0, messages: [] };
 }
 
-// Grok's models are offered only while the gate is on and Grok is added.
-const outsideModels = computed(() => (gate.value && outside.value?.added ? (outside.value.models ?? []) : []));
+// An outside engine's models are offered only while the gate is on and the
+// engine is added.
+const outsideModels = computed(() => (gate.value ? outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []) : []));
 const models = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
 // The models a question goes to, in the list's order.
 const chosen = computed(() => models.value.filter((entry) => picked.value.includes(entry.id)));
@@ -130,10 +135,12 @@ const graderChoice = computed({
     rememberGrader(id);
   },
 });
-// A grader picked that is not on hand now, such as Grok with the gate off.
+// A grader picked that is not on hand now, such as an outside engine with the
+// gate off.
 const graderAway = computed(() => (graderPick.value && !grader.value ? graderPick.value : ""));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && chosen.value.length > 0);
-// With Grok to ask, the first run's downloads wait on the Installers page.
+// With an outside engine to ask, the first run's downloads wait on the
+// Installers page.
 const offers = computed(() => (outsideModels.value.length ? [] : firstRunOffers(engine.value)));
 const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
@@ -262,7 +269,7 @@ async function setGate(open) {
   } finally {
     gateBusy.value = false;
   }
-  // Grok's models come and go with the gate.
+  // The outside engines' models come and go with the gate.
   pickModels(picked.value);
   // With the gate on, what waited for it goes ahead, and a line saying the
   // gate is off is gone.
@@ -270,60 +277,75 @@ async function setGate(open) {
     updateChecked.value = "";
     checkStack();
     checkUpdate();
-    if (outside.value?.added && !outside.value.models?.length) refreshOutside();
+    // Each engine added before its models were found finds them now, one at
+    // a time.
+    for (const entry of outside.value.filter((each) => each.added && !each.models?.length)) {
+      await refreshOutside(entry.id);
+    }
   }
 }
 
 /**
  * "user can add their outside inference, start with Grok and Grok ai. user
  * adds it manually, they will need to provide or specify a path to a key".
- * Rust keeps the path, reads the key from it each time Grok is asked, and
- * never hands the key to the page. The page sends only the path typed.
+ * And of the engines after Grok: "and claude and codex/gpt and gemmini". Rust
+ * keeps the path to each engine's key, reads the key from it each time the
+ * engine is asked, and never hands the key to the page. The page sends only
+ * the path typed.
  */
 async function readOutside() {
   try {
-    outside.value = await invoke("outside_status");
+    const listed = await invoke("outside_status");
+    outside.value = Array.isArray(listed) ? listed : [];
+    outsideNote.value = "";
   } catch (error) {
     outsideNote.value = String(error);
   }
 }
 
-/** Asks Rust to change Grok. Gives back whether Rust took the change. */
-async function changeOutside(command, args) {
+/**
+ * Asks Rust to change one outside engine, by its id. Gives back whether Rust
+ * took the change.
+ */
+async function changeOutside(command, id, args = {}) {
   if (outsideBusy.value) return false;
-  outsideBusy.value = command;
-  outsideNote.value = "";
+  outsideBusy.value = `${command} ${id}`;
+  outsideNotes.value = { ...outsideNotes.value, [id]: "" };
   let taken = false;
+  let note = "";
   try {
-    outside.value = await invoke(command, args);
-    // With the gate off, the line above Grok already says what waits for it.
-    outsideNote.value = gate.value ? (outside.value?.error ?? "") : "";
+    const changed = await invoke(command, { engine: id, ...args });
+    outside.value = outside.value.map((entry) => (entry.id === changed.id ? changed : entry));
+    // With the gate off, the line above the engines already says what waits
+    // for it.
+    note = gate.value ? (changed.error ?? "") : "";
     taken = true;
   } catch (error) {
     // Nothing changed; Rust says why.
-    outsideNote.value = String(error);
+    note = String(error);
   } finally {
     outsideBusy.value = "";
   }
-  // The models a question goes to follow Grok's.
+  outsideNotes.value = { ...outsideNotes.value, [id]: note };
+  // The models a question goes to follow the engines'.
   pickModels(picked.value);
   return taken;
 }
 
-async function addOutside() {
-  const given = outsidePath.value.trim();
+async function addOutside(id) {
+  const given = (outsidePaths.value[id] ?? "").trim();
   if (!given) return;
-  const added = await changeOutside("add_outside", { keyPath: given });
+  const added = await changeOutside("add_outside", id, { keyPath: given });
   // A key pasted where the path goes does not stay on screen.
-  if (added || !looksLikePath(given)) outsidePath.value = "";
+  if (added || !looksLikePath(given)) outsidePaths.value = { ...outsidePaths.value, [id]: "" };
 }
 
-function refreshOutside() {
-  return changeOutside("refresh_outside");
+function refreshOutside(id) {
+  return changeOutside("refresh_outside", id);
 }
 
-function removeOutside() {
-  return changeOutside("remove_outside");
+function removeOutside(id) {
+  return changeOutside("remove_outside", id);
 }
 
 /**
@@ -366,7 +388,8 @@ async function setMaker(name, on, box) {
 
 /**
  * Opens Installers or Settings in place of the chat. Both show the makers, and
- * Installers shows Grok, as Rust keeps them, so each asks Rust afresh.
+ * Installers shows the outside engines, as Rust keeps them, so each asks Rust
+ * afresh.
  */
 async function openPage(name) {
   page.value = name;
@@ -757,8 +780,8 @@ function scrollDown() {
 function modelName(id) {
   // A model whose maker was removed is set aside, not offered, but a saved
   // chat still names the model that wrote it.
-  // So does a chat Grok answered after Grok is removed.
-  const known = [...models.value, ...(engine.value?.setAside ?? []), ...(outside.value?.models ?? [])];
+  // So does a chat an outside engine answered after the engine is removed.
+  const known = [...models.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -794,7 +817,7 @@ onMounted(async () => {
   window.addEventListener("focus", checkEngine);
   // While the gate is off, Rust starts no stack and asks for no new version.
   await readGate();
-  // So is the path to Grok's key, and the models found with it.
+  // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   // The makers picked are kept on this computer, so they need no gate.
   await readMakers();
@@ -1005,50 +1028,68 @@ onBeforeUnmount(() => {
 
           <h3 class="gap-above">Outside engines</h3>
           <p class="quiet">
-            Grok, by xAI, answers from xAI's computers, not this one. Give the path to a file that holds your xAI key.
-            Rusty Business™ reads the key from that file when it asks Grok and sends it only to xAI's API, while the gate
-            is on. The key never shows here.
+            Each engine here answers from its maker's computers, not this one. Give the path to a file that holds your
+            key from that maker. Rusty Business™ reads the key from that file when it asks the engine and sends it only
+            to that maker's API, while the gate is on. The key never shows here.
           </p>
           <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so Grok cannot be asked.</span>
+            <span>The outbound gate is off, so no outside engine can be asked.</span>
             <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
           </p>
-          <div class="engine-card" aria-labelledby="grok-name" role="group">
+          <div
+            v-for="entry in outside"
+            :key="entry.id"
+            class="engine-card"
+            :aria-labelledby="`${entry.id}-name`"
+            role="group"
+          >
             <div class="maker-head">
-              <span id="grok-name" class="maker-name">Grok</span>
-              <span v-if="outside?.added" class="engine-buttons">
-                <button type="button" :disabled="Boolean(outsideBusy) || !gate" @click="refreshOutside">
-                  {{ outsideBusy === "refresh_outside" ? "Asking xAI..." : "Refresh models" }}
+              <span :id="`${entry.id}-name`" class="maker-name">
+                {{ entry.name }} <span class="quiet small">by {{ entry.maker }}</span>
+              </span>
+              <span v-if="entry.added" class="engine-buttons">
+                <button type="button" :disabled="Boolean(outsideBusy) || !gate" @click="refreshOutside(entry.id)">
+                  {{ outsideBusy === `refresh_outside ${entry.id}` ? `Asking ${entry.maker}...` : "Refresh models" }}
                 </button>
-                <button type="button" aria-label="Remove Grok" :disabled="Boolean(outsideBusy)" @click="removeOutside">
+                <button
+                  type="button"
+                  :aria-label="`Remove ${entry.name}`"
+                  :disabled="Boolean(outsideBusy)"
+                  @click="removeOutside(entry.id)"
+                >
                   Remove
                 </button>
               </span>
             </div>
-            <template v-if="outside?.added">
-              <p class="small key-file">Key file: <code>{{ outside.keyPath }}</code></p>
-              <p v-if="outside.warning" class="small" role="alert">{{ outside.warning }}</p>
-              <p class="quiet small">{{ outsideModelsLine(outside) }}</p>
+            <template v-if="entry.added">
+              <p class="small key-file">Key file: <code>{{ entry.keyPath }}</code></p>
+              <p v-if="entry.warning" class="small" role="alert">{{ entry.warning }}</p>
+              <p class="quiet small">{{ outsideModelsLine(entry) }}</p>
             </template>
-            <form v-else class="key-path" @submit.prevent="addOutside">
-              <label for="xai-key-path" class="small">Path to your xAI key file</label>
+            <form v-else class="key-path" @submit.prevent="addOutside(entry.id)">
+              <label :for="`${entry.id}-key-path`" class="small">Path to your {{ entry.maker }} key file</label>
               <span class="key-path-row">
                 <input
-                  id="xai-key-path"
-                  v-model="outsidePath"
+                  :id="`${entry.id}-key-path`"
+                  v-model="outsidePaths[entry.id]"
                   type="text"
-                  placeholder="~/.config/xai/key"
+                  :placeholder="`~/.config/${entry.id}/key`"
                   spellcheck="false"
                   autocomplete="off"
                   autocapitalize="off"
                   autocorrect="off"
                   :disabled="Boolean(outsideBusy)"
                 />
-                <button class="primary" type="submit" :disabled="Boolean(outsideBusy) || !outsidePath.trim()">
-                  {{ outsideBusy === "add_outside" ? "Adding..." : "Add" }}
+                <button
+                  class="primary"
+                  type="submit"
+                  :disabled="Boolean(outsideBusy) || !(outsidePaths[entry.id] ?? '').trim()"
+                >
+                  {{ outsideBusy === `add_outside ${entry.id}` ? "Adding..." : "Add" }}
                 </button>
               </span>
             </form>
+            <p v-if="outsideNotes[entry.id]" class="small" role="alert">{{ outsideNotes[entry.id] }}</p>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
         </div>
@@ -1064,7 +1105,7 @@ onBeforeUnmount(() => {
             The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
           </p>
           <p class="quiet small">
-            To install a model or add Grok, go to the
+            To install a model or add an outside engine, go to the
             <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
           </p>
           <ul class="makers" aria-label="Model makers">
@@ -1121,14 +1162,16 @@ onBeforeUnmount(() => {
               </option>
             </select>
           </div>
-          <p v-if="graderPick === null" class="quiet small">Until you pick one, Grok grades while it is on hand.</p>
+          <p v-if="graderPick === null" class="quiet small">
+            Until you pick one, the first outside engine on hand grades, in the order the Installers page lists them.
+          </p>
           <p v-if="graderAway" class="quiet small">
             The model picked is not on hand, so the answers are not graded.
-            <template v-if="isOutside(graderAway)">Grok is on hand only while the gate is on.</template>
+            <template v-if="isOutside(graderAway)">Outside engines are on hand only while the gate is on.</template>
           </p>
           <p v-if="grader && isOutside(grader.id)" class="small">
-            Grok grades on xAI's computers, so the question and every answer, the answers from this computer too, go to
-            xAI each time it grades. That happens only while the gate is on.
+            {{ grader.name }} grades on {{ grader.maker }}'s computers, so the question and every answer, the answers
+            from this computer too, go to {{ grader.maker }} each time it grades. That happens only while the gate is on.
           </p>
         </div>
       </section>
@@ -1210,7 +1253,7 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
             <p class="quiet small">
-              More models, and Grok, are on the
+              More models, and the outside engines, are on the
               <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
             </p>
           </div>

@@ -12,7 +12,7 @@ The desktop app's Rust code.
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
-| `outside.rs`  | The engines outside this computer, Grok first: keeps the path to the person's xAI key, never the key, and asks xAI's API through the gate |
+| `outside.rs`  | The engines outside this computer, Grok and GPT: keeps the path to each of the person's keys, never a key, and asks xAI's or OpenAI's API through the gate |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
@@ -25,7 +25,7 @@ Three rules live in `gate.rs`, each with tests:
   is on, over https, with no proxy. The one other client in the app speaks
   to the model engine on this computer.
 - Turning the gate off stops what is under way: the check for a new version,
-  a model download, a start of the stack, and Grok's answer.
+  a model download, a start of the stack, and an outside engine's answer.
 
 Three more live in `engine.rs`, each with tests:
 
@@ -89,22 +89,23 @@ Five more live in `update.rs`, each with tests:
   why it failed; the checks at open and once a day show nothing. The app
   downloads and installs nothing itself.
 
-Five more live in `outside.rs`, each with tests:
+Five more live in `outside.rs`, each with tests, for Grok and GPT alike:
 
-- The key never leaves Rust. The app keeps only the path to its file, and
-  the page, a log, an error, and a saved chat never hold the key. A key
+- A key never leaves Rust. The app keeps only the path to its file, and
+  the page, a log, an error, and a saved chat never hold a key. A key
   pasted where the path goes is refused and not kept.
-- With the gate off, Grok is not asked and the key is not even read.
-  Turning the gate off stops Grok part way through, whether it is finding
-  models or answering.
-- Only xAI's API is asked, at an address fixed in the code, over https,
-  with no proxy and no redirect, and an answer from anywhere else is
-  refused.
-- Only Grok's models that xAI's list gave are asked, and a model off that
-  list is refused.
-- Remove forgets the path and keeps the models found, so saved chats still
-  name them. The key file is the person's, and the app never changes or
-  removes it.
+- With the gate off, no outside engine is asked and no key is even read.
+  Turning the gate off stops an engine part way through, whether it is
+  finding models or answering.
+- Each engine is asked only at its maker's API, xAI's for Grok and OpenAI's
+  for GPT, at an address fixed in the code, over https, with no proxy and
+  no redirect, and an answer from anywhere else is refused.
+- Only the models an engine's own list gave are asked of it, and a model
+  off that list, or from the other engine, is refused.
+- Each engine keeps its own path and models. Remove forgets the path and
+  keeps the models found, so saved chats still name them, and leaves the
+  other engine as it was. The key file is the person's, and the app never
+  changes or removes it.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts

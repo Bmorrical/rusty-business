@@ -108,7 +108,7 @@ export function fullest(turns, models) {
   let top = null;
   for (const entry of models ?? []) {
     const used = tokensUsed(turns, entry.id) ?? tokensUsed(turns);
-    // A window not known, as with some of Grok's, cannot be measured.
+    // A window not known, as with some outside engines' models, cannot be measured.
     if (!used || !entry.context) continue;
     const full = fullness(used, entry.context);
     if (!top || full > top.full) top = { model: entry, used, full };
@@ -351,7 +351,7 @@ export function checkedLine(update, current) {
  */
 export function gateLine(open) {
   return open
-    ? "Gate on. The app may go online to check for updates, download models, start the stack, and ask Grok."
+    ? "Gate on. The app may go online to check for updates, download models, start the stack, and ask the outside engines you add."
     : "Gate off. Nothing leaves this computer.";
 }
 
@@ -392,12 +392,16 @@ export function installLine(maker, model) {
   return model.onDisk && !maker.picked ? `${line}, shown once ${maker.name} is added` : line;
 }
 
-/** The start of a model id that names one of Grok's models, asked at xAI. */
-export const OUTSIDE_PREFIX = "xai:";
+/**
+ * The starts of the model ids that name an outside engine's models: Grok's,
+ * asked at xAI, and GPT's, asked at OpenAI.
+ */
+export const OUTSIDE_PREFIXES = ["xai:", "openai:"];
 
 /** True for a model asked outside this computer. */
 export function isOutside(id) {
-  return String(id ?? "").startsWith(OUTSIDE_PREFIX);
+  const text = String(id ?? "");
+  return OUTSIDE_PREFIXES.some((prefix) => text.startsWith(prefix));
 }
 
 /**
@@ -423,7 +427,7 @@ export function looksLikePath(text) {
 /** "Grok's models: Grok 4.7 and Grok 4.7 Fast.", or that none is found yet. */
 export function outsideModelsLine(status) {
   const names = (status?.models ?? []).map((entry) => entry.name);
-  if (!names.length) return `No ${status?.name ?? "Grok"} models found yet.`;
+  if (!names.length) return status?.name ? `No ${status.name} models found yet.` : "No models found yet.";
   return `${status.name}'s models: ${namesLine(names)}.`;
 }
 
@@ -572,8 +576,9 @@ export function nameAnswers(text, graded, nameOf) {
 
 /**
  * The model that grades, of the models on hand: the one picked in Settings,
- * `saved`, or, until one is picked, Grok's first model. "" picked means no
- * grading. Null when no model grades.
+ * `saved`, or, until one is picked, the first outside engine's first model, in
+ * the order the Installers page lists them. "" picked means no grading. Null
+ * when no model grades.
  */
 export function graderFor(saved, models) {
   const list = models ?? [];

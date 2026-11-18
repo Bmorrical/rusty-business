@@ -1,18 +1,20 @@
-// Grok, the first engine outside this computer, checked on every test run.
+// The engines outside this computer, Grok by xAI and GPT by OpenAI, checked
+// on every test run.
 //
-// It answers the ask that started it: "user can add their outside inference,
-// start with Grok and Grok ai. user adds it manually, they will need to
-// provide or specify a path to a key, now, the Rusty Business™ can query Grok
-// for the same question", and "you can use grok by it's self too."
+// They answer the asks that started them: "user can add their outside
+// inference, start with Grok and Grok ai. user adds it manually, they will
+// need to provide or specify a path to a key, now, the Rusty Business™ can
+// query Grok for the same question", "you can use grok by it's self too.",
+// and "and claude and codex/gpt and gemmini".
 //
-// Rust keeps the path and reads the key, and its tests in outside.rs check
-// how it behaves; chat.test.js checks the page's helpers. These fail when the
-// key could reach the page, a log, or anywhere but xAI's API, when xAI's
-// address can be changed, when the key is read before the gate is checked,
-// when Grok waits for the turn the models on this computer take, when the
-// page keeps the path, leaves a pasted key on screen, offers Grok with the
-// gate off, or loses the way to add, refresh, and remove it, or when a rule
-// loses its Rust test.
+// Rust keeps each path and reads each key, and its tests in outside.rs check
+// how it behaves; chat.test.js checks the page's helpers. These fail when a
+// key could reach the page, a log, or anywhere but its maker's API, when a
+// maker's address can be changed, when a key is read before the gate is
+// checked, when an outside engine waits for the turn the models on this
+// computer take, when the page keeps a path, leaves a pasted key on screen,
+// offers an engine with the gate off, or loses the way to add, refresh, and
+// remove one, or when a rule loses its Rust test.
 //
 // The checks read the files as text, so nothing has to be installed to run
 // them.
@@ -29,7 +31,7 @@ const OUTSIDE = 'apps/desktop/src-tauri/src/outside.rs';
 const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const LIB = 'apps/desktop/src-tauri/src/lib.rs';
 
-/** The Rust tests that keep Grok's rules. */
+/** The Rust tests that keep the outside engines' rules. */
 const RUST_TESTS = [
   'the_key_never_leaves_rust',
   'a_key_pasted_where_the_path_goes_is_refused_and_not_kept',
@@ -37,11 +39,16 @@ const RUST_TESTS = [
   'a_key_file_others_can_read_is_warned_of',
   'with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read',
   'only_grok_models_found_are_asked',
+  'a_model_is_asked_only_of_the_engine_that_listed_it',
+  'an_engine_the_app_does_not_know_is_refused',
   'grok_is_asked_at_xais_api_alone_over_https',
+  'gpt_is_asked_at_openais_api_alone_over_https',
   'xais_list_gives_grok_models_for_text_with_their_names',
+  'openais_list_gives_gpt_models_for_text_newest_first_with_their_names',
   'xais_refusals_are_said_plainly',
   'turning_the_gate_off_stops_grok_part_way_through',
   'removing_grok_forgets_the_path_and_keeps_the_models',
+  'each_engine_keeps_its_own_key_path_and_models',
   'a_kept_file_is_read_with_care',
 ];
 
@@ -90,49 +97,65 @@ test('the key stays in Rust: never sent to the page, never logged, never kept by
   // as sensitive, and an answer's words are never read back into an error.
   assert.equal(source.match(/\.bearer_auth\(&key\.0\)/g)?.length, 2, 'the key is used somewhere new');
   assert.equal(source.match(/key\.0/g)?.length, 2, 'the key is read somewhere new');
-  assert.ok(!source.includes('.text()'), "an error could now repeat xAI's own words");
+  assert.ok(!source.includes('.text()'), "an error could now repeat a maker's own words");
 });
 
-test("Grok is asked at xAI's API alone, over https, and only while the gate is on", () => {
+test("each engine is asked at its maker's API alone, over https, and only while the gate is on", () => {
   const source = code(OUTSIDE);
   assert.ok(source.includes('const XAI_BASE: &str = "https://api.x.ai/v1";'), "xAI's address has moved");
   assert.ok(source.includes('pub const XAI_HOST: &str = "api.x.ai";'), "xAI's host has moved");
-  // Nothing outside the code can point Grok somewhere else.
+  assert.ok(source.includes('const OPENAI_BASE: &str = "https://api.openai.com/v1";'), "OpenAI's address has moved");
+  assert.ok(source.includes('pub const OPENAI_HOST: &str = "api.openai.com";'), "OpenAI's host has moved");
+  // Each engine has one address and one host, the ones above.
+  assert.match(rustFunction(source, 'base'), /Self::Xai => XAI_BASE,\s+Self::OpenAi => OPENAI_BASE,\s+\}/, 'an engine is asked at another address');
+  assert.match(rustFunction(source, 'host'), /Self::Xai => XAI_HOST,\s+Self::OpenAi => OPENAI_HOST,\s+\}/, 'an engine answers from another host');
+  // Nothing outside the code can point an engine somewhere else.
   const reads = source.match(/env::var(?:_os)?\("[A-Z_]+"\)/g) ?? [];
-  assert.deepEqual(reads, ['env::var_os("HOME")', 'env::var_os("USERPROFILE")'], `${OUTSIDE} reads a setting that could move Grok`);
-  assert.equal(source.match(/\{XAI_BASE\}\//g)?.length, 2, 'Grok is asked at an address not built on XAI_BASE');
+  assert.deepEqual(reads, ['env::var_os("HOME")', 'env::var_os("USERPROFILE")'], `${OUTSIDE} reads a setting that could move an engine`);
+  assert.equal(source.match(/format!\("\{\}\/[^"]*", engine\.base\(\)\)/g)?.length, 2, 'an engine is asked at an address not built on its base');
 
   const client = rustFunction(source, 'client');
-  assert.match(client, /\{\s+gate\.client\(GATE_OFF,/, "Grok's client does not go through the gate");
+  assert.match(client, /\{\s+gate\.client\(&engine\.gate_off\(\),/, "an engine's client does not go through the gate");
   for (const rule of ['.no_proxy()', '.https_only(true)', 'redirect::Policy::none()', '.referer(false)']) {
-    assert.ok(client.includes(rule), `Grok's client has lost ${rule}`);
+    assert.ok(client.includes(rule), `the outside engines' client has lost ${rule}`);
   }
-  // An answer from anywhere else is refused, both for the list and for a chat.
-  assert.equal(source.match(/if !from_xai\(response\.url\(\)\)/g)?.length, 2, "an answer is no longer checked to come from xAI's API");
+  // An answer from anywhere but the engine's own host is refused, both for
+  // the list and for a chat.
+  assert.equal(source.match(/if !engine\.owns\(response\.url\(\)\)/g)?.length, 2, "an answer is no longer checked to come from its maker's API");
+  assert.ok(rustFunction(source, 'owns').includes('url.domain() == Some(self.host())'), "an answer is no longer checked against the engine's own host");
 
   // The gate is checked before the key is read, and turning it off stops
-  // Grok, whether it is finding models or answering.
+  // the engine, whether it is finding models or answering.
   for (const name of ['run_chat', 'refresh']) {
     const body = rustFunction(source, name);
-    const gate = body.indexOf('client(gate)?');
+    const gate = body.indexOf('client(engine, gate)?');
     assert.ok(gate >= 0, `${name} does not ask the gate first`);
     assert.ok(body.indexOf('read_key(') > gate, `${name} reads the key before it checks the gate`);
     assert.ok(body.includes('gate.closed()'), `${name} goes on when the gate is turned off`);
   }
+  // A model goes only to the engine that listed it.
+  const chat = rustFunction(source, 'run_chat');
+  assert.ok(chat.indexOf('outside.knows(engine, model)') < chat.indexOf('client(engine, gate)?'), 'a model is asked before it is checked against its engine\'s list');
 });
 
-test('Grok waits for no turn, and the app knows its commands', () => {
+test('an outside engine waits for no turn, and the app knows its commands', () => {
   const engine = code(ENGINE);
   const stream = rustFunction(engine, 'chat_stream');
   const outside = stream.indexOf('let result = if outside::is_outside(&request.model) {');
-  assert.ok(outside >= 0, "the chat no longer sends Grok's models to Grok");
-  assert.ok(stream.indexOf('wait_for_turn(') > outside, 'Grok waits for the turn the models on this computer take');
-  assert.ok(stream.includes('outside::run_chat(&gate, &outside,'), 'Grok is asked without the gate');
+  assert.ok(outside >= 0, "the chat no longer sends an outside engine's models to it");
+  assert.ok(stream.indexOf('wait_for_turn(') > outside, 'an outside engine waits for the turn the models on this computer take');
+  assert.ok(stream.includes('outside::run_chat(&gate, &outside,'), 'an outside engine is asked without the gate');
 
   const lib = read(LIB);
-  assert.ok(lib.includes('app.manage(outside::Outside::new(data.join("outside.json")));'), "the app no longer keeps Grok's path in its own folder");
+  assert.ok(lib.includes('app.manage(outside::Outside::new(data.join("outside.json")));'), "the app no longer keeps the paths in its own folder");
   for (const command of ['outside_status', 'add_outside', 'refresh_outside', 'remove_outside']) {
     assert.ok(lib.includes(`outside::${command},`), `the page can no longer ask for ${command}`);
+  }
+  // Each command names the engine it changes, and one the app does not know
+  // is refused.
+  for (const command of ['add_outside', 'refresh_outside', 'remove_outside']) {
+    const body = rustFunction(code(OUTSIDE), command);
+    assert.ok(body.includes('engine: String,') && body.includes('Engine::named(&engine)?'), `${command} no longer names its engine`);
   }
   // Remove forgets the path. The key file is the person's, and the app never
   // removes or changes it.
@@ -142,43 +165,51 @@ test('Grok waits for no turn, and the app knows its commands', () => {
   }
 });
 
-test('the page sends only the path, keeps none of it, and offers Grok only with the gate on', () => {
+test('the page sends only the path, keeps none of it, and offers an engine only with the gate on', () => {
   const app = read(APP);
-  assert.match(
-    app,
-    /const outsideModels = computed\(\(\) => \(gate\.value && outside\.value\?\.added \? \(outside\.value\.models \?\? \[\]\) : \[\]\)\);/,
-    "Grok's models are offered with the gate off, or before Grok is added",
+  assert.ok(
+    app.includes('const outsideModels = computed(() => (gate.value ? outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []) : []));'),
+    "an outside engine's models are offered with the gate off, or before it is added",
   );
-  assert.match(app, /const models = computed\(\(\) => \[\.\.\.\(engine\.value\?\.models \?\? \[\]\), \.\.\.outsideModels\.value\]\);/, "Grok can no longer answer alone or as one of several");
+  assert.match(app, /const models = computed\(\(\) => \[\.\.\.\(engine\.value\?\.models \?\? \[\]\), \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  // Rust gives every engine, as a list.
+  assert.ok(pageFunction(app, 'readOutside').includes('outside.value = Array.isArray(listed) ? listed : [];'), 'the page no longer reads the engines as a list');
 
   const add = pageFunction(app, 'addOutside');
-  assert.ok(add.includes('invoke') === false && add.includes('changeOutside("add_outside", { keyPath: given })'), 'adding Grok sends more than the path');
-  assert.ok(add.includes('if (added || !looksLikePath(given)) outsidePath.value = "";'), 'a key pasted where the path goes stays on screen');
+  assert.ok(add.includes('invoke') === false && add.includes('changeOutside("add_outside", id, { keyPath: given })'), 'adding an engine sends more than the path');
+  assert.ok(add.includes('if (added || !looksLikePath(given)) outsidePaths.value = { ...outsidePaths.value, [id]: "" };'), 'a key pasted where the path goes stays on screen');
   for (const name of ['refreshOutside', 'removeOutside']) {
-    assert.match(pageFunction(app, name), new RegExp(`changeOutside\\("${name.replace('Outside', '_outside')}"\\)`), `${name} no longer asks Rust`);
+    assert.match(pageFunction(app, name), new RegExp(`changeOutside\\("${name.replace('Outside', '_outside')}", id\\)`), `${name} no longer asks Rust`);
   }
   const change = pageFunction(app, 'changeOutside');
-  assert.ok(change.includes('pickModels(picked.value);'), "the models picked no longer follow Grok's");
-  assert.ok(pageFunction(app, 'setGate').includes('pickModels(picked.value);'), "Grok's models stay picked once the gate is off");
+  assert.ok(change.includes('invoke(command, { engine: id, ...args })'), 'a change no longer names its engine');
+  assert.ok(change.includes('entry.id === changed.id ? changed : entry'), 'a change lands on another engine');
+  // Each engine has its own note: what one says leaves the other's alone.
+  const notes = [...change.matchAll(/outsideNotes\.value = ([^;]+);/g)].map((found) => found[1]);
+  assert.ok(notes.length >= 2 && notes.every((each) => each.startsWith('{ ...outsideNotes.value, [id]: ')), "one engine's note wipes the other's");
+  assert.ok(change.includes('pickModels(picked.value);'), "the models picked no longer follow the engines'");
+  assert.ok(pageFunction(app, 'setGate').includes('pickModels(picked.value);'), "an outside engine's models stay picked once the gate is off");
 
-  // Nothing about the key or its path is kept by the page: only the models
+  // Nothing about a key or its path is kept by the page: only the models
   // picked to answer, and the one picked to grade.
   const storage = app.match(/localStorage\.setItem\("[^"]*"/g) ?? [];
   assert.deepEqual(storage, ['localStorage.setItem("models"', 'localStorage.setItem("grader"'], 'the page keeps something new in its storage');
   assert.ok(!/sessionStorage|indexedDB|document\.cookie/.test(app), 'the page keeps something in another store');
 
-  // The box for the path: labelled, and not checked, filled in, or changed
-  // by the system as it is typed.
-  const form = app.slice(app.indexOf('<form v-else class="key-path"'), app.indexOf('</form>'));
-  assert.ok(form, 'the Installers page has lost the way to add Grok');
-  for (const part of ['@submit.prevent="addOutside"', 'for="xai-key-path"', 'id="xai-key-path"', 'v-model="outsidePath"', 'spellcheck="false"', 'autocomplete="off"', 'autocapitalize="off"', 'autocorrect="off"']) {
-    assert.ok(form.includes(part), `the box for the path has lost ${part}`);
-  }
-  assert.ok(!/type="password"/.test(form), 'the box asks for the key, not the path');
+  // One card for each engine Rust gives.
   const engines = app.indexOf('<h3 class="gap-above">Outside engines</h3>');
   assert.ok(engines >= 0, 'the Installers page has lost its outside engines');
   const settings = app.slice(engines, app.indexOf('</section>', engines));
-  for (const part of ['@click="refreshOutside"', '@click="removeOutside"', '{{ outside.keyPath }}', '{{ outside.warning }}', '{{ outsideModelsLine(outside) }}', '{{ outsideNote }}', '@click="setGate(true)"', 'The key never shows here.']) {
+  assert.ok(settings.includes('v-for="entry in outside"'), 'the Installers page no longer shows every outside engine');
+  // The box for the path: labelled, and not checked, filled in, or changed
+  // by the system as it is typed.
+  const form = settings.slice(settings.indexOf('<form v-else class="key-path"'), settings.indexOf('</form>'));
+  assert.ok(form, 'the Installers page has lost the way to add an engine');
+  for (const part of ['@submit.prevent="addOutside(entry.id)"', ':for="`${entry.id}-key-path`"', ':id="`${entry.id}-key-path`"', 'v-model="outsidePaths[entry.id]"', 'spellcheck="false"', 'autocomplete="off"', 'autocapitalize="off"', 'autocorrect="off"']) {
+    assert.ok(form.includes(part), `the box for the path has lost ${part}`);
+  }
+  assert.ok(!/type="password"/.test(form), 'the box asks for the key, not the path');
+  for (const part of ['@click="refreshOutside(entry.id)"', '@click="removeOutside(entry.id)"', '{{ entry.keyPath }}', '{{ entry.warning }}', '{{ outsideModelsLine(entry) }}', '{{ outsideNotes[entry.id] }}', '{{ outsideNote }}', '@click="setGate(true)"', 'The key never shows here.']) {
     assert.ok(settings.includes(part), `the Installers page's outside engines have lost ${part}`);
   }
   // Vue counts an empty string as true for :disabled, and the busy word is ""
@@ -186,11 +217,12 @@ test('the page sends only the path, keeps none of it, and offers Grok only with 
   assert.ok(!/:disabled="outsideBusy\b/.test(app), 'the box for the path or a button stays locked while nothing is under way');
   // A chip says when a model is asked online.
   assert.ok(app.includes('<span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>'), 'a chip no longer says when its model is asked online');
-  // A saved chat still names a Grok model once the gate is off or Grok is removed.
-  assert.match(pageFunction(app, 'modelName'), /\.\.\.\(outside\.value\?\.models \?\? \[\]\)\]/, 'a saved chat loses the name of the Grok model that answered it');
+  // A saved chat still names an outside model once the gate is off or its
+  // engine is removed.
+  assert.ok(pageFunction(app, 'modelName').includes('...outside.value.flatMap((entry) => entry.models ?? [])]'), 'a saved chat loses the name of the outside model that answered it');
 });
 
-test("every rule for Grok has its Rust test", () => {
+test("every rule for the outside engines has its Rust test", () => {
   const source = read(OUTSIDE);
   for (const name of RUST_TESTS) {
     assert.match(source, new RegExp(`#\\[test\\]\\s+fn ${name}\\(`), `${OUTSIDE} has lost the test ${name}`);

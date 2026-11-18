@@ -14,9 +14,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **OpenAI and Claude, outside this computer.** On the Installers page, you
-  give the path to your own OpenAI or Anthropic key, the way Grok is added,
-  and GPT or Claude answers through the outbound gate.
+- **Claude, outside this computer.** On the Installers page, you give the
+  path to your own Anthropic key, the way Grok and GPT are added, and
+  Claude answers through the outbound gate.
 
 ## Later
 
@@ -95,13 +95,18 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   over https only to xAI's API, and only while the outbound gate is on.
   Grok answers alone or as one of several, and a chip at the top says it is
   asked online.
+- **GPT, by OpenAI, beside Grok.** GPT is added on the Installers page the
+  same way, with the path to your own OpenAI key, which goes only to
+  OpenAI's API. Each engine keeps its own key path and models, and removing
+  one leaves the other as it was.
 - **Grading and a summary.** Once every answer is in, one model grades each
   from A to F and sums them up, reading the question and the answers,
-  numbered and without the models' names. Grok grades until another model is
-  picked in Settings, where No grading turns it off. A round not graded yet
+  numbered and without the models' names. An outside engine grades, Grok
+  before GPT, until another model is picked in Settings, where No grading
+  turns it off. A round not graded yet
   has a button to grade it.
 - **An installers page.** Every model on the list, from every maker, is one
   Install away, with its license and download size. Install downloads it,
   with the outbound gate on, then adds its maker, so it shows at the top of
   the window. A model already here whose maker is not added has a Show
-  button instead. Grok is added there too.
+  button instead. Grok and GPT are added there too.

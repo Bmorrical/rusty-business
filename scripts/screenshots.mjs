@@ -56,17 +56,11 @@ export const SCENES = [
 /** The button in the side bar that opens each page a picture shows. */
 export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
 
-/** Grok as outside_status gives it before anyone adds it. */
-export const GROK_NOT_ADDED = {
-  name: 'Grok',
-  maker: 'xAI',
-  host: 'api.x.ai',
-  added: false,
-  keyPath: null,
-  models: [],
-  warning: null,
-  error: null,
-};
+/** The outside engines as outside_status gives them before anyone adds one. */
+export const OUTSIDE_NOT_ADDED = [
+  { id: 'xai', name: 'Grok', maker: 'xAI', host: 'api.x.ai', added: false, keyPath: null, models: [], warning: null, error: null },
+  { id: 'openai', name: 'GPT', maker: 'OpenAI', host: 'api.openai.com', added: false, keyPath: null, models: [], warning: null, error: null },
+];
 
 const BROWSERS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -219,7 +213,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
     const sessions = ${JSON.stringify(sessions)};
     const notStarted = ${JSON.stringify(start)};
     const stack = ${JSON.stringify(stack)};
-    const grok = ${JSON.stringify(GROK_NOT_ADDED)};
+    const outside = ${JSON.stringify(OUTSIDE_NOT_ADDED)};
     const forMakers = ${forMakers};
     const makersStatus = ${makersStatus};
     const latestAnswers = ${latestAnswers};
@@ -229,7 +223,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
-      outside_status: () => grok,
+      outside_status: () => outside,
       list_sessions: () =>
         sessions.map((entry) => ({
           id: entry.id,

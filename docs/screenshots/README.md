@@ -48,14 +48,15 @@ button to try again.
 
 ## The first run
 
-[![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and Grok, are on the Installers page](first-run.png)](first-run.png?raw=true)
+[![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and the outside engines, are on the Installers page](first-run.png)](first-run.png?raw=true)
 
 What the app shows when none of its models is on this computer. Microsoft
 is ticked to begin with; ticking another maker adds its models below, each
 with its maker, license, and download size, and the smallest marked as the
 quickest to start. Microsoft cannot be unticked while it is the only maker
 ticked. Nothing downloads until the outbound gate is on and Download is
-pressed. More models, and Grok, are a click away on the Installers page.
+pressed. More models, and the outside engines, are a click away on the
+Installers page.
 
 ## The Installers page
 
@@ -66,7 +67,8 @@ lists every model on the app's list, from every maker, with its license and
 download size. Install downloads one, once the outbound gate is on, then
 adds its maker so the model shows at the top of the window. Here the gate is
 off, so Install waits. A model already on this computer whose maker is not
-added has a Show button instead. Grok is added below, under Outside engines.
+added has a Show button instead. Grok and GPT are added below, under
+Outside engines, each on its own card.
 
 ## Settings: the model makers
 
@@ -105,9 +107,9 @@ These are pictures of the app's page, not captures of the app's window:
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
   No stack is started either: in every picture, the page is told the stack's
-  front door already answers. Grok is not added, and no key is read. The
-  outbound gate is off in every picture, as it is until it is turned on, and
-  no maker can be changed.
+  front door already answers. Grok and GPT are not added, and no key is
+  read. The outbound gate is off in every picture, as it is until it is
+  turned on, and no maker can be changed.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 

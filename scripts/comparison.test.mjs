@@ -245,8 +245,8 @@ test('the page cannot reach past this computer, and Rust does only through the g
   assert.ok(update.includes('redirect::Policy::none()'), `${UPDATE} may now follow a redirect somewhere else`);
 
   const outside = read(OUTSIDE);
-  assert.ok(outside.includes('.no_proxy()'), `${OUTSIDE} may now send Grok's calls through a proxy`);
-  assert.ok(outside.includes('redirect::Policy::none()'), `${OUTSIDE} may now follow a redirect away from xAI`);
+  assert.ok(outside.includes('.no_proxy()'), `${OUTSIDE} may now send an outside engine's calls through a proxy`);
+  assert.ok(outside.includes('redirect::Policy::none()'), `${OUTSIDE} may now follow a redirect away from a maker's API`);
 
   // Every client that reaches past this computer is made by the gate, which
   // refuses while it is off and holds each one to https with no proxy.
@@ -255,9 +255,11 @@ test('the page cannot reach past this computer, and Rust does only through the g
   for (const rule of ['.https_only(true)', '.no_proxy()']) {
     assert.ok(gate.includes(rule), `${GATE} no longer holds its clients to ${rule}`);
   }
-  for (const file of [UPDATE, DOWNLOADS, OUTSIDE]) {
+  for (const file of [UPDATE, DOWNLOADS]) {
     assert.match(read(file), /fn client\(gate: &Gate\)[^{]*\{\s+gate\.client\(GATE_OFF,/, `${file} makes a client that does not go through the gate`);
   }
+  // The outside engines' client says which engine waits for the gate.
+  assert.match(read(OUTSIDE), /fn client\(engine: Engine, gate: &Gate\)[^{]*\{\s+gate\.client\(&engine\.gate_off\(\),/, `${OUTSIDE} makes a client that does not go through the gate`);
 
   // The README says so, in the reason to choose Rusty Business™.
   const why = (ours[0]?.body ?? '').replace(/\s+/g, ' ');
