@@ -14,9 +14,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **Gemini, outside this computer.** On the Installers page, you give the
-  path to your own Google key, the way Grok, GPT, and Claude are added, and
-  Gemini answers through the outbound gate.
+Nothing yet. The next item comes from Later.
 
 ## Later
 
@@ -103,15 +101,18 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   page the same way, with the path to your own Anthropic key, which goes
   only to Anthropic's API. Claude answers alone or among several, and can
   grade.
+- **Gemini, by Google, beside them.** Gemini is added on the Installers
+  page the same way, with the path to your own Google key, which goes only
+  to Google's API, in a header and never in an address. Gemini answers
+  alone or among several, and can grade.
 - **Grading and a summary.** Once every answer is in, one model grades each
   from A to F and sums them up, reading the question and the answers,
   numbered and without the models' names. An outside engine grades, Grok
-  first, then GPT, then Claude, until another model is picked in Settings,
-  where No grading
-  turns it off. A round not graded yet
-  has a button to grade it.
+  first, then GPT, then Claude, then Gemini, until another model is picked
+  in Settings, where No grading turns it off. A round not graded yet has a
+  button to grade it.
 - **An installers page.** Every model on the list, from every maker, is one
   Install away, with its license and download size. Install downloads it,
   with the outbound gate on, then adds its maker, so it shows at the top of
   the window. A model already here whose maker is not added has a Show
-  button instead. Grok, GPT, and Claude are added there too.
+  button instead. Grok, GPT, Claude, and Gemini are added there too.
