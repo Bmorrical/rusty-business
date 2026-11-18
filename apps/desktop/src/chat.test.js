@@ -27,6 +27,7 @@ import {
   graderFor,
   gradesLine,
   groups,
+  installLine,
   isOutside,
   keptPicks,
   latestAnswers,
@@ -411,6 +412,22 @@ test("each model in Settings gives its license, and its size or that it is here"
     listedLine({ name: "Llama 3.1 8B", license: "Llama 3.1 Community License", onDisk: false, offer: null }),
     "Llama 3.1 Community License · no download for this computer",
   );
+});
+
+test("each model on the Installers page says the same, and when it waits for its maker", () => {
+  // Brad, 2026-11-17: "one click from an installers page would be good".
+  const google = { name: "Google", picked: false };
+  const gemma = { name: "Gemma 4 26B", license: "Apache 2.0", onDisk: true, offer: OFFERS[1] };
+  // On this computer, with its maker not added: Show adds the maker.
+  assert.equal(installLine(google, gemma), "Apache 2.0 · on this computer, shown once Google is added");
+  // With its maker added, it reads as in Settings.
+  assert.equal(installLine({ ...google, picked: true }, gemma), listedLine(gemma));
+  // Not here yet, it gives its size, whether its maker is added or not.
+  const away = { ...gemma, onDisk: false };
+  assert.equal(installLine(google, away), "Apache 2.0 · 12.1 GB");
+  assert.equal(installLine({ ...google, picked: true }, away), "Apache 2.0 · 12.1 GB");
+  // And one with no download says so.
+  assert.equal(installLine(google, { ...away, offer: null }), "Apache 2.0 · no download for this computer");
 });
 
 const PHI = "mlx-community/phi-4-4bit";

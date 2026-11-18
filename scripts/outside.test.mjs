@@ -170,15 +170,16 @@ test('the page sends only the path, keeps none of it, and offers Grok only with 
   // The box for the path: labelled, and not checked, filled in, or changed
   // by the system as it is typed.
   const form = app.slice(app.indexOf('<form v-else class="key-path"'), app.indexOf('</form>'));
-  assert.ok(form, 'Settings has lost the way to add Grok');
+  assert.ok(form, 'the Installers page has lost the way to add Grok');
   for (const part of ['@submit.prevent="addOutside"', 'for="xai-key-path"', 'id="xai-key-path"', 'v-model="outsidePath"', 'spellcheck="false"', 'autocomplete="off"', 'autocapitalize="off"', 'autocorrect="off"']) {
     assert.ok(form.includes(part), `the box for the path has lost ${part}`);
   }
   assert.ok(!/type="password"/.test(form), 'the box asks for the key, not the path');
-  const settings = app.slice(app.indexOf('<h3 class="gap-above">Outside engines</h3>'), app.indexOf('<header v-show="!settingsOpen"'));
-  assert.ok(settings, 'Settings has lost its outside engines');
+  const engines = app.indexOf('<h3 class="gap-above">Outside engines</h3>');
+  assert.ok(engines >= 0, 'the Installers page has lost its outside engines');
+  const settings = app.slice(engines, app.indexOf('</section>', engines));
   for (const part of ['@click="refreshOutside"', '@click="removeOutside"', '{{ outside.keyPath }}', '{{ outside.warning }}', '{{ outsideModelsLine(outside) }}', '{{ outsideNote }}', '@click="setGate(true)"', 'The key never shows here.']) {
-    assert.ok(settings.includes(part), `Settings' outside engines have lost ${part}`);
+    assert.ok(settings.includes(part), `the Installers page's outside engines have lost ${part}`);
   }
   // Vue counts an empty string as true for :disabled, and the busy word is ""
   // while nothing is under way, so it would lock the box and Remove for good.

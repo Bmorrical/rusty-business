@@ -34,9 +34,11 @@ import {
 } from '../apps/desktop/src/chat.js';
 import {
   FIRST_MAKER,
+  GROK_NOT_ADDED,
   HEIGHT,
   NOT_STARTED,
   NO_MODEL,
+  PAGE_BUTTONS,
   SCALE,
   SCENES,
   STACK_RUNNING,
@@ -62,6 +64,7 @@ const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 const STACK = 'apps/desktop/src-tauri/src/stack.rs';
 const PINNED = 'apps/desktop/src-tauri/pinned-models.json';
 const MAKERS = 'apps/desktop/src-tauri/src/makers.rs';
+const OUTSIDE = 'apps/desktop/src-tauri/src/outside.rs';
 
 // The pages that show the app's pictures.
 const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
@@ -275,7 +278,10 @@ test('each scene is a picture the script can make', () => {
     assert.ok(['light', 'dark'].includes(scene.scheme), `${scene.file} is light or dark`);
     assert.ok(['on', 'off', 'first-run'].includes(scene.engine), `${scene.file} has the engine on, off, or on a first run`);
     if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
-    if (scene.settings) assert.ok(!scene.open, `${scene.file} opens Settings, not a chat`);
+    if (scene.page) {
+      assert.ok(scene.page in PAGE_BUTTONS, `${scene.file} opens a page the side bar has a button for`);
+      assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
+    }
     if (scene.thinking) {
       const chat = chats.find((entry) => entry.id === scene.open);
       assert.ok(
@@ -411,12 +417,19 @@ test('the page downloads a model only when its Download button is pressed', () =
   const page = read('apps/desktop/src/App.vue');
   const asks = [...page.matchAll(/invoke\("download_model"/g)];
   assert.equal(asks.length, 1, 'the page asks Rust for a download in one place');
-  // It is called from the first-run picker, and from Settings.
-  const calls = [...page.matchAll(/\bdownload\(/g)].map((match) => page.slice(match.index - 30, match.index));
+  // It is called from the first-run picker, and from install(), which only
+  // the Install buttons call.
+  const calls = [...page.matchAll(/\bdownload\(/g)].map((match) => page.slice(match.index - 60, match.index));
   assert.deepEqual(
-    calls.map((before) => /async function $|@click="$/.test(before)),
+    calls.map((before) => /async function $|@click="$|function install\(maker, offer\) \{\n {2}if \(!\(await $/.test(before)),
     [true, true, true],
-    'download() is defined once and called only from a button',
+    'download() is defined once and called only from a button or from install()',
+  );
+  const installs = [...page.matchAll(/\binstall\(/g)].map((match) => page.slice(match.index - 30, match.index));
+  assert.deepEqual(
+    installs.map((before) => /async function $|@click="$/.test(before)),
+    [true, true],
+    'install() is defined once and called only from a button',
   );
   assert.match(page, /\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer shows its size');
   assert.match(page, />\s*Download\s*</, 'each offer has a Download button');
@@ -430,13 +443,13 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   // model is whole.
   const page = read('apps/desktop/src/App.vue');
   const download = page.match(/\nasync function download\(offer\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
-  assert.match(download, /^\s*if \(downloading\.value\) return;/, 'download() does nothing while one is running');
+  assert.match(download, /^\s*if \(downloading\.value\) return false;/, 'download() does nothing while one is running');
   assert.match(download, /invoke\("download_model", \{ id: offer\.id, onProgress: channel \}\)/, 'Rust is told which model, and reports its progress');
   assert.match(download, /if \(report\.stopped\) stoppedNote\.value = `The download of \$\{offer\.name\} stopped, and none of it was kept\.`;/, 'a stopped download says so');
   assert.match(
     download,
     /if \(report\.whole\) await Promise\.all\(\[checkEngine\(\), readMakers\(\)\]\);/,
-    'a whole model starts the engine, and Settings shows it on this computer',
+    'a whole model starts the engine, and the Installers page shows it on this computer',
   );
   assert.match(download, /catch \(error\) \{\n\s*problem\.value = String\(error\);/, 'a download that fails says why');
   const cancel = page.match(/\nasync function cancelDownload\(\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
@@ -454,8 +467,8 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16}<\/li>/)?.[0] ?? '';
   assert.match(
     listed,
-    /v-else-if="maker\.picked && entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="Boolean\(downloading\) \|\| !gate"\s*\n\s*@click="download\(entry\.offer\)"/,
-    'in Settings too, and only for a picked maker\'s model that is not here yet',
+    /v-else-if="entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="makersLocked \|\| !gate"\s*\n\s*@click="install\(maker\.name, entry\.offer\)"/,
+    'Install is off there too, and shows only for a model that is not here yet',
   );
   assert.match(listed, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it there too');
   assert.match(
@@ -464,7 +477,7 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
     'the first-run picker offers to turn the gate on',
   );
   assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
-  assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed, under Settings too');
+  assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed, on the Installers page too');
 });
 
 test('the saved chats are listed newest first, and read "Today" and "Yesterday" at any hour', () => {
@@ -638,7 +651,7 @@ test('the stand-in picks the makers as the app does before the person picks', ()
   );
 });
 
-test('the stand-in answers the seven calls the pictures need, and refuses the rest', async () => {
+test('the stand-in answers the eight calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -679,8 +692,18 @@ test('the stand-in answers the seven calls the pictures need, and refuses the re
   // The outbound gate is off, as on a first run, and the pictures leave it so.
   assert.equal(await invoke('gate_status'), false);
 
+  // Grok is not added, and comes in the fields outside.rs gives the page.
+  assert.deepEqual(plain(await invoke('outside_status')), GROK_NOT_ADDED);
+  const [, grokBody] = read(OUTSIDE).match(/pub struct OutsideStatus \{\n([^}]+)\}/) ?? [];
+  assert.deepEqual(
+    Object.keys(GROK_NOT_ADDED),
+    [...(grokBody ?? '').matchAll(/^\s*(?:pub )?(\w+):/gm)].map(([, field]) => field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())),
+    'the stand-in gives Grok in the fields outside.rs has',
+  );
+  assert.ok(read(OUTSIDE).includes(`pub const XAI_HOST: &str = "${GROK_NOT_ADDED.host}";`), 'the stand-in gives Grok a host outside.rs does not ask');
+
   // A call that would send, save, trash, or download has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers']) {
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

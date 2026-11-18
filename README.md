@@ -42,9 +42,13 @@ Select a picture to open it full size.
 | ---------- | ------------------- |
 | [![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 picked among the models at the top, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](docs/screenshots/new-chat.png)](docs/screenshots/new-chat.png?raw=true) | [![The app in the light theme with no engine answering: a red dot, the three models already on this computer, the reason the app did not start the engine, the command that starts one by hand, a Try again button, a green dot for the stack, and the message box turned off](docs/screenshots/engine-off.png)](docs/screenshots/engine-off.png?raw=true) |
 
-| The first run: pick makers, then a model | Settings: add or remove a maker |
-| ---------------------------------------- | ------------------------------- |
-| [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
+| The first run: pick makers, then a model | The Installers page: any model in one click |
+| ---------------------------------------- | ------------------------------------------- |
+| [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and Grok, are on the Installers page](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![The Installers page in the dark theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate, and Outside engines below](docs/screenshots/installers.png)](docs/screenshots/installers.png?raw=true) |
+
+| Settings: add or remove a maker |
+| ------------------------------- |
+| [![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -58,8 +62,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 
 - **A short list, on purpose.** It knows five models, one each from Microsoft,
   OpenAI, NVIDIA, Google, and Meta. It shows the models of the makers you
-  pick: Microsoft to begin with, and any others you tick on a first run or
-  add in Settings with one click. A model that is not on the list is never
+  pick: Microsoft to begin with, and any others you tick on a first run, add
+  in Settings, or install from the Installers page, each with one click. A model that is not on the list is never
   shown and never accepted, even when the engine holds it. Ollama's library
   is far larger, and open to models from many makers.
 - **Local first, behind a gate.** A chat needs nothing outside your
@@ -68,13 +72,13 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   listens on this computer only, and is told to stay offline. Everything
   else waits for the outbound gate, a switch at the foot of the window that
   is off until you turn it on; turning it off stops what is under way. With
-  the gate on, the app reaches out in four places. On a first run or in
-  Settings, Download brings the model you pick from Hugging Face, over https
-  and from nowhere else. The first time it starts the stack, Docker downloads the stack's
+  the gate on, the app reaches out in four places. On a first run or on the
+  Installers page, Download or Install brings the model you pick from Hugging
+  Face, over https and from nowhere else. The first time it starts the stack, Docker downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
   out. Nothing you type goes with any of these three. The fourth is Grok:
-  once you add it in Settings, with the path to a file that holds your own
+  once you add it on the Installers page, with the path to a file that holds your own
   xAI key, a question you ask Grok goes to xAI's API, over https and to
   nowhere else, with the key. When Grok grades, the question and every
   answer go too, those from this computer included. The key stays in its
@@ -105,7 +109,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads only the five on its list: one on a first
-  run, and the others from Settings once their maker is picked.
+  run, and any of the others from the Installers page with one click.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
   a model.
@@ -212,8 +216,8 @@ brings the one you pick from Hugging Face; the app then starts the engine
 with it. The gate stays as you leave it, and a chat works with it on or off.
 
 To ask Grok, by xAI, put your xAI key alone in a file, such as
-`~/.config/xai/key`, readable only by you. In Settings, under Outside
-engines, give the path to that file and click Add. With the gate on, the app
+`~/.config/xai/key`, readable only by you. On the Installers page, under
+Outside engines, give the path to that file and click Add. With the gate on, the app
 finds Grok's models, and they join the ones at the top of the window, marked
 online. The app keeps the path, never the key, and Remove forgets the path
 and leaves the file as it is.
@@ -225,10 +229,14 @@ Grading picks another model to grade, or No grading. A grade by Grok sends
 xAI the question and every answer, so a grade by a model on this computer
 keeps it all here.
 
-Settings, above Check for updates, adds or removes a maker with one click,
-and downloads any of a picked maker's models that are not on the computer
-yet. Removing a maker hides its models and deletes nothing: they stay on the
-computer, and saved chats still name them. One maker always stays picked.
+The Installers page, at the foot of the window above Settings, lists every
+model on the app's list, whoever made it. With the gate on, Install brings
+the one you pick from Hugging Face and adds its maker, so the model shows at
+the top of the window. A model already on the computer whose maker is not
+added has a Show button instead. Settings adds or removes a maker with one
+click. Removing a maker hides its models and deletes nothing: they stay on
+the computer, and saved chats still name them. One maker always stays
+picked.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
