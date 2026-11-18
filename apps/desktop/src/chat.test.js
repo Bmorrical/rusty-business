@@ -549,12 +549,14 @@ const GROK_UNKNOWN = { id: "xai:grok-mini", name: "Grok Mini", maker: "xAI", con
 // gives no windows, so a GPT model's is never known.
 const OPENAI_GPT = { id: "openai:gpt-5", name: "GPT-5", maker: "OpenAI", context: 0 };
 const CLAUDE = { id: "anthropic:claude-opus-5-5", name: "Claude Opus 5.5", maker: "Anthropic", context: 1_000_000 };
+const GEMINI = { id: "google:gemini-3.5-flash", name: "Gemini 3.5 Flash", maker: "Google", context: 1_048_576 };
 
 test("the outside engines' models are told apart from the models on this computer", () => {
-  assert.deepEqual(OUTSIDE_PREFIXES, ["xai:", "openai:", "anthropic:"]);
+  assert.deepEqual(OUTSIDE_PREFIXES, ["xai:", "openai:", "anthropic:", "google:"]);
   assert.ok(isOutside(GROK.id));
   assert.ok(isOutside(OPENAI_GPT.id));
   assert.ok(isOutside(CLAUDE.id));
+  assert.ok(isOutside(GEMINI.id));
   for (const id of [
     "microsoft/phi-4",
     "",
@@ -563,13 +565,18 @@ test("the outside engines' models are told apart from the models on this compute
     "grok-4",
     "gpt-5",
     "claude-opus-5-5",
+    "gemini-3.5-flash",
+    "google/gemma-4-26b",
     "local/xai:grok",
     "local/openai:gpt-5",
     "local/anthropic:claude",
+    "local/google:gemini",
     "openai",
     "anthropic",
+    "google",
     "OPENAI:gpt-5",
     "Anthropic:claude-opus-5-5",
+    "Google:gemini-3.5-flash",
   ]) {
     assert.equal(isOutside(id), false, `${id} read as an outside engine's`);
   }
@@ -581,6 +588,8 @@ test("a chip says when a model is asked online", () => {
   // A window xAI did not give is left out, not shown as 0K.
   assert.equal(chipDetail(GROK_UNKNOWN), "xAI · online");
   assert.equal(chipDetail(OPENAI_GPT), "OpenAI · online");
+  // Google counts Gemini's window in powers of two, 1,048,576, as 1M.
+  assert.equal(chipDetail(GEMINI), "Google · online · 1M");
 });
 
 test("an outside engine can answer alone, even when its window is not known", () => {
@@ -763,12 +772,15 @@ test("the page names the model behind each answer the grader numbered", () => {
 test("the first outside engine grades until another model is picked, and none when No grading is", () => {
   const phi = { id: PHI, name: "Phi-4" };
   assert.equal(graderFor(null, [phi, GROK, GROK_UNKNOWN]), GROK);
-  // In the Installers page's order: Grok's first, then GPT's, then Claude's.
-  assert.equal(graderFor(null, [phi, GROK, OPENAI_GPT, CLAUDE]), GROK);
+  // In the Installers page's order: Grok's first, then GPT's, Claude's, and
+  // Gemini's.
+  assert.equal(graderFor(null, [phi, GROK, OPENAI_GPT, CLAUDE, GEMINI]), GROK);
   assert.equal(graderFor(null, [phi, OPENAI_GPT, CLAUDE]), OPENAI_GPT, "GPT does not grade when Grok is not on hand");
-  assert.equal(graderFor(null, [phi, CLAUDE]), CLAUDE, "Claude does not grade when it is the only outside engine on hand");
+  assert.equal(graderFor(null, [phi, CLAUDE, GEMINI]), CLAUDE, "Claude does not grade when Grok and GPT are not on hand");
+  assert.equal(graderFor(null, [phi, GEMINI]), GEMINI, "Gemini does not grade when it is the only outside engine on hand");
   assert.equal(graderFor(OPENAI_GPT.id, [phi, GROK, OPENAI_GPT]), OPENAI_GPT);
   assert.equal(graderFor(CLAUDE.id, [phi, GROK, OPENAI_GPT, CLAUDE]), CLAUDE, "Claude does not grade when picked");
+  assert.equal(graderFor(GEMINI.id, [phi, GROK, GEMINI]), GEMINI, "Gemini does not grade when picked");
   assert.equal(graderFor(undefined, [phi]), null, "a model on this computer grades without being picked");
   assert.equal(graderFor("", [phi, GROK]), null, "No grading still grades");
   assert.equal(graderFor(PHI, [phi, GROK]), phi);

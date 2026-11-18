@@ -20,7 +20,8 @@ A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. It is local first: a chat
 with a model here needs nothing from outside, and nothing leaves the computer
 until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
-OpenAI, and Claude, by Anthropic, can answer too, each with your own key.
+OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
+with your own key.
 
 **Status:** version 0.5.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
@@ -78,10 +79,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
   out. Nothing you type goes with any of these three. The fourth is the
-  outside engines, Grok, GPT, and Claude: once you add one on the Installers
+  outside engines, Grok, GPT, Claude, and Gemini: once you add one on the Installers
   page, with the path to a file that holds your own key, a question you ask it
-  goes to its maker's API, xAI's for Grok, OpenAI's for GPT, and Anthropic's
-  for Claude, over https and to
+  goes to its maker's API, xAI's for Grok, OpenAI's for GPT, Anthropic's
+  for Claude, and Google's for Gemini, over https and to
   nowhere else, with that key. When one grades, the question and every
   answer go too, those from this computer included. Each key stays in its
   file and never reaches the page. There is no account and no sign-in. Ollama keeps your prompts on
@@ -93,11 +94,11 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 - **One question, several models.** Pick one model or more at the top of
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time. Grok,
-  GPT, and Claude, once added, can be among them, or answer alone.
+  GPT, Claude, and Gemini, once added, can be among them, or answer alone.
 - **Answers graded and summed up.** Once every answer is in, one model grades
   each from A to F and sums them up. It reads the question and the answers,
   numbered and without the models' names. An outside engine grades, Grok
-  first, then GPT, then Claude, until you pick another model, or No grading,
+  first, then GPT, then Claude, then Gemini, until you pick another model, or No grading,
   in Settings.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
@@ -118,7 +119,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   a model.
 - **Models that run in the cloud.** Ollama offers them, for a model larger
   than your computer can hold. Rusty Business™ runs only what your computer
-  can, and asks three engines outside it, Grok, GPT, and Claude, each with
+  can, and asks four engines outside it, Grok, GPT, Claude, and Gemini, each with
   your own key.
 - **Pictures and files.** Ollama's app takes images and dropped files. Rusty
   Business™ takes words.
@@ -144,8 +145,8 @@ run models on your own computer. Here are the three side by side.
 | Runs a model on | A Mac with Apple silicon; Windows and Linux get the window, with no engine yet | macOS, Windows, and Linux | macOS, Windows, and Linux |
 | How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
 | What does the work | Apple silicon's GPU, through MLX | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
-| Models | Five, on a fixed list, from the makers you pick; any other is refused. Grok, by xAI, GPT, by OpenAI, and Claude, by Anthropic, each with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
-| A model too big for memory | Not run here; Grok, GPT, or Claude, with your own key, answers from its maker's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
+| Models | Five, on a fixed list, from the makers you pick; any other is refused. Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and Gemini, by Google, each with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
+| A model too big for memory | Not run here; Grok, GPT, Claude, or Gemini, with your own key, answers from its maker's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
 | For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
 | Pictures and files | Words only | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
@@ -224,16 +225,17 @@ To ask Grok, by xAI, put your xAI key alone in a file, such as
 Outside engines, give the path to that file and click Add. With the gate on, the app
 finds Grok's models, and they join the ones at the top of the window, marked
 online. The app keeps the path, never the key, and Remove forgets the path
-and leaves the file as it is. GPT, by OpenAI, and Claude, by Anthropic, are
-added the same way, each on its own card, with its maker's key in a file of
-its own, such as `~/.config/openai/key` or `~/.config/anthropic/key`. Each key
-goes only to its own maker.
+and leaves the file as it is. GPT, by OpenAI, Claude, by Anthropic, and
+Gemini, by Google, are added the same way, each on its own card, with its
+maker's key in a file of its own, such as `~/.config/openai/key`,
+`~/.config/anthropic/key`, or `~/.config/google/key`. Each key goes only to
+its own maker.
 
 When several models answer, an outside engine grades their answers once all
-are in, Grok first, then GPT, then Claude: a letter under each, and a summary
+are in, Grok first, then GPT, then Claude, then Gemini: a letter under each, and a summary
 below them. The grader sees the answers by number only; the page puts each
 model's name after its number. In Settings, Grading picks another model to
-grade, or No grading. A grade by Grok, GPT, or Claude sends its maker the
+grade, or No grading. A grade by Grok, GPT, Claude, or Gemini sends its maker the
 question and every answer, so a grade by a model on this computer keeps it all
 here.
 
@@ -432,9 +434,8 @@ next.
 - **One model at a time on this computer.** The engine holds one model, so
   when several answer, they take turns, and each answer waits for the ones
   before it.
-- **Three engines outside this computer.** Grok, by xAI, GPT, by OpenAI, and
-  Claude, by Anthropic, so far. (On the roadmap: Gemini, outside this
-  computer.) The app asks Grok through the chat API that xAI now calls
+- **Four engines outside this computer.** Grok, by xAI, GPT, by OpenAI,
+  Claude, by Anthropic, and Gemini, by Google, so far. The app asks Grok through the chat API that xAI now calls
   legacy. (On the roadmap: Grok through xAI's newer API.)
 - **A grade reads one question.** The grader reads the question and its
   answers, not the chat before them.

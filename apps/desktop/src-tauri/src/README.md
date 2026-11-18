@@ -12,7 +12,7 @@ The desktop app's Rust code.
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
-| `outside.rs`  | The engines outside this computer, Grok, GPT, and Claude: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, or Anthropic's API through the gate |
+| `outside.rs`  | The engines outside this computer, Grok, GPT, Claude, and Gemini: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, Anthropic's, or Google's API through the gate |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
@@ -89,8 +89,8 @@ Five more live in `update.rs`, each with tests:
   why it failed; the checks at open and once a day show nothing. The app
   downloads and installs nothing itself.
 
-Five more live in `outside.rs`, each with tests, for Grok, GPT, and Claude
-alike:
+Five more live in `outside.rs`, each with tests, for Grok, GPT, Claude, and
+Gemini alike:
 
 - A key never leaves Rust. The app keeps only the path to its file, and
   the page, a log, an error, and a saved chat never hold a key. A key
@@ -99,7 +99,8 @@ alike:
   Turning the gate off stops an engine part way through, whether it is
   finding models or answering.
 - Each engine is asked only at its maker's API, xAI's for Grok, OpenAI's
-  for GPT, and Anthropic's for Claude, at an address fixed in the code,
+  for GPT, Anthropic's for Claude, and Google's for Gemini, at an address
+  fixed in the code,
   over https, with no proxy and no redirect, and an answer from anywhere
   else is refused.
 - Only the models an engine's own list gave are asked of it, and a model
