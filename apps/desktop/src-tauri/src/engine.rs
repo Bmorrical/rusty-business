@@ -7,8 +7,8 @@
 //! same two calls. Nothing above this file knows the difference.
 //!
 //! Three rules live here:
-//! - prompts never leave the computer (loopback addresses only, no proxy, no
-//!   redirects);
+//! - a prompt to the engine never leaves the computer (loopback addresses
+//!   only, no proxy, no redirects), so a chat needs no outbound gate;
 //! - only models on the list below are offered or accepted;
 //! - a model's thinking is separated from its answer, so the window never
 //!   shows raw markers.

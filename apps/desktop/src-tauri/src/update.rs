@@ -26,6 +26,10 @@
 //   the next one tries again.
 // - The app downloads and installs nothing itself. The browser downloads the
 //   file, and the person installs it, as the first time.
+// - Nothing is asked while the outbound gate is off ("off by default,
+//   everything stops"), and turning it off stops a check under way. Check for
+//   updates then says so: "for update, it should tell them to enable the gate
+//   to check for updates." Download and Release notes wait for it too.
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -34,6 +38,8 @@ use std::time::Duration;
 
 use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+
+use crate::gate::Gate;
 
 /// The repository whose releases the app follows.
 const REPOSITORY: &str = "Bmorrical/rusty-business";
@@ -261,19 +267,25 @@ fn on_releases(url: &reqwest::Url) -> bool {
         && url.fragment().is_none()
 }
 
-/// The one client the check uses. It sends no account, token, or cookie,
-/// and follows no redirect.
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .https_only(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .referer(false)
-        .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(CONNECT_WAIT)
-        .timeout(WHOLE_WAIT)
-        .build()
-        .map_err(|error| format!("Could not set up the connection: {error}"))
+/// What Check for updates says while the outbound gate is off.
+const GATE_OFF: &str = "The gate is off. Turn it on to check for updates.";
+
+/// What Download and Release notes say while the outbound gate is off.
+const GATE_OFF_OPEN: &str = "The gate is off. Turn it on to open the download.";
+
+/// The one client the check uses, through the outbound gate. It sends no
+/// account, token, or cookie, and follows no redirect.
+fn client(gate: &Gate) -> Result<reqwest::Client, String> {
+    gate.client(GATE_OFF, |builder| {
+        builder
+            .no_proxy()
+            .https_only(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .referer(false)
+            .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_WAIT)
+            .timeout(WHOLE_WAIT)
+    })
 }
 
 /// An answer, read up to `most` bytes and no further.
@@ -323,6 +335,16 @@ async fn ask(client: reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     read_capped(chunks, MOST_BYTES).await
 }
 
+/// GitHub's answer, while the outbound gate stays on. Turning it off stops
+/// the check where it is.
+async fn ask_through(gate: &Gate, url: &str) -> Result<Vec<u8>, String> {
+    let client = client(gate)?;
+    tokio::select! {
+        answer = ask(client, url) => answer,
+        () = gate.closed() => Err(GATE_OFF.to_string()),
+    }
+}
+
 /// The new version the last check found, so the page never has to give an
 /// address.
 #[derive(Default)]
@@ -343,20 +365,15 @@ impl Updates {
     }
 }
 
-/// Asks GitHub whether a new version is out. A check that fails keeps what
-/// the last one found and answers why, which the Check for updates button
-/// shows and the other checks let pass.
+/// Asks GitHub whether a new version is out, unless the outbound gate is
+/// off. A check that fails keeps what the last one found and answers why,
+/// which the Check for updates button shows and the other checks let pass.
 #[tauri::command]
-pub async fn check_update(updates: tauri::State<'_, Updates>) -> Result<Option<Update>, String> {
+pub async fn check_update(updates: tauri::State<'_, Updates>, gate: tauri::State<'_, Gate>) -> Result<Option<Update>, String> {
     let Some(download) = this_download() else {
         return Ok(None);
     };
-    let checked = match client() {
-        Ok(client) => ask(client, &latest_url())
-            .await
-            .map(|answer| update_from(env!("CARGO_PKG_VERSION"), &answer, download)),
-        Err(error) => Err(error),
-    };
+    let checked = ask_through(&gate, &latest_url()).await.map(|answer| update_from(env!("CARGO_PKG_VERSION"), &answer, download));
     updates.keep(checked)
 }
 
@@ -399,12 +416,21 @@ fn browser(url: &reqwest::Url) -> Command {
     command
 }
 
-/// Opens the new version's file or notes in the browser. The page names only
-/// which, never an address.
-#[tauri::command]
-pub fn open_update(part: Part, updates: tauri::State<'_, Updates>) -> Result<(), String> {
+/// The address to open for the part asked for, only while the outbound gate
+/// is on and a new version has been found.
+fn to_open(part: Part, updates: &Updates, gate: &Gate) -> Result<reqwest::Url, String> {
+    if !gate.is_open() {
+        return Err(GATE_OFF_OPEN.to_string());
+    }
     let update = updates.found().ok_or_else(|| "No new version has been found.".to_string())?;
-    let url = address(&update, part)?;
+    address(&update, part)
+}
+
+/// Opens the new version's file or notes in the browser, unless the outbound
+/// gate is off. The page names only which, never an address.
+#[tauri::command]
+pub fn open_update(part: Part, updates: tauri::State<'_, Updates>, gate: tauri::State<'_, Gate>) -> Result<(), String> {
+    let url = to_open(part, &updates, &gate)?;
     let mut child = browser(&url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -615,7 +641,7 @@ mod tests {
     }
 
     fn client_for_test() -> reqwest::Client {
-        client().unwrap()
+        client(&Gate::at(true)).unwrap()
     }
 
     #[test]
@@ -687,6 +713,49 @@ mod tests {
         assert_eq!(updates.found(), None);
     }
 
+    // Brad, 2026-11-17: "off by default, everything stops", and "for update,
+    // it should tell them to enable the gate to check for updates."
+    #[test]
+    fn with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let error = block_on(ask_through(&Gate::at(false), &format!("https://127.0.0.1:{port}/repos"))).unwrap_err();
+        assert_eq!(error, "The gate is off. Turn it on to check for updates.");
+        assert_eq!(error, GATE_OFF);
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "the check went out with the gate off");
+        assert!(GATE_OFF.contains("Turn it on") && GATE_OFF.contains("check for updates"));
+
+        // A version found while the gate was on is not opened once it is off.
+        let updates = Updates::default();
+        updates.keep(Ok(update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Mac))).unwrap();
+        for part in [Part::Download, Part::Notes] {
+            assert_eq!(to_open(part, &updates, &Gate::at(false)).unwrap_err(), "The gate is off. Turn it on to open the download.");
+            assert!(on_releases(&to_open(part, &updates, &Gate::at(true)).unwrap()), "{part:?}");
+        }
+        assert_eq!(to_open(Part::Notes, &Updates::default(), &Gate::at(true)).unwrap_err(), "No new version has been found.");
+    }
+
+    #[test]
+    fn turning_the_gate_off_stops_a_check_under_way() {
+        // A stand-in that takes the connection and never answers.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let held = std::thread::spawn(move || listener.accept().map(|(stream, _)| stream));
+        let gate = Gate::at(true);
+        let switch = gate.clone();
+        let started = std::time::Instant::now();
+        let turned_off = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = switch.set(false);
+        });
+        let error = block_on(ask_through(&gate, &format!("https://127.0.0.1:{port}/repos"))).unwrap_err();
+        assert_eq!(error, GATE_OFF);
+        assert!(started.elapsed() < CONNECT_WAIT, "the check ran on after the gate was turned off");
+        turned_off.join().unwrap();
+        drop(held.join().unwrap());
+    }
+
     #[test]
     fn too_many_checks_are_said_plainly() {
         let busy = "GitHub has had too many checks from this network for now. Try again later.";
@@ -699,7 +768,7 @@ mod tests {
     #[test]
     #[ignore = "asks GitHub itself; run with --ignored"]
     fn github_answers_the_check() {
-        let answer = block_on(ask(client().unwrap(), &latest_url())).unwrap();
+        let answer = block_on(ask(client_for_test(), &latest_url())).unwrap();
         let found = update_from("0.0.1", &answer, Download::Mac).expect("the newest release has the .dmg");
         assert!(version(&found.version).unwrap() > [0, 0, 1]);
         assert_eq!(found.file, MAC);

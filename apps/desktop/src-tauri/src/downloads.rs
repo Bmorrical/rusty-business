@@ -5,7 +5,7 @@
 //! the models folder the engine reads. The engine lists it the next time it is
 //! asked, so nothing needs a restart.
 //!
-//! Five rules live here:
+//! Six rules live here:
 //! - only a model on the app's list is downloaded, at the revision pinned in
 //!   `pinned-models.json`, and only the files listed there;
 //! - only from Hugging Face, over https: a redirect anywhere else is refused,
@@ -14,7 +14,9 @@
 //!   throws the whole download away;
 //! - the models folder is only added to: a finished model moves in whole, and
 //!   only where there is no folder for it yet;
-//! - one download at a time, and Cancel stops it and leaves nothing behind.
+//! - one download at a time, and Cancel stops it and leaves nothing behind;
+//! - nothing is asked for while the outbound gate is off, and turning it off
+//!   stops a download as Cancel does, then says why.
 //!
 //! A download is put together in the app's own folder, beside `sessions`, and
 //! moves into the models folder in one step once every file has been checked.
@@ -35,6 +37,7 @@ use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::gate::Gate;
 use crate::{engine, models};
 
 /// Where the app downloads from.
@@ -357,19 +360,26 @@ fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-/// The one client downloads use. It sends no account, token, or cookie: no
-/// such thing is ever added to a request here, and it keeps no cookies.
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .https_only(true)
-        .redirect(redirect_policy())
-        .referer(false)
-        .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(CONNECT_WAIT)
-        .read_timeout(READ_WAIT)
-        .build()
-        .map_err(|error| format!("Could not set up the connection: {error}"))
+/// What Download says while the outbound gate is off.
+const GATE_OFF: &str = "The gate is off. Turn it on to download a model.";
+
+/// What a download says when the gate is turned off part way.
+const GATE_TURNED_OFF: &str = "The gate was turned off, so the download stopped.";
+
+/// The one client downloads use, through the outbound gate. It sends no
+/// account, token, or cookie: no such thing is ever added to a request here,
+/// and it keeps no cookies.
+fn client(gate: &Gate) -> Result<reqwest::Client, String> {
+    gate.client(GATE_OFF, |builder| {
+        builder
+            .no_proxy()
+            .https_only(true)
+            .redirect(redirect_policy())
+            .referer(false)
+            .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_WAIT)
+            .read_timeout(READ_WAIT)
+    })
 }
 
 fn file_url(pin: &Pinned, file: &PinnedFile) -> String {
@@ -666,20 +676,44 @@ impl Downloads {
     }
 }
 
+/// A download while the outbound gate stays on. Each file is asked for only
+/// while it is on, and a download stopped by turning it off says so.
+async fn download_through(
+    downloads: &Downloads,
+    gate: &Gate,
+    id: &str,
+    pins: &[Pinned],
+    hub: Option<PathBuf>,
+    mut open: impl FnMut(String) -> Opening,
+    report: impl FnMut(Progress),
+) -> Result<DownloadReport, String> {
+    if !gate.is_open() {
+        return Err(GATE_OFF.to_string());
+    }
+    let watching = gate.clone();
+    let gated = move |url: String| -> Opening { if watching.is_open() { open(url) } else { Box::pin(async { Err(GATE_TURNED_OFF.to_string()) }) } };
+    let done = downloads.download(id, pins, hub, gated, report).await?;
+    if done.stopped && !gate.is_open() {
+        return Err(GATE_TURNED_OFF.to_string());
+    }
+    Ok(done)
+}
+
 #[tauri::command]
 pub async fn download_model(
     downloads: tauri::State<'_, Downloads>,
+    gate: tauri::State<'_, Gate>,
     id: String,
     on_progress: Channel<Progress>,
 ) -> Result<DownloadReport, String> {
     let home = std::env::home_dir();
     let hub = models::hub_folder(|name| std::env::var(name).ok(), home.as_deref());
-    let client = client()?;
+    let client = client(&gate)?;
     let open = move |url: String| open_url(client.clone(), url);
     let report = move |progress: Progress| {
         let _ = on_progress.send(progress);
     };
-    downloads.download(&id, &PINNED, hub, open, report).await
+    download_through(&downloads, &gate, &id, &PINNED, hub, open, report).await
 }
 
 #[tauri::command]
@@ -758,6 +792,11 @@ mod tests {
                 Ok(Box::pin(futures_util::stream::iter(parts)) as Chunks)
             })
         }
+    }
+
+    /// The app's own client, with the gate on.
+    fn open_client() -> reqwest::Client {
+        client(&Gate::at(true)).unwrap()
     }
 
     fn never_asked() -> (Arc<Mutex<Vec<String>>>, impl FnMut(String) -> Opening) {
@@ -1039,7 +1078,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let callers = answer_at(listener, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string());
-        let error = block_on(client().unwrap().get(format!("http://127.0.0.1:{port}/")).send()).unwrap_err();
+        let error = block_on(open_client().get(format!("http://127.0.0.1:{port}/")).send()).unwrap_err();
         assert!(error.is_builder(), "{error:?}");
         thread::sleep(Duration::from_millis(100));
         assert_eq!(callers.load(Ordering::SeqCst), 0);
@@ -1048,11 +1087,9 @@ mod tests {
     #[test]
     fn the_apps_client_uses_no_proxy_and_the_redirect_rule_and_sends_no_referer() {
         // A client cannot be asked how it was built, so this reads the builder.
-        let built = include_str!("downloads.rs")
-            .split_once("fn client()")
-            .and_then(|(_, rest)| rest.split_once(".build()"))
-            .expect("the app's client")
-            .0;
+        let built =
+            include_str!("downloads.rs").split_once("fn client(gate: &Gate)").and_then(|(_, rest)| rest.split_once("\n}\n")).expect("the app's client").0;
+        assert!(built.contains("gate.client(GATE_OFF,"), "the client does not go through the gate: {built}");
         for setting in [".no_proxy()", ".https_only(true)", ".redirect(redirect_policy())", ".referer(false)"] {
             assert!(built.contains(setting), "{setting} is missing from: {built}");
         }
@@ -1245,6 +1282,64 @@ mod tests {
         assert!(everything_in(&place.staging).is_empty());
     }
 
+    // Brad, 2026-11-17: "there is a hard switch / circuit breaker to hard stop
+    // all outbound communication", and "off by default, everything stops".
+    #[test]
+    fn with_the_gate_off_nothing_is_downloaded() {
+        let place = place();
+        let files = files();
+        let pins = vec![pin_for(PHI, &files)];
+        let (asked, open) = never_asked();
+        let error = block_on(download_through(&place.downloads, &Gate::at(false), PHI, &pins, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        assert_eq!(error, "The gate is off. Turn it on to download a model.");
+        assert_eq!(client(&Gate::at(false)).unwrap_err(), GATE_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&place.hub).is_empty());
+        assert!(everything_in(&place.staging).is_empty());
+    }
+
+    #[test]
+    fn turning_the_gate_off_stops_a_download_and_says_why() {
+        let files = files();
+        let pins = vec![pin_for(PHI, &files)];
+        // As the switch does: the gate turns off, and the download is stopped.
+        let first = place();
+        let gate = Gate::at(true);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let switch = gate.clone();
+        let turn_off = |_| {
+            let _ = switch.set(false);
+            first.downloads.stop();
+        };
+        let error = block_on(download_through(&first.downloads, &gate, PHI, &pins, Some(first.hub.clone()), serving(files.clone(), asked.clone()), turn_off))
+            .unwrap_err();
+        assert_eq!(error, GATE_TURNED_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&first.hub).is_empty());
+        assert!(everything_in(&first.staging).is_empty());
+        assert!(first.downloads.slot().is_none(), "the slot is free again");
+
+        // Even unheard, the next file is not asked for.
+        let second = place();
+        let gate = Gate::at(true);
+        let switch = gate.clone();
+        let error = block_on(download_through(&second.downloads, &gate, PHI, &pins, Some(second.hub.clone()), serving(files, asked.clone()), |_| {
+            let _ = switch.set(false);
+        }))
+        .unwrap_err();
+        assert_eq!(error, GATE_TURNED_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&second.staging).is_empty());
+
+        // Cancel with the gate on is still a plain stop.
+        let third = place();
+        let report = block_on(download_through(&third.downloads, &Gate::at(true), PHI, &pins, Some(third.hub.clone()), never_asked().1, |_| {
+            third.downloads.stop();
+        }))
+        .unwrap();
+        assert_eq!(report, DownloadReport { whole: false, stopped: true });
+    }
+
     #[test]
     fn one_download_at_a_time() {
         let place = place();
@@ -1422,7 +1517,7 @@ mod tests {
     #[test]
     #[ignore = "reaches Hugging Face"]
     fn the_small_pinned_files_match_hugging_face() {
-        let client = client().unwrap();
+        let client = open_client();
         let (_keep, mut cancel) = watch::channel(false);
         for pin in PINNED.iter() {
             let folder = scratch();
@@ -1450,7 +1545,7 @@ mod tests {
         let to = PathBuf::from(std::env::var("RUSTY_DOWNLOAD_TO").expect("RUSTY_DOWNLOAD_TO names an empty folder"));
         let hub = to.join("hub");
         let downloads = Downloads::new(to.join("downloads"));
-        let client = client().unwrap();
+        let client = open_client();
         let started = Instant::now();
         let mut last = Instant::now();
         let report = block_on(downloads.download(PHI, &PINNED, Some(hub.clone()), move |url| open_url(client.clone(), url), |progress| {

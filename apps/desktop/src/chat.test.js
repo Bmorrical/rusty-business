@@ -11,6 +11,7 @@ import {
   formatSize,
   formatWindow,
   fullness,
+  gateLine,
   onDiskLine,
   quickest,
   requestMessages,
@@ -318,4 +319,14 @@ test("Check for updates says what it found", () => {
 
 test("the page asks once a day while it stays open", () => {
   assert.equal(UPDATE_EVERY, 86_400_000);
+});
+
+// Brad, 2026-11-17: "there is a hard switch / circuit breaker to hard stop all
+// outbound communication, user can turn it on to use their inference." Then:
+// "off by default, everything stops".
+test("the gate's line says what off and on mean", () => {
+  assert.equal(gateLine(false), "Gate off. Nothing leaves this computer.");
+  assert.equal(gateLine(true), "Gate on. The app may go online to check for updates, download models, and start the stack.");
+  // Anything but a plain yes reads as off.
+  for (const open of [undefined, null, 0, ""]) assert.equal(gateLine(open), gateLine(false));
 });
