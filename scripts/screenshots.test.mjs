@@ -31,6 +31,7 @@ import {
   titleFrom,
 } from '../apps/desktop/src/chat.js';
 import {
+  FIRST_MAKER,
   HEIGHT,
   NOT_STARTED,
   NO_MODEL,
@@ -41,6 +42,10 @@ import {
   engineFor,
   engineOff,
   firstRun,
+  forMakers,
+  makersOf,
+  makersStatus,
+  pickedAtFirst,
   sessionsFrom,
   standIn,
 } from './screenshots.mjs';
@@ -54,6 +59,7 @@ const ENGINE = 'apps/desktop/src-tauri/src/engine.rs';
 const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 const STACK = 'apps/desktop/src-tauri/src/stack.rs';
 const PINNED = 'apps/desktop/src-tauri/pinned-models.json';
+const MAKERS = 'apps/desktop/src-tauri/src/makers.rs';
 
 // The pages that show the app's pictures.
 const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
@@ -153,10 +159,14 @@ function offPanel() {
 
 /** The app's allow-list, read from the Rust source. */
 function catalog() {
-  const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", context: ([\d_]+) \}/g;
-  return [...read(ENGINE).matchAll(entry)].map(
-    ([, needle, name, maker, context]) => ({ needle, name, maker, context: Number(context.replaceAll('_', '')) }),
-  );
+  const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", license: "([^"]+)", context: ([\d_]+) \}/g;
+  return [...read(ENGINE).matchAll(entry)].map(([, needle, name, maker, license, context]) => ({
+    needle,
+    name,
+    maker,
+    license,
+    context: Number(context.replaceAll('_', '')),
+  }));
 }
 
 test('the first, wide picture is kept, and shown only in the gallery', () => {
@@ -263,6 +273,7 @@ test('each scene is a picture the script can make', () => {
     assert.ok(['light', 'dark'].includes(scene.scheme), `${scene.file} is light or dark`);
     assert.ok(['on', 'off', 'first-run'].includes(scene.engine), `${scene.file} has the engine on, off, or on a first run`);
     if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
+    if (scene.settings) assert.ok(!scene.open, `${scene.file} opens Settings, not a chat`);
     if (scene.thinking) {
       const chat = chats.find((entry) => entry.id === scene.open);
       assert.ok(
@@ -274,9 +285,11 @@ test('each scene is a picture the script can make', () => {
 });
 
 test('the recorded engine offers only models on the app\'s list', () => {
-  // Brad, on which models this project runs: "I want us only models, not
-  // meta or google". The pictures show a model picker, so what was recorded
-  // has to match the allow-list in the Rust code.
+  // The pictures show a model picker, so what was recorded has to match the
+  // allow-list in the Rust code. Brad, 2026-11-17: "user can pick google,
+  // gemini, meta from the app if they want those instead." So the list holds
+  // models from Google and Meta too, and the recording offers every model on
+  // it, so Settings can show each maker.
   const { engine, chats } = recorded();
   const allowed = catalog();
   assert.ok(allowed.length > 0, 'the allow-list was read from engine.rs');
@@ -293,12 +306,20 @@ test('the recorded engine offers only models on the app\'s list', () => {
       `${model.id} is described as the app describes it`,
     );
   }
-  // And for the models it offers to download.
+  // And for the models it offers to download, each with its license.
   for (const offer of engine.offers) {
     const entry = allowed.find((candidate) => offer.id.toLowerCase().includes(candidate.needle));
     assert.ok(entry, `${offer.id} is on the app's list`);
-    assert.deepEqual({ name: offer.name, maker: offer.maker }, { name: entry.name, maker: entry.maker });
+    assert.deepEqual(
+      { name: offer.name, maker: offer.maker, license: offer.license },
+      { name: entry.name, maker: entry.maker, license: entry.license },
+    );
   }
+  assert.deepEqual(
+    engine.offers.map((offer) => offer.name),
+    allowed.map((entry) => entry.name),
+    'every model on the list is offered, in the list\'s order',
+  );
 
   const offered = engine.models.map((model) => model.id);
   for (const chat of chats) {
@@ -309,8 +330,6 @@ test('the recorded engine offers only models on the app\'s list', () => {
       }
     }
   }
-
-  assert.doesNotMatch(read(`${FOLDER}/chats.json`), /\b(meta|google|llama|gemma|gemini)\b/i);
 });
 
 test('the recorded report has the fields the app reports, in its order', () => {
@@ -350,9 +369,17 @@ test('on a first run, the app offers its models with their sizes, and the quicke
   assert.deepEqual(firstRunOffers(engineOff(engine)), [], 'nor with models on the disk and the engine off');
   assert.deepEqual(
     engine.offers.map((offer) => formatSize(offer.bytes)),
-    ['8.3 GB', '12.1 GB', '17.8 GB'],
+    ['8.3 GB', '12.1 GB', '17.8 GB', '15.4 GB', '4.5 GB'],
   );
-  assert.equal(quickest(engine.offers), 'mlx-community/phi-4-4bit');
+  assert.equal(quickest(engine.offers), 'mlx-community/Llama-3.1-8B-Instruct-4bit');
+
+  // Brad, 2026-11-17: "I think the user can pick one or more at install with
+  // microsoft default". A first run picks Microsoft alone, so it offers
+  // Microsoft's model, and that one is the quickest to start.
+  const offered = firstRunOffers(forMakers(first, pickedAtFirst(first)));
+  assert.deepEqual(pickedAtFirst(first), ['Microsoft']);
+  assert.deepEqual(offered.map((offer) => offer.name), ['Phi-4']);
+  assert.equal(quickest(offered), 'mlx-community/phi-4-4bit');
   assert.deepEqual(plain(engine), before, 'the recorded engine is left as it was');
 
   // With nothing to serve, the app does not start the engine, and says so in
@@ -373,10 +400,11 @@ test('the page downloads a model only when its Download button is pressed', () =
   const page = read('apps/desktop/src/App.vue');
   const asks = [...page.matchAll(/invoke\("download_model"/g)];
   assert.equal(asks.length, 1, 'the page asks Rust for a download in one place');
+  // It is called from the first-run picker, and from Settings.
   const calls = [...page.matchAll(/\bdownload\(/g)].map((match) => page.slice(match.index - 30, match.index));
   assert.deepEqual(
     calls.map((before) => /async function $|@click="$/.test(before)),
-    [true, true],
+    [true, true, true],
     'download() is defined once and called only from a button',
   );
   assert.match(page, /\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer shows its size');
@@ -394,26 +422,38 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   assert.match(download, /^\s*if \(downloading\.value\) return;/, 'download() does nothing while one is running');
   assert.match(download, /invoke\("download_model", \{ id: offer\.id, onProgress: channel \}\)/, 'Rust is told which model, and reports its progress');
   assert.match(download, /if \(report\.stopped\) stoppedNote\.value = `The download of \$\{offer\.name\} stopped, and none of it was kept\.`;/, 'a stopped download says so');
-  assert.match(download, /if \(report\.whole\) await checkEngine\(\);/, 'a whole model starts the engine');
+  assert.match(
+    download,
+    /if \(report\.whole\) await Promise\.all\(\[checkEngine\(\), readMakers\(\)\]\);/,
+    'a whole model starts the engine, and Settings shows it on this computer',
+  );
   assert.match(download, /catch \(error\) \{\n\s*problem\.value = String\(error\);/, 'a download that fails says why');
   const cancel = page.match(/\nasync function cancelDownload\(\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
   assert.match(cancel, /await invoke\("stop_download"\)/, 'Cancel asks Rust to stop the download');
 
   const row = page.match(/<li v-for="offer in offers"[\s\S]*?<\/li>/)?.[0] ?? '';
-  assert.match(row, /\{\{ offer\.id === quick \? " · quickest to start" : "" \}\}/, 'the quickest to start is pointed to');
+  assert.match(row, /\{\{\s*offer\.id === quick \? " · quickest to start" : ""\s*\}\}/, 'the quickest to start is pointed to');
+  assert.match(row, /by \{\{ offer\.maker \}\} · \{\{ offer\.license \}\} · \{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer gives its maker, its license, and its size');
   assert.match(row, /<progress\s+:value="downloaded\(progress\)"/, 'a download shows how far it has come');
   assert.match(row, /\{\{ stopping \? "Stopping\.\.\." : downloadLine\(progress\) \}\}/, 'and in words');
   assert.match(row, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it');
   // Brad, 2026-11-17: "off by default, everything stops". Download is off too
   // while the outbound gate is, and the picker offers to turn the gate on.
   assert.match(row, /:disabled="Boolean\(downloading\) \|\| !gate"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
+  const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16}<\/li>/)?.[0] ?? '';
+  assert.match(
+    listed,
+    /v-else-if="maker\.picked && entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="Boolean\(downloading\) \|\| !gate"\s*\n\s*@click="download\(entry\.offer\)"/,
+    'in Settings too, and only for a picked maker\'s model that is not here yet',
+  );
+  assert.match(listed, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it there too');
   assert.match(
     page,
     /<p v-if="!gate" class="gate-ask">\s*<span>The outbound gate is off, so nothing can download yet\.<\/span>\s*<button class="primary" type="button" :disabled="gateBusy" @click="setGate\(true\)">Turn on the gate<\/button>\s*<\/p>/,
     'the first-run picker offers to turn the gate on',
   );
   assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
-  assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed');
+  assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed, under Settings too');
 });
 
 test('the saved chats are listed newest first, and read "Today" and "Yesterday" at any hour', () => {
@@ -549,7 +589,45 @@ test('with the window open, the app asks for the stack to be started, and says w
   assert.equal(stackLine(STACK_RUNNING, false), `Stack on 127.0.0.1:${port}`);
 });
 
-test('the stand-in answers the six calls the pictures need, and refuses the rest', async () => {
+test('the stand-in picks the makers as the app does before the person picks', () => {
+  // Brad, 2026-11-17: "I think the user can pick one or more at install with
+  // microsoft default". With nothing picked yet, the app picks Microsoft and
+  // the maker of each model already on the disk, so the pictures do too.
+  const { engine } = recorded();
+  assert.ok(read(MAKERS).includes(`pub const FIRST: &str = "${FIRST_MAKER}";`), `${MAKERS} picks ${FIRST_MAKER} first`);
+  assert.deepEqual(makersOf(engine), [...new Set(catalog().map((entry) => entry.maker))], 'the makers, in the list\'s order');
+  assert.deepEqual(pickedAtFirst(engine), ['Microsoft', 'OpenAI', 'NVIDIA']);
+  assert.deepEqual(pickedAtFirst(firstRun(engine)), ['Microsoft']);
+
+  // Only the picked makers' models are reported, and hidden models still count.
+  const google = forMakers(engine, ['Google']);
+  assert.deepEqual([google.models, google.onDisk], [[], []]);
+  assert.deepEqual(google.setAside, engine.models, 'a saved chat still names the model that wrote it');
+  assert.deepEqual(Object.keys(google), Object.keys(engine), 'the report keeps its fields, in order');
+  assert.deepEqual(google.offers.map((offer) => offer.name), ['Gemma 4 26B']);
+  assert.equal(google.hidden, engine.hidden);
+
+  // Settings lists every maker with its models, as makers.rs reports them.
+  const status = makersStatus(engine, ['Microsoft', 'Meta']);
+  assert.deepEqual(
+    status.map((maker) => [maker.name, maker.picked]),
+    [['Microsoft', true], ['OpenAI', false], ['NVIDIA', false], ['Google', false], ['Meta', true]],
+  );
+  assert.deepEqual(Object.keys(status[0]), fieldsOf(MAKERS, 'Maker'));
+  assert.deepEqual(Object.keys(status[0].models[0]), fieldsOf(MAKERS, 'Listed'));
+  assert.deepEqual(
+    status.map((maker) => maker.models.map((model) => [model.name, model.license, model.onDisk])),
+    [
+      [['Phi-4', 'MIT', true]],
+      [['gpt-oss 20B', 'Apache 2.0', true]],
+      [['Nemotron 3.5 Lightning', 'OpenMDW 1.1', true]],
+      [['Gemma 4 26B', 'Apache 2.0', false]],
+      [['Llama 3.1 8B', 'Llama 3.1 Community License', false]],
+    ],
+  );
+});
+
+test('the stand-in answers the seven calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -559,7 +637,9 @@ test('the stand-in answers the six calls the pictures need, and refuses the rest
   const { invoke } = window.__TAURI_INTERNALS__;
 
   assert.equal(cleared, 1, 'what the page kept from an earlier picture is cleared');
-  assert.deepEqual(plain(await invoke('engine_status')), plain(engine));
+  const picked = pickedAtFirst(engine);
+  assert.deepEqual(plain(await invoke('engine_status')), plain(forMakers(engine, picked)));
+  assert.deepEqual(plain(await invoke('makers_status')), plain(makersStatus(engine, picked)));
   assert.deepEqual(
     plain(await invoke('list_sessions')),
     sessions.map((entry) => ({
@@ -577,6 +657,9 @@ test('the stand-in answers the six calls the pictures need, and refuses the rest
   const first = { window: { localStorage: { clear: () => {} } }, structuredClone };
   vm.runInNewContext(standIn(firstRun(engine), sessions, NO_MODEL), first);
   assert.deepEqual(plain(await first.window.__TAURI_INTERNALS__.invoke('start_engine')), NO_MODEL);
+  // On a first run Microsoft alone is picked, so Phi-4 alone is offered.
+  const firstOffers = (await first.window.__TAURI_INTERNALS__.invoke('engine_status')).offers;
+  assert.deepEqual(firstOffers.map((offer) => offer.name), ['Phi-4']);
 
   // Asked to start the stack, it starts nothing and says the stack runs.
   assert.deepEqual(plain(await invoke('start_stack')), STACK_RUNNING);
@@ -585,7 +668,7 @@ test('the stand-in answers the six calls the pictures need, and refuses the rest
   assert.equal(await invoke('gate_status'), false);
 
   // A call that would send, save, trash, or download has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate']) {
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  canRemove,
   checkedLine,
   dayLabel,
   downloaded,
@@ -12,7 +13,9 @@ import {
   formatWindow,
   fullness,
   gateLine,
+  listedLine,
   onDiskLine,
+  pickedMakers,
   quickest,
   requestMessages,
   savedTurn,
@@ -28,6 +31,7 @@ import {
   titleFrom,
   tokensPerSecond,
   tokensUsed,
+  withMaker,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -205,9 +209,15 @@ test("when the app cannot start the engine, it says why, once", () => {
 // On a computer with none of the app's models, the page lists the ones it can
 // download, each with its size, and points to the quickest.
 const OFFERS = [
-  { id: "mlx-community/phi-4-4bit", name: "Phi-4", maker: "Microsoft", bytes: 8256384748 },
-  { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B", maker: "OpenAI", bytes: 12104215835 },
-  { id: "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", bytes: 17792581692 },
+  { id: "mlx-community/phi-4-4bit", name: "Phi-4", maker: "Microsoft", license: "MIT", bytes: 8256384748 },
+  { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B", maker: "OpenAI", license: "Apache 2.0", bytes: 12104215835 },
+  {
+    id: "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+    name: "Nemotron 3.5 Lightning",
+    maker: "NVIDIA",
+    license: "OpenMDW 1.1",
+    bytes: 17792581692,
+  },
 ];
 
 test("the picker shows only on a first run, with none of the app's models anywhere", () => {
@@ -329,4 +339,46 @@ test("the gate's line says what off and on mean", () => {
   assert.equal(gateLine(true), "Gate on. The app may go online to check for updates, download models, and start the stack.");
   // Anything but a plain yes reads as off.
   for (const open of [undefined, null, 0, ""]) assert.equal(gateLine(open), gateLine(false));
+});
+
+// Brad, 2026-11-17: "user can pick google, gemini, meta from the app if they
+// want those instead. I think the user can pick one or more at install with
+// microsoft default, and in settings they can one click more of them if they
+// want."
+const MAKERS = [
+  { name: "Microsoft", picked: true, models: [] },
+  { name: "OpenAI", picked: false, models: [] },
+  { name: "NVIDIA", picked: false, models: [] },
+  { name: "Google", picked: true, models: [] },
+  { name: "Meta", picked: false, models: [] },
+];
+
+test("one click adds or removes a maker, and the list keeps its order", () => {
+  assert.deepEqual(pickedMakers(MAKERS), ["Microsoft", "Google"]);
+  assert.deepEqual(withMaker(MAKERS, "Meta", true), ["Microsoft", "Google", "Meta"]);
+  assert.deepEqual(withMaker(MAKERS, "OpenAI", true), ["Microsoft", "OpenAI", "Google"]);
+  assert.deepEqual(withMaker(MAKERS, "Microsoft", false), ["Google"]);
+  // Adding one already picked, or removing one that is not, changes nothing.
+  assert.deepEqual(withMaker(MAKERS, "Google", true), ["Microsoft", "Google"]);
+  assert.deepEqual(withMaker(MAKERS, "Meta", false), ["Microsoft", "Google"]);
+  assert.deepEqual(pickedMakers(null), []);
+});
+
+test("the last maker picked stays picked", () => {
+  const one = MAKERS.map((maker) => ({ ...maker, picked: maker.name === "Microsoft" }));
+  assert.deepEqual(withMaker(one, "Microsoft", false), ["Microsoft"]);
+  assert.equal(canRemove(one, "Microsoft"), false);
+  assert.equal(canRemove(MAKERS, "Microsoft"), true);
+  assert.equal(canRemove(MAKERS, "Google"), true);
+  // A maker not picked has nothing to remove.
+  assert.equal(canRemove(MAKERS, "Meta"), false);
+});
+
+test("each model in Settings gives its license, and its size or that it is here", () => {
+  assert.equal(listedLine({ name: "Phi-4", license: "MIT", onDisk: true, offer: OFFERS[0] }), "MIT · on this computer");
+  assert.equal(listedLine({ name: "gpt-oss 20B", license: "Apache 2.0", onDisk: false, offer: OFFERS[1] }), "Apache 2.0 · 12.1 GB");
+  assert.equal(
+    listedLine({ name: "Llama 3.1 8B", license: "Llama 3.1 Community License", onDisk: false, offer: null }),
+    "Llama 3.1 Community License · no download for this computer",
+  );
 });

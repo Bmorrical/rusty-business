@@ -1,6 +1,7 @@
 mod downloads;
 mod engine;
 mod gate;
+mod makers;
 mod models;
 mod sessions;
 mod stack;
@@ -32,6 +33,8 @@ pub fn run() {
             let downloads = downloads::Downloads::new(data.join("downloads"));
             downloads.clear();
             app.manage(downloads);
+            // The model makers picked: Microsoft until the person picks others.
+            app.manage(makers::Makers::new(data.join("makers"), &models::on_disk()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -50,6 +53,8 @@ pub fn run() {
             update::open_update,
             gate::gate_status,
             gate::set_gate,
+            makers::makers_status,
+            makers::set_makers,
         ])
         .build(context)
         .expect("error while building tauri application");

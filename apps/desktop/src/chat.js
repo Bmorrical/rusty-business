@@ -224,3 +224,30 @@ export function gateLine(open) {
     ? "Gate on. The app may go online to check for updates, download models, and start the stack."
     : "Gate off. Nothing leaves this computer.";
 }
+
+/** The names of the model makers picked, in the list's order. */
+export function pickedMakers(makers) {
+  return (makers ?? []).filter((maker) => maker.picked).map((maker) => maker.name);
+}
+
+/**
+ * The makers picked once `name` is added (`on`) or taken away, in the list's
+ * order. The last one picked stays: at least one maker is always picked.
+ */
+export function withMaker(makers, name, on) {
+  const picked = (makers ?? []).filter((maker) => (maker.name === name ? on : maker.picked)).map((maker) => maker.name);
+  return picked.length ? picked : pickedMakers(makers);
+}
+
+/** Whether a maker can be taken away: it is picked, and not the only one. */
+export function canRemove(makers, name) {
+  const picked = pickedMakers(makers);
+  return picked.includes(name) && picked.length > 1;
+}
+
+/** "MIT · on this computer", "Apache 2.0 · 15.4 GB", or why it cannot download. */
+export function listedLine(model) {
+  if (model.onDisk) return `${model.license} · on this computer`;
+  if (model.offer) return `${model.license} · ${formatSize(model.offer.bytes)}`;
+  return `${model.license} · no download for this computer`;
+}

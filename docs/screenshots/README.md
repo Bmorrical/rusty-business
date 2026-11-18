@@ -1,6 +1,6 @@
 # Screenshots
 
-Five pictures of the chat window. Each is 1,840 pixels wide, taken from a
+Six pictures of the chat window. Each is 1,840 pixels wide, taken from a
 window 920 points wide, so the words are large enough to read. Select a
 picture to open it full size.
 
@@ -38,12 +38,25 @@ button to try again.
 
 ## The first run
 
-[![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button that waits for the outbound gate, a Turn on the gate button above them, and Phi-4 marked as the quickest to start](first-run.png)](first-run.png?raw=true)
+[![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, and Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate](first-run.png)](first-run.png?raw=true)
 
-What the app shows when none of its models is on this computer: each one it
-can download, with its maker and its download size, and the smallest marked
-as the quickest to start. Nothing downloads until the outbound gate is on and
-Download is pressed.
+What the app shows when none of its models is on this computer. Microsoft
+is ticked to begin with; ticking another maker adds its models below, each
+with its maker, license, and download size, and the smallest marked as the
+quickest to start. Microsoft cannot be unticked while it is the only maker
+ticked. Nothing downloads until the outbound gate is on and Download is
+pressed.
+
+## Settings: the model makers
+
+[![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](settings.png)](settings.png?raw=true)
+
+Settings, opened from the foot of the window, lists every maker on the app's
+list with its models. Add and Remove pick a maker with one click. Here the
+makers picked are the three whose models are on this computer, as the app
+picks them before you do. Removing one hides its models and deletes nothing,
+and saved chats still name them. A picked maker's model that is not on the
+computer has a Download button, which waits for the outbound gate.
 
 ## How these were made
 
@@ -61,15 +74,17 @@ These are pictures of the app's page, not captures of the app's window:
   uses the system's web view, which draws that control its own way.
 - Rust is not running. The page's calls to it are answered from
   [chats.json](chats.json): what the app reported about the engine on one
-  Mac, the models it offers with their sizes, and replies the three models
-  gave there, recorded once. The words,
-  token counts, and speeds are real. Nothing is sent to a model while the
-  pictures are made, and no engine is started: in the last two pictures, the
+  Mac with every maker picked, the five models it offers with their sizes,
+  and replies the three models there gave, recorded once. Each picture picks
+  makers as the app does before you pick any: Microsoft, and the maker of
+  each model already on the computer. The words, token counts, and speeds
+  are real. Nothing is sent to a model while the pictures are made, and no
+  engine is started: in the pictures of no engine and of the first run, the
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
   No stack is started either: in every picture, the page is told the stack's
-  front door already answers. The outbound gate is off in every picture, as it
-  is until it is turned on.
+  front door already answers. The outbound gate is off in every picture, as
+  it is until it is turned on, and no maker can be changed.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 
@@ -90,4 +105,5 @@ nowhere else.
 | `new-chat.png`   | A new chat, before the first question                          |
 | `engine-off.png` | The app with no engine answering                               |
 | `first-run.png`  | The first run, with none of the app's models on this computer  |
+| `settings.png`   | Settings, with the five model makers                           |
 | `chats.json`     | What the pictures are made from: the engine's report, the models offered, and four recorded chats |
