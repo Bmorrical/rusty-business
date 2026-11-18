@@ -23,6 +23,7 @@ const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 const UPDATE = 'apps/desktop/src-tauri/src/update.rs';
 const GATE = 'apps/desktop/src-tauri/src/gate.rs';
 const STACK = 'apps/desktop/src-tauri/src/stack.rs';
+const OUTSIDE = 'apps/desktop/src-tauri/src/outside.rs';
 const TAURI = 'apps/desktop/src-tauri/tauri.conf.json';
 const PAGE = 'apps/desktop/src';
 const OLLAMA = 'https://ollama.com';
@@ -52,6 +53,10 @@ const KEPT_BY = [
   { file: UPDATE, test: 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on' },
   { file: DOWNLOADS, test: 'with_the_gate_off_nothing_is_downloaded' },
   { file: STACK, test: 'with_the_gate_off_the_stack_is_not_started' },
+  { file: OUTSIDE, test: 'the_key_never_leaves_rust' },
+  { file: OUTSIDE, test: 'with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read' },
+  { file: OUTSIDE, test: 'grok_is_asked_at_xais_api_alone_over_https' },
+  { file: OUTSIDE, test: 'turning_the_gate_off_stops_grok_part_way_through' },
 ];
 
 function read(file) {
@@ -239,6 +244,10 @@ test('the page cannot reach past this computer, and Rust does only through the g
   assert.ok(update.includes('.no_proxy()'), `${UPDATE} may now send its check through a proxy`);
   assert.ok(update.includes('redirect::Policy::none()'), `${UPDATE} may now follow a redirect somewhere else`);
 
+  const outside = read(OUTSIDE);
+  assert.ok(outside.includes('.no_proxy()'), `${OUTSIDE} may now send Grok's calls through a proxy`);
+  assert.ok(outside.includes('redirect::Policy::none()'), `${OUTSIDE} may now follow a redirect away from xAI`);
+
   // Every client that reaches past this computer is made by the gate, which
   // refuses while it is off and holds each one to https with no proxy.
   const gate = read(GATE);
@@ -246,7 +255,7 @@ test('the page cannot reach past this computer, and Rust does only through the g
   for (const rule of ['.https_only(true)', '.no_proxy()']) {
     assert.ok(gate.includes(rule), `${GATE} no longer holds its clients to ${rule}`);
   }
-  for (const file of [UPDATE, DOWNLOADS]) {
+  for (const file of [UPDATE, DOWNLOADS, OUTSIDE]) {
     assert.match(read(file), /fn client\(gate: &Gate\)[^{]*\{\s+gate\.client\(GATE_OFF,/, `${file} makes a client that does not go through the gate`);
   }
 

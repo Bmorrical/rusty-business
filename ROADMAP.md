@@ -14,10 +14,6 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-- **Engines outside this computer, Grok first.** You give the path to your
-  key. The app reads it there, never shows it to the page, and sends it
-  over https only to the maker's own address, and only while the outbound
-  gate is on. Grok can answer alone or as one of several.
 - **Grading and a summary.** Once every answer is in, an engine you pick
   grades them and sums them up.
 - **An installers page.** One click installs a model to run here, or sets up
@@ -25,6 +21,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Later
 
+- **Grok through xAI's newer API.** The app asks Grok through the chat API
+  that xAI now calls legacy. Its Responses API is the one to move to, with
+  the same key and the same rules.
 - **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
   Windows and Linux need an engine of their own. It is not chosen yet.
 - **Pictures.** Add an image to a question and ask about it.
@@ -90,3 +89,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time, and
   Stop asks no more of them.
+- **Grok, the first engine outside this computer.** In Settings, you give
+  the path to a file that holds your own xAI key. The app reads the key
+  there when it asks Grok, never shows it to the page, and sends it over
+  https only to xAI's API, and only while the outbound gate is on. Grok
+  answers alone or as one of several, and a chip at the top says it is
+  asked online.

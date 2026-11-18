@@ -24,9 +24,10 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Plain http to the engine on this computer. Past it, only through the
-# outbound gate (src/gate.rs): https to Hugging Face only, for downloads, and
-# https to GitHub's API only, for the check for a new version, through the
-# system's own TLS.
+# outbound gate (src/gate.rs): https to Hugging Face only, for downloads,
+# https to GitHub's API only, for the check for a new version, and https to
+# xAI's API only, with the person's own key, to ask Grok, through the system's
+# own TLS.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "macros", "time"] }

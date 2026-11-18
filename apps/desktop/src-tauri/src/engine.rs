@@ -18,15 +18,17 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::gate::Gate;
 use crate::makers::Makers;
+use crate::outside::{self, Outside};
 
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
-const DEFAULT_MAX_TOKENS: u32 = 4096;
+pub(crate) const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 // ---------------------------------------------------------------------------
 // Where the engine is
@@ -542,10 +544,16 @@ fn checked_request(request: &ChatRequest) -> Result<(), String> {
     if catalog_entry(&request.model).is_none() {
         return Err("That model is not on this app's list.".to_string());
     }
-    if request.messages.is_empty() {
+    checked_messages(&request.messages)
+}
+
+/// The messages any engine is sent: at least one, each in a role an engine
+/// takes.
+pub(crate) fn checked_messages(messages: &[ChatMessage]) -> Result<(), String> {
+    if messages.is_empty() {
         return Err("There is nothing to send.".to_string());
     }
-    for message in &request.messages {
+    for message in messages {
         if !matches!(message.role.as_str(), "system" | "user" | "assistant") {
             return Err("A message has a role the engine does not take.".to_string());
         }
@@ -556,7 +564,7 @@ fn checked_request(request: &ChatRequest) -> Result<(), String> {
 pub async fn run_chat(
     request: &ChatRequest,
     cancel: &mut watch::Receiver<bool>,
-    mut emit: impl FnMut(ChatEvent),
+    emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
     checked_request(request)?;
     let base = base_url()?;
@@ -577,8 +585,22 @@ pub async fn run_chat(
         let detail: String = response.text().await.unwrap_or_default().chars().take(300).collect();
         return Err(format!("The engine answered {status}. {detail}").trim().to_string());
     }
+    read_reply(response.bytes_stream(), cancel, std::future::pending(), emit, "The engine stopped answering part way through.").await
+}
 
-    let mut bytes = response.bytes_stream();
+/// Reads a streamed answer into thinking and answer pieces, for the engine on
+/// this computer and for engines outside it alike. Stop keeps what came;
+/// `halt` ending stops the answer with its reason; a broken stream says
+/// `broke`.
+pub(crate) async fn read_reply<B: AsRef<[u8]>, E>(
+    bytes: impl Stream<Item = Result<B, E>>,
+    cancel: &mut watch::Receiver<bool>,
+    halt: impl Future<Output = String>,
+    mut emit: impl FnMut(ChatEvent),
+    broke: &str,
+) -> Result<ChatDone, String> {
+    let mut bytes = std::pin::pin!(bytes);
+    let mut halt = std::pin::pin!(halt);
     let mut lines = SseLines::default();
     let mut reply = ReplyStream::default();
     let mut done = ChatDone::default();
@@ -591,14 +613,15 @@ pub async fn run_chat(
                 done.stopped = true;
                 break 'stream;
             }
+            reason = &mut halt => return Err(reason),
             next = bytes.next() => next,
         };
         let piece = match next {
             None => break 'stream,
-            Some(Err(_)) => return Err("The engine stopped answering part way through.".to_string()),
+            Some(Err(_)) => return Err(broke.to_string()),
             Some(Ok(piece)) => piece,
         };
-        for payload in lines.push(&piece) {
+        for payload in lines.push(piece.as_ref()) {
             if payload == "[DONE]" {
                 break 'stream;
             }
@@ -640,20 +663,30 @@ pub async fn run_chat(
 #[tauri::command]
 pub async fn chat_stream(
     chats: tauri::State<'_, Chats>,
+    gate: tauri::State<'_, Gate>,
+    outside: tauri::State<'_, Outside>,
     chat_id: String,
     request: ChatRequest,
     on_event: Channel<ChatEvent>,
 ) -> Result<ChatDone, String> {
     let (stop, mut stopped) = watch::channel(false);
     chats.stops.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
-    // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
-    let result = match wait_for_turn(&chats.turn, &mut stopped).await {
-        None => Ok(ChatDone { stopped: true, ..ChatDone::default() }),
-        Some(_turn) => {
-            run_chat(&request, &mut stopped, |event| {
-                let _ = on_event.send(event);
-            })
-            .await
+    let result = if outside::is_outside(&request.model) {
+        // An engine outside this computer waits for no turn here.
+        outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
+            let _ = on_event.send(event);
+        })
+        .await
+    } else {
+        // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
+        match wait_for_turn(&chats.turn, &mut stopped).await {
+            None => Ok(ChatDone { stopped: true, ..ChatDone::default() }),
+            Some(_turn) => {
+                run_chat(&request, &mut stopped, |event| {
+                    let _ = on_event.send(event);
+                })
+                .await
+            }
         }
     };
     if let Ok(mut map) = chats.stops.lock() {

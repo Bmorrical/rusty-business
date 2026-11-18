@@ -3,7 +3,7 @@
 A window for chatting with models that run on your own computer. The shell is
 Rust (Tauri 2), and the page is Vue 3. It is local first: a chat needs nothing
 outside the computer, and nothing leaves it until you turn on the outbound
-gate.
+gate. With it on, Grok, by xAI, can answer too, with your own key.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
@@ -15,8 +15,8 @@ Select the picture to open it full size. The rest of the set is in
 - **The outbound gate**, a switch at the foot of the window. It is off until
   you turn it on, and it stays as you leave it. While it is off, the app
   makes no connection past this computer: it asks for no new version,
-  downloads nothing, and starts no stack. Turning it off stops what is under
-  way. A chat with a model here works either way.
+  downloads nothing, starts no stack, and asks Grok nothing. Turning it off
+  stops what is under way. A chat with a model here works either way.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **One model or several.** The models sit at the top of the window, one
@@ -35,6 +35,12 @@ Select the picture to open it full size. The rest of the set is in
   picked. Settings also downloads a picked maker's model that is not on this
   computer yet, with the gate on. Removing a maker hides its models and
   deletes nothing, and saved chats still name them.
+- **Grok, by xAI**, added in Settings under Outside engines with the path to
+  a file that holds your own xAI key. With the gate on, the app finds Grok's
+  models, and they join the buttons at the top of the window, marked online,
+  to answer alone or beside the models here. The key never reaches the page.
+  Remove forgets the path, leaves the file as it is, and saved chats still
+  name Grok's models.
 - **The models on this computer**, named when the engine is not answering.
   The app looks in the Hugging Face cache folder, where the engine keeps the
   models it has downloaded. It only reads there, it keeps no list of its own,
@@ -78,16 +84,17 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
                       Rust  --gate--https, on Download only-->   Hugging Face
                       Rust  --gate--Docker, when the stack is not answering-->  the stack
                       Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
+                      Rust  --gate--https, with the key from your file-->  xAI's API (Grok)
 ```
 
 The page never talks to the network, and Rust reaches past this computer only
-through the gate. Rust owns nine things:
+through the gate. Rust owns ten things:
 
 - [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
   keeps the switch, off until the person turns it on, and makes every client
   that reaches past this computer: only while the gate is on, over https,
-  with no proxy. Turning it off stops a check, a download, or a start of the
-  stack that is under way.
+  with no proxy. Turning it off stops a check, a download, a start of the
+  stack, or Grok's answer that is under way.
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
@@ -120,6 +127,12 @@ through the gate. Rust owns nine things:
   always keeps one, and starts with Microsoft and the maker of any model
   already on this computer. The models shown, on the disk, and offered for
   download are only those of the makers picked.
+- [src-tauri/src/outside.rs](src-tauri/src/outside.rs), the engines outside
+  this computer, Grok first. It keeps the path to the person's xAI key in
+  the app's data folder, never the key. It reads the key from that file only
+  when it asks xAI, after the gate says yes, and sends it only to xAI's API,
+  over https, with no proxy and no redirect. The page gets the path and
+  Grok's models, never the key.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 - [src-tauri/src/update.rs](src-tauri/src/update.rs), the notice of a new
   version. It asks only GitHub's API, only for this repository's newest
