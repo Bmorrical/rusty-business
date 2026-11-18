@@ -3,6 +3,7 @@ mod engine;
 mod gate;
 mod makers;
 mod models;
+mod outside;
 mod sessions;
 mod stack;
 mod starter;
@@ -35,6 +36,8 @@ pub fn run() {
             app.manage(downloads);
             // The model makers picked: Microsoft until the person picks others.
             app.manage(makers::Makers::new(data.join("makers"), &models::on_disk()));
+            // Engines outside this computer: the path to each key, never the key.
+            app.manage(outside::Outside::new(data.join("outside.json")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -55,6 +58,10 @@ pub fn run() {
             gate::set_gate,
             makers::makers_status,
             makers::set_makers,
+            outside::outside_status,
+            outside::add_outside,
+            outside::refresh_outside,
+            outside::remove_outside,
         ])
         .build(context)
         .expect("error while building tauri application");

@@ -31,6 +31,8 @@ const GATE_TESTS = [
   ['UPDATE', 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on'],
   ['DOWNLOADS', 'with_the_gate_off_nothing_is_downloaded'],
   ['STACK', 'with_the_gate_off_the_stack_is_not_started'],
+  ['OUTSIDE', 'with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read'],
+  ['OUTSIDE', 'turning_the_gate_off_stops_grok_part_way_through'],
 ];
 
 function read(file) {

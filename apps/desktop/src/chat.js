@@ -100,7 +100,8 @@ export function fullest(turns, models) {
   let top = null;
   for (const entry of models ?? []) {
     const used = tokensUsed(turns, entry.id) ?? tokensUsed(turns);
-    if (!used) continue;
+    // A window not known, as with some of Grok's, cannot be measured.
+    if (!used || !entry.context) continue;
     const full = fullness(used, entry.context);
     if (!top || full > top.full) top = { model: entry, used, full };
   }
@@ -171,6 +172,7 @@ export function answersLine(models) {
   if (!list.length) return "";
   if (list.length === 1) {
     const [only] = list;
+    if (!only.context) return `${only.name} by ${only.maker} answers.`;
     return `${only.name} by ${only.maker} answers, with room for ${formatCount(only.context)} tokens.`;
   }
   return `${namesLine(list.map((entry) => entry.name))} answer in turn, side by side.`;
@@ -341,7 +343,7 @@ export function checkedLine(update, current) {
  */
 export function gateLine(open) {
   return open
-    ? "Gate on. The app may go online to check for updates, download models, and start the stack."
+    ? "Gate on. The app may go online to check for updates, download models, start the stack, and ask Grok."
     : "Gate off. Nothing leaves this computer.";
 }
 
@@ -370,4 +372,39 @@ export function listedLine(model) {
   if (model.onDisk) return `${model.license} · on this computer`;
   if (model.offer) return `${model.license} · ${formatSize(model.offer.bytes)}`;
   return `${model.license} · no download for this computer`;
+}
+
+/** The start of a model id that names one of Grok's models, asked at xAI. */
+export const OUTSIDE_PREFIX = "xai:";
+
+/** True for a model asked outside this computer. */
+export function isOutside(id) {
+  return String(id ?? "").startsWith(OUTSIDE_PREFIX);
+}
+
+/**
+ * Under a model's name on its chip: "Microsoft · 16K", or "xAI · online · 256K"
+ * for one asked outside this computer, which leaves out a window not known.
+ */
+export function chipDetail(entry) {
+  const parts = [entry.maker];
+  if (isOutside(entry.id)) parts.push("online");
+  if (entry.context) parts.push(formatWindow(entry.context));
+  return parts.join(" · ");
+}
+
+/**
+ * True when what was typed reads as a path to a file, as /, ~/, C:\, or \\
+ * would start one. Anything else, such as a key pasted where the path goes,
+ * is cleared from the box once Rust refuses it, so it does not stay on screen.
+ */
+export function looksLikePath(text) {
+  return /^(?:\/|~[\/\\]|[A-Za-z]:[\/\\]|\\\\)/.test(String(text ?? "").trim());
+}
+
+/** "Grok's models: Grok 4.7 and Grok 4.7 Fast.", or that none is found yet. */
+export function outsideModelsLine(status) {
+  const names = (status?.models ?? []).map((entry) => entry.name);
+  if (!names.length) return `No ${status?.name ?? "Grok"} models found yet.`;
+  return `${status.name}'s models: ${namesLine(names)}.`;
 }

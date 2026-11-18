@@ -8,22 +8,24 @@ import {
   canRemove,
   chatModels,
   checkedLine,
+  chipDetail,
   dayLabel,
   downloaded,
   downloadLine,
   firstRunOffers,
   formatCount,
   formatSize,
-  formatWindow,
   fullest,
   gateLine,
   groups,
   keptPicks,
   listedLine,
+  looksLikePath,
   meterLine,
   moreLine,
   namesLine,
   onDiskLine,
+  outsideModelsLine,
   pickedMakers,
   quickest,
   requestMessages,
@@ -76,6 +78,11 @@ const gateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
+const outside = ref(null);
+// The change to Grok under way, by the name of its command, or "".
+const outsideBusy = ref("");
+const outsideNote = ref("");
+const outsidePath = ref("");
 const settingsOpen = ref(false);
 const settingsTitle = ref(null);
 let updateTimer = 0;
@@ -89,14 +96,17 @@ function blankSession() {
   return { id: "", title: "", model: "", createdAt: 0, updatedAt: 0, messages: [] };
 }
 
-const models = computed(() => engine.value?.models ?? []);
+// Grok's models are offered only while the gate is on and Grok is added.
+const outsideModels = computed(() => (gate.value && outside.value?.added ? (outside.value.models ?? []) : []));
+const models = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
 // The models a question goes to, in the list's order.
 const chosen = computed(() => models.value.filter((entry) => picked.value.includes(entry.id)));
 const many = computed(() => chosen.value.length > 1);
 const top = computed(() => fullest(current.value.messages, chosen.value));
 const rounds = computed(() => groups(current.value.messages));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && chosen.value.length > 0);
-const offers = computed(() => firstRunOffers(engine.value));
+// With Grok to ask, the first run's downloads wait in Settings.
+const offers = computed(() => (outsideModels.value.length ? [] : firstRunOffers(engine.value)));
 const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
 const makersLocked = computed(() => makersBusy.value || Boolean(downloading.value));
@@ -208,13 +218,68 @@ async function setGate(open) {
   } finally {
     gateBusy.value = false;
   }
+  // Grok's models come and go with the gate.
+  pickModels(picked.value);
   // With the gate on, what waited for it goes ahead, and a line saying the
   // gate is off is gone.
   if (gate.value) {
     updateChecked.value = "";
     checkStack();
     checkUpdate();
+    if (outside.value?.added && !outside.value.models?.length) refreshOutside();
   }
+}
+
+/**
+ * "user can add their outside inference, start with Grok and Grok ai. user
+ * adds it manually, they will need to provide or specify a path to a key".
+ * Rust keeps the path, reads the key from it each time Grok is asked, and
+ * never hands the key to the page. The page sends only the path typed.
+ */
+async function readOutside() {
+  try {
+    outside.value = await invoke("outside_status");
+  } catch (error) {
+    outsideNote.value = String(error);
+  }
+}
+
+/** Asks Rust to change Grok. Gives back whether Rust took the change. */
+async function changeOutside(command, args) {
+  if (outsideBusy.value) return false;
+  outsideBusy.value = command;
+  outsideNote.value = "";
+  let taken = false;
+  try {
+    outside.value = await invoke(command, args);
+    // With the gate off, the line above Grok already says what waits for it.
+    outsideNote.value = gate.value ? (outside.value?.error ?? "") : "";
+    taken = true;
+  } catch (error) {
+    // Nothing changed; Rust says why.
+    outsideNote.value = String(error);
+  } finally {
+    outsideBusy.value = "";
+  }
+  // The models a question goes to follow Grok's.
+  pickModels(picked.value);
+  return taken;
+}
+
+async function addOutside() {
+  const given = outsidePath.value.trim();
+  if (!given) return;
+  const added = await changeOutside("add_outside", { keyPath: given });
+  // A key pasted where the path goes does not stay on screen.
+  if (added || !looksLikePath(given)) outsidePath.value = "";
+}
+
+function refreshOutside() {
+  return changeOutside("refresh_outside");
+}
+
+function removeOutside() {
+  return changeOutside("remove_outside");
 }
 
 /**
@@ -259,6 +324,7 @@ async function openSettings() {
   settingsOpen.value = true;
   nextTick(() => settingsTitle.value?.focus());
   await readMakers();
+  await readOutside();
 }
 
 function closeSettings() {
@@ -575,7 +641,8 @@ function scrollDown() {
 function modelName(id) {
   // A model whose maker was removed is set aside, not offered, but a saved
   // chat still names the model that wrote it.
-  const known = [...models.value, ...(engine.value?.setAside ?? [])];
+  // So does a chat Grok answered after Grok is removed.
+  const known = [...models.value, ...(engine.value?.setAside ?? []), ...(outside.value?.models ?? [])];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -601,6 +668,8 @@ onMounted(async () => {
   window.addEventListener("focus", checkEngine);
   // While the gate is off, Rust starts no stack and asks for no new version.
   await readGate();
+  // So is the path to Grok's key, and the models found with it.
+  await readOutside();
   // The makers picked are kept on this computer, so they need no gate.
   await readMakers();
   // The stack can take minutes, so the page does not wait for it.
@@ -808,6 +877,55 @@ onBeforeUnmount(() => {
           <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
           <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
           <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+
+          <h3 class="gap-above">Outside engines</h3>
+          <p class="quiet">
+            Grok, by xAI, answers from xAI's computers, not this one. Give the path to a file that holds your xAI key.
+            Rusty Business™ reads the key from that file when it asks Grok and sends it only to xAI's API, while the gate
+            is on. The key never shows here.
+          </p>
+          <p v-if="!gate" class="gate-ask">
+            <span>The outbound gate is off, so Grok cannot be asked.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          </p>
+          <div class="engine-card" aria-labelledby="grok-name" role="group">
+            <div class="maker-head">
+              <span id="grok-name" class="maker-name">Grok</span>
+              <span v-if="outside?.added" class="engine-buttons">
+                <button type="button" :disabled="Boolean(outsideBusy) || !gate" @click="refreshOutside">
+                  {{ outsideBusy === "refresh_outside" ? "Asking xAI..." : "Refresh models" }}
+                </button>
+                <button type="button" aria-label="Remove Grok" :disabled="Boolean(outsideBusy)" @click="removeOutside">
+                  Remove
+                </button>
+              </span>
+            </div>
+            <template v-if="outside?.added">
+              <p class="small key-file">Key file: <code>{{ outside.keyPath }}</code></p>
+              <p v-if="outside.warning" class="small" role="alert">{{ outside.warning }}</p>
+              <p class="quiet small">{{ outsideModelsLine(outside) }}</p>
+            </template>
+            <form v-else class="key-path" @submit.prevent="addOutside">
+              <label for="xai-key-path" class="small">Path to your xAI key file</label>
+              <span class="key-path-row">
+                <input
+                  id="xai-key-path"
+                  v-model="outsidePath"
+                  type="text"
+                  placeholder="~/.config/xai/key"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  :disabled="Boolean(outsideBusy)"
+                />
+                <button class="primary" type="submit" :disabled="Boolean(outsideBusy) || !outsidePath.trim()">
+                  {{ outsideBusy === "add_outside" ? "Adding..." : "Add" }}
+                </button>
+              </span>
+            </form>
+          </div>
+          <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
         </div>
       </section>
       <header v-show="!settingsOpen" class="bar">
@@ -827,7 +945,7 @@ onBeforeUnmount(() => {
           >
             <span class="chip-mark" aria-hidden="true">{{ picked.includes(entry.id) ? "✓" : "+" }}</span>
             {{ entry.name }}
-            <span class="quiet small chip-detail">{{ entry.maker }} · {{ formatWindow(entry.context) }}</span>
+            <span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>
           </button>
         </div>
       </header>
@@ -1489,6 +1607,53 @@ button.switch {
 
 .maker-name {
   font-weight: 600;
+}
+
+.settings-body .gap-above {
+  margin-top: 1rem;
+}
+
+.engine-card {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.engine-card .maker-head {
+  margin-bottom: 0;
+}
+
+.engine-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.key-file code {
+  overflow-wrap: anywhere;
+}
+
+.key-path {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.key-path-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.key-path input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  padding: 0.4rem 0.6rem;
 }
 
 .makers-pick {

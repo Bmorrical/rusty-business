@@ -41,8 +41,14 @@ I want to hear about:
 - The page has no way to call out.
 - While the outbound gate is off, which it is until you turn it on, the app
   makes no connection past this computer: no check for a new version, no
-  download, and no start of the stack. Turning it off stops what is under
-  way. With it on, every such connection is https only, through no proxy.
+  download, no start of the stack, and no question to Grok. Turning it off
+  stops what is under way. With it on, every such connection is https only,
+  through no proxy.
+- Your xAI key stays in the file you name. The app keeps only the file's
+  path, reads the key from it when it asks Grok, and sends the key only to
+  xAI's API, over https, following no redirect. The key never reaches the
+  page, a log, or a saved chat, and the app never changes or removes the
+  file.
 - The app refuses an engine address that is not on this computer, and an
   engine it starts listens on this computer only.
 - The app downloads only the models on its list, only from Hugging Face over
