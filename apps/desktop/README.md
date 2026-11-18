@@ -1,7 +1,9 @@
 # The desktop app
 
 A window for chatting with models that run on your own computer. The shell is
-Rust (Tauri 2), the page is Vue 3, and nothing you type leaves the machine.
+Rust (Tauri 2), and the page is Vue 3. It is local first: a chat needs nothing
+outside the computer, and nothing leaves it until you turn on the outbound
+gate.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, the model picker at the top right, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
@@ -10,6 +12,11 @@ Select the picture to open it full size. The rest of the set is in
 
 ## What it does
 
+- **The outbound gate**, a switch at the foot of the window. It is off until
+  you turn it on, and it stays as you leave it. While it is off, the app
+  makes no connection past this computer: it asks for no new version,
+  downloads nothing, and starts no stack. Turning it off stops what is under
+  way. A chat with a model here works either way.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **Model picker** limited to a short list: Phi-4 (Microsoft), gpt-oss 20B
@@ -25,7 +32,7 @@ Select the picture to open it full size. The rest of the set is in
   the app quits, it stops the engine it started and no other. When it cannot
   start one, it says why in one sentence.
 - **The stack, started by the app.** When the stack's front door is not
-  answering, the app starts the stack in Docker, opening Docker Desktop first
+  answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a
   few minutes. The footer says where the stack answers, or why it is not
   running. As with the engine, it starts only what is missing, and when the
@@ -33,8 +40,9 @@ Select the picture to open it full size. The rest of the set is in
   Docker; the chat does not need the stack yet.
 - **A first-run picker.** When none of the app's models is on this computer,
   the page lists them with their download sizes and marks the quickest to
-  start. Download brings the one you pick from Hugging Face, with a progress
-  bar and a Cancel button, and the app then starts the engine with it.
+  start. With the gate on, Download brings the one you pick from Hugging
+  Face, with a progress bar and a Cancel button, and the app then starts the
+  engine with it. With it off, the picker offers to turn it on.
 - **Saved chats**, one JSON file each in the app's data folder. Trash moves a
   file into a `trash` folder; the app deletes nothing.
 - **A context meter** that shows how full the model's window is.
@@ -45,18 +53,26 @@ Select the picture to open it full size. The rest of the set is in
   says so. Download opens that file in the browser and then says how to
   install it; What changed opens the release's notes; Later hides the notice
   until the app opens again, a newer version is out, or you click Check for
-  updates. Check for updates says what it found, or why the check failed.
+  updates. Check for updates says what it found, or why the check failed;
+  while the gate is off, it says to turn the gate on.
 
 ## How it is put together
 
 ```
 page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
-                      Rust  --https, on Download only-->   Hugging Face
-                      Rust  --Docker, when the stack is not answering-->  the stack
-                      Rust  --https, at open, once a day, and on Check for updates-->  GitHub's API
+                      Rust  --gate--https, on Download only-->   Hugging Face
+                      Rust  --gate--Docker, when the stack is not answering-->  the stack
+                      Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
 ```
 
-The page never talks to the network. Rust owns seven things:
+The page never talks to the network, and Rust reaches past this computer only
+through the gate. Rust owns eight things:
+
+- [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
+  keeps the switch, off until the person turns it on, and makes every client
+  that reaches past this computer: only while the gate is on, over https,
+  with no proxy. Turning it off stops a check, a download, or a start of the
+  stack that is under way.
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,

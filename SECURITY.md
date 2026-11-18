@@ -1,7 +1,9 @@
 # Security
 
-Rusty Business™ is built to keep what you type on your computer. If you find
-a way around that, or any other security problem, I want to hear about it.
+Rusty Business™ is built local first, to keep what you type on your
+computer, with an outbound gate that holds everything else back until you
+turn it on. If you find a way around that, or any other security problem, I
+want to hear about it.
 
 ## Reporting a problem
 
@@ -22,7 +24,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.4.0. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.5.0. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -37,6 +39,10 @@ These are the promises that matter most. A way to break one is exactly what
 I want to hear about:
 
 - The page has no way to call out.
+- While the outbound gate is off, which it is until you turn it on, the app
+  makes no connection past this computer: no check for a new version, no
+  download, and no start of the stack. Turning it off stops what is under
+  way. With it on, every such connection is https only, through no proxy.
 - The app refuses an engine address that is not on this computer, and an
   engine it starts listens on this computer only.
 - The app downloads only the models on its list, only from Hugging Face over

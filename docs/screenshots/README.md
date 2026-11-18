@@ -22,7 +22,7 @@ above the answer. Here it is opened.
 
 ## A new chat
 
-[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, and the stack line reading Stack on 127.0.0.1:4700](new-chat.png)](new-chat.png?raw=true)
+[![A new chat in the light theme: 'Ask anything.' in the middle, Phi-4 chosen in the model picker, the engine line reading MLX on 127.0.0.1:8080, the stack line reading Stack on 127.0.0.1:4700, and the outbound gate off at the foot of the window](new-chat.png)](new-chat.png?raw=true)
 
 What the app shows before the first question. The app follows the system's
 light or dark setting; this is light.
@@ -38,11 +38,12 @@ button to try again.
 
 ## The first run
 
-[![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button, and Phi-4 marked as the quickest to start](first-run.png)](first-run.png?raw=true)
+[![The first run in the dark theme, with none of the app's models on this computer: Phi-4 at 8.3 GB, gpt-oss 20B at 12.1 GB, and Nemotron 3.5 Lightning at 17.8 GB, each with a Download button that waits for the outbound gate, a Turn on the gate button above them, and Phi-4 marked as the quickest to start](first-run.png)](first-run.png?raw=true)
 
 What the app shows when none of its models is on this computer: each one it
 can download, with its maker and its download size, and the smallest marked
-as the quickest to start. Nothing downloads until Download is pressed.
+as the quickest to start. Nothing downloads until the outbound gate is on and
+Download is pressed.
 
 ## How these were made
 
@@ -67,7 +68,8 @@ These are pictures of the app's page, not captures of the app's window:
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
   No stack is started either: in every picture, the page is told the stack's
-  front door already answers.
+  front door already answers. The outbound gate is off in every picture, as it
+  is until it is turned on.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.
 

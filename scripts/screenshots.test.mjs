@@ -404,7 +404,14 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   assert.match(row, /<progress\s+:value="downloaded\(progress\)"/, 'a download shows how far it has come');
   assert.match(row, /\{\{ stopping \? "Stopping\.\.\." : downloadLine\(progress\) \}\}/, 'and in words');
   assert.match(row, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it');
-  assert.match(row, /:disabled="Boolean\(downloading\)"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads');
+  // Brad, 2026-11-17: "off by default, everything stops". Download is off too
+  // while the outbound gate is, and the picker offers to turn the gate on.
+  assert.match(row, /:disabled="Boolean\(downloading\) \|\| !gate"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
+  assert.match(
+    page,
+    /<p v-if="!gate" class="gate-ask">\s*<span>The outbound gate is off, so nothing can download yet\.<\/span>\s*<button class="primary" type="button" :disabled="gateBusy" @click="setGate\(true\)">Turn on the gate<\/button>\s*<\/p>/,
+    'the first-run picker offers to turn the gate on',
+  );
   assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
   assert.match(page, /<p v-if="problem" class="problem" role="alert">\s*\{\{ problem \}\}/, 'and so is the reason a download failed');
 });
@@ -542,7 +549,7 @@ test('with the window open, the app asks for the stack to be started, and says w
   assert.equal(stackLine(STACK_RUNNING, false), `Stack on 127.0.0.1:${port}`);
 });
 
-test('the stand-in answers the five calls the pictures need, and refuses the rest', async () => {
+test('the stand-in answers the six calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -574,8 +581,11 @@ test('the stand-in answers the five calls the pictures need, and refuses the res
   // Asked to start the stack, it starts nothing and says the stack runs.
   assert.deepEqual(plain(await invoke('start_stack')), STACK_RUNNING);
 
+  // The outbound gate is off, as on a first run, and the pictures leave it so.
+  assert.equal(await invoke('gate_status'), false);
+
   // A call that would send, save, trash, or download has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download']) {
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

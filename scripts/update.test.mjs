@@ -134,6 +134,17 @@ test('"check for updates": a button asks now and says what it found', () => {
   assert.match(app, /async function checkUpdate\(\) \{\n  if \(!inApp\) return;\n  try \{\n    update\.value = await invoke\("check_update"\);\n  \} catch \{/, `${APP} shows a failed daily check`);
 });
 
+// Brad, 2026-11-17: "for update, it should tell them to enable the gate to
+// check for updates."
+test('with the gate off, Check for updates says to turn the gate on, and the line goes once it is on', () => {
+  const update = codeOf(read(UPDATE));
+  assert.ok(update.includes('const GATE_OFF: &str = "The gate is off. Turn it on to check for updates.";'), `${UPDATE} no longer says to turn the gate on`);
+  assert.match(update, /fn client\(gate: &Gate\)[^{]*\{\s+gate\.client\(GATE_OFF,/, `${UPDATE} checks without the gate`);
+  const app = read(APP);
+  const setGate = app.slice(app.indexOf('async function setGate('), app.indexOf('async function', app.indexOf('async function setGate(') + 1));
+  assert.match(setGate, /if \(gate\.value\) \{\n    updateChecked\.value = "";\n    checkStack\(\);\n    checkUpdate\(\);/, `${APP} keeps saying the gate is off after it is turned on`);
+});
+
 test('the two commands are on the list the page may call, with what the last check found', () => {
   const lib = read(LIB);
   assert.match(lib, /^mod update;$/m);
@@ -171,7 +182,8 @@ test('the app opens the browser and nothing else, and installs nothing itself', 
   for (const opener of ['"/usr/bin/open"', '"rundll32.exe", &["url.dll,FileProtocolHandler"]', '"xdg-open"']) {
     assert.ok(code.includes(opener), `${UPDATE} no longer opens the browser with ${opener}`);
   }
-  assert.match(code, /let url = address\(&update, part\)\?;\n\s+let mut child = browser\(&url\)/, `${UPDATE} opens an address it did not check`);
+  assert.match(code, /let url = to_open\(part, &updates, &gate\)\?;\n\s+let mut child = browser\(&url\)/, `${UPDATE} opens an address it did not check`);
+  assert.match(code, /fn to_open\([^)]*\) -> Result<reqwest::Url, String> \{[^}]*\}[^}]*address\(&update, part\)\n\}/, `${UPDATE} opens an address it did not check`);
   assert.doesNotMatch(read(CARGO), /tauri-plugin-(?:updater|opener|shell|process)/, `${CARGO} brings in a plugin that could install or run things`);
   assert.equal(JSON.parse(read(TAURI)).plugins?.updater, undefined, `${TAURI} turns on Tauri's updater`);
   assert.deepEqual(JSON.parse(read(CAPABILITY)).permissions, ['core:default'], `${CAPABILITY} lets the page do more`);
@@ -186,12 +198,18 @@ test('each rule of the notice is kept by a test in the Rust', () => {
   assert.ok(rust.includes('("is the user able to click a refresh button? If not, I want that.",\n// then "check for updates I imply")'), `${UPDATE} no longer quotes the ask for the button`);
 });
 
+// Brad, 2026-11-17: "for update, it should tell them to enable the gate to
+// check for updates."
 test('the README, the security policy, and the roadmap say what the check does', () => {
   const readme = read('README.md');
-  assert.match(readme, /once a day while it stays open, and when you click Check\s+for updates, the app asks GitHub\s+whether a new version is out\./, 'the README no longer says when the app asks GitHub');
-  assert.match(readme, /Check for updates,\s+under the saved chats, asks at any time\./, "the README's limits no longer name Check for updates");
+  const words = readme.replace(/\s+/g, ' ');
+  assert.ok(words.includes('once a day while it stays open, and when you click Check for updates, the app asks GitHub whether a new version is out.'), 'the README no longer says when the app asks GitHub');
+  assert.ok(words.includes('Check for updates, under the saved chats, asks at any time.'), "the README's limits no longer name Check for updates");
   assert.match(readme, /^- \*\*A new version is a download\.\*\*/m, "the README's limits no longer say a new version is a download");
-  assert.match(readme, /There\s+is\s+no\s+switch\s+to\s+turn\s+the\s+check\s+off\./, 'the README no longer says the check has no switch');
+  assert.ok(
+    words.includes('While the outbound gate is off, the app does not ask, and the button says to turn the gate on.'),
+    'the README no longer says the check waits for the outbound gate',
+  );
   const security = read('SECURITY.md').replace(/\s+/g, ' ');
   assert.ok(
     security.includes("The check for a new version asks GitHub's API for this repository's newest release, over https, and nothing else."),

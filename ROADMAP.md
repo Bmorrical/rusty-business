@@ -14,12 +14,32 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-Nothing is picked yet.
+- **Model makers you choose.** On a first run, you pick one maker or more,
+  with Microsoft ticked to start. Settings adds another with one click,
+  Google and Meta among them.
+- **One question, many models.** Ask one model or several the same
+  question, and see the answers side by side. Models that cannot run at
+  once take turns.
+- **Engines outside this computer, Grok first.** You give the path to your
+  key. The app reads it there, never shows it to the page, and sends it
+  over https only to the maker's own address, and only while the outbound
+  gate is on. Grok can answer alone or as one of several.
+- **Grading and a summary.** Once every answer is in, an engine you pick
+  grades them and sums them up.
+- **An installers page.** One click installs a model to run here, or sets up
+  Claude or OpenAI's models.
 
 ## Later
 
 - **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
   Windows and Linux need an engine of their own. It is not chosen yet.
+- **Pictures.** Add an image to a question and ask about it.
+- **A look at the desktop.** Select text, or point at the screen, and ask
+  about what is there.
+- **Skills.** Tell the app how you like its answers, such as short unless
+  you ask for more, and it keeps that.
+- **Learning on this computer.** The app learns from how you use it, here,
+  and reaches outside sparingly, only when you say so.
 
 ## Done
 
@@ -63,3 +83,7 @@ Nothing is picked yet.
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
   GitHub when the window opens, once a day, and when you click Check for
   updates. It installs nothing itself.
+- **The outbound gate.** A switch at the foot of the window, off until you
+  turn it on. While it is off, nothing leaves the computer: no check for a
+  new version, no download, and no start of the stack. Turning it off stops
+  what is under way. A chat with a model here works either way.
