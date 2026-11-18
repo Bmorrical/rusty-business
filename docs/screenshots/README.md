@@ -67,8 +67,8 @@ lists every model on the app's list, from every maker, with its license and
 download size. Install downloads one, once the outbound gate is on, then
 adds its maker so the model shows at the top of the window. Here the gate is
 off, so Install waits. A model already on this computer whose maker is not
-added has a Show button instead. Grok and GPT are added below, under
-Outside engines, each on its own card.
+added has a Show button instead. Grok, GPT, and Claude are added below,
+under Outside engines, each on its own card.
 
 ## Settings: the model makers
 
@@ -107,8 +107,8 @@ These are pictures of the app's page, not captures of the app's window:
   page is told why the app did not start one. For the first run, it is also
   told that none of the models is on this computer, and nothing downloads.
   No stack is started either: in every picture, the page is told the stack's
-  front door already answers. Grok and GPT are not added, and no key is
-  read. The outbound gate is off in every picture, as it is until it is
+  front door already answers. Grok, GPT, and Claude are not added, and no
+  key is read. The outbound gate is off in every picture, as it is until it is
   turned on, and no maker can be changed.
 - "Today" and "Yesterday" are counted from the day the pictures are made.
 - Made on another system, the letters come out in that system's font.

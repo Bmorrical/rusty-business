@@ -3,8 +3,8 @@
 A window for chatting with models that run on your own computer. The shell is
 Rust (Tauri 2), and the page is Vue 3. It is local first: a chat needs nothing
 outside the computer, and nothing leaves it until you turn on the outbound
-gate. With it on, Grok, by xAI, and GPT, by OpenAI, can answer too, each
-with your own key.
+gate. With it on, Grok, by xAI, GPT, by OpenAI, and Claude, by Anthropic,
+can answer too, each with your own key.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
@@ -16,8 +16,8 @@ Select the picture to open it full size. The rest of the set is in
 - **The outbound gate**, a switch at the foot of the window. It is off until
   you turn it on, and it stays as you leave it. While it is off, the app
   makes no connection past this computer: it asks for no new version,
-  downloads nothing, starts no stack, and asks Grok and GPT nothing. Turning it off
-  stops what is under way. A chat with a model here works either way.
+  downloads nothing, starts no stack, and asks Grok, GPT, and Claude nothing.
+  Turning it off stops what is under way. A chat with a model here works either way.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **One model or several.** The models sit at the top of the window, one
@@ -49,11 +49,14 @@ Select the picture to open it full size. The rest of the set is in
 - **GPT, by OpenAI**, added the same way on a card of its own, with the path
   to a file that holds your own OpenAI key. That key goes only to OpenAI's
   API. Each engine keeps its own path and models, and removing one leaves
-  the other as it was.
+  the others as they were.
+- **Claude, by Anthropic**, added the same way on a card of its own, with
+  the path to a file that holds your own Anthropic key. That key goes only
+  to Anthropic's API, in Anthropic's own header. A chat for Claude starts
+  and ends with a message of yours, and a question Claude declines says so.
 - **Grading**, once several models have answered. One model, an outside
-  engine (Grok before GPT) until another is picked in Settings under
-  Grading, grades each answer from A to
-  F and sums them up. It reads the question and the answers, numbered and
+  engine (Grok first, then GPT, then Claude) until another is picked in
+  Settings under Grading, grades each answer from A to F and sums them up. It reads the question and the answers, numbered and
   without the models' names. Each answer shows its letter, the summary sits
   below them, and a round not graded yet has a button to grade it. Where the
   grader wrote "Answer 2", the page adds the name of the model that wrote it.
@@ -103,6 +106,7 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
                       Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
                       Rust  --gate--https, with the key from your file-->  xAI's API (Grok)
                       Rust  --gate--https, with the key from your file-->  OpenAI's API (GPT)
+                      Rust  --gate--https, with the key from your file-->  Anthropic's API (Claude)
 ```
 
 The page never talks to the network, and Rust reaches past this computer only
@@ -146,12 +150,12 @@ through the gate. Rust owns ten things:
   already on this computer. The models shown, on the disk, and offered for
   download are only those of the makers picked.
 - [src-tauri/src/outside.rs](src-tauri/src/outside.rs), the engines outside
-  this computer: Grok, by xAI, and GPT, by OpenAI. It keeps the path to each
-  of the person's keys in the app's data folder, never a key. It reads a key
-  from its file only when it asks that engine's maker, after the gate says
-  yes, and sends it only to that maker's API, at an address fixed in the
-  code, over https, with no proxy and no redirect. The page gets the paths
-  and the models, never a key.
+  this computer: Grok, by xAI, GPT, by OpenAI, and Claude, by Anthropic. It
+  keeps the path to each of the person's keys in the app's data folder,
+  never a key. It reads a key from its file only when it asks that engine's
+  maker, after the gate says yes, and sends it only to that maker's API, at
+  an address fixed in the code, over https, with no proxy and no redirect.
+  The page gets the paths and the models, never a key.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
 - [src-tauri/src/update.rs](src-tauri/src/update.rs), the notice of a new
   version. It asks only GitHub's API, only for this repository's newest
