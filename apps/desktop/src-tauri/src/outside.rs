@@ -1,23 +1,26 @@
-//! Engines outside this computer, Grok by xAI first.
+//! Engines outside this computer: Grok by xAI, and GPT by OpenAI.
 //!
-//! It answers this ask: "user can add their outside inference, start with
+//! It answers these asks: "user can add their outside inference, start with
 //! Grok and Grok ai. user adds it manually, they will need to provide or
 //! specify a path to a key, now, the Rusty Business™ can query Grok for the
-//! same question. ... you can use grok by it's self too."
+//! same question. ... you can use grok by it's self too." And, of the engines
+//! after Grok: "and claude and codex/gpt and gemmini".
 //!
-//! The rules, each with a test:
+//! The rules, each with a test, are the same for every engine:
 //!
-//! - The person gives the path to a file that holds their xAI key. The app
-//!   keeps the path, never the key. Rust reads the key from the file each time
-//!   it asks xAI, and the key never reaches the page, the app's own files, or
-//!   a message.
-//! - xAI is asked only while the outbound gate is on, over https, at its API
-//!   alone, an address no setting changes. The gate is looked at before the
-//!   key is read, and turning it off stops an answer under way.
-//! - Only Grok models for text, as xAI lists them, are offered, and only
-//!   those are accepted. Grok answers alone or as one of the models asked, and
-//!   waits for no turn: it is not on this computer.
-//! - Removing Grok forgets the path. The key file is never touched.
+//! - The person gives the path to a file that holds their key from the
+//!   engine's maker. The app keeps the path, never the key. Rust reads the key
+//!   from the file each time it asks, and the key never reaches the page, the
+//!   app's own files, or a message.
+//! - An engine is asked only while the outbound gate is on, over https, at its
+//!   maker's API alone, an address no setting changes. The gate is looked at
+//!   before the key is read, and turning it off stops an answer under way.
+//! - Only an engine's models for text, as its maker lists them, are offered,
+//!   and a model is asked only of the engine that listed it. Each answers
+//!   alone or as one of the models asked, and waits for no turn: it is not on
+//!   this computer.
+//! - Each engine keeps its own path and models. Removing one forgets its path
+//!   and leaves the others as they were. The key file is never touched.
 
 use std::collections::HashMap;
 use std::fs;
@@ -34,32 +37,16 @@ use tokio::sync::watch;
 use crate::engine::{self, ChatDone, ChatEvent, ChatRequest, ModelInfo};
 use crate::gate::Gate;
 
-/// The one host asked, and its API.
+/// The one host asked for each engine, and its API.
 pub const XAI_HOST: &str = "api.x.ai";
 const XAI_BASE: &str = "https://api.x.ai/v1";
+pub const OPENAI_HOST: &str = "api.openai.com";
+const OPENAI_BASE: &str = "https://api.openai.com/v1";
 
-/// What the page's ids for Grok's models start with.
-pub const PREFIX: &str = "xai:";
+const UNKNOWN: &str = "The app does not know that outside engine.";
+const NOT_OUTSIDE: &str = "That model is not one an outside engine listed.";
 
-const NAME: &str = "Grok";
-const MAKER: &str = "xAI";
-
-/// What Grok says while the outbound gate is off.
-const GATE_OFF: &str = "The gate is off. Turn it on to ask Grok.";
-
-/// What adding Grok says while the outbound gate is off.
-const GATE_OFF_FIND: &str = "Grok is added. Turn on the gate to find its models.";
-
-/// What an answer says when the gate is turned off part way through.
-const GATE_WENT_OFF: &str = "The gate went off, so Grok stopped.";
-
-const NOT_ADDED: &str = "Grok is not added. Add it in Settings with the path to your xAI key.";
-const NO_PATH: &str = "Give the path to the file that holds your xAI key.";
-const WHOLE_PATH: &str = "Give the whole path to the file that holds your xAI key, starting with / or ~/, not the key itself.";
-const UNREACHABLE: &str = "Grok could not be reached.";
-const UNREADABLE: &str = "xAI's list of models could not be read.";
-
-/// How long the app waits to reach xAI. A reasoning model can think for
+/// How long the app waits to reach an engine. A reasoning model can think for
 /// minutes, so an answer has no overall limit; Stop and the gate end it.
 const CONNECT_WAIT: Duration = Duration::from_secs(10);
 
@@ -69,23 +56,209 @@ const LIST_WAIT: Duration = Duration::from_secs(30);
 /// The most of a list the app reads.
 const MOST_BYTES: usize = 1_000_000;
 
-/// The most models kept from xAI's list.
-const MOST_MODELS: usize = 30;
-
 /// The longest path taken, and the biggest key file read.
 const PATH_MOST: usize = 4096;
 const KEY_FILE_MOST: u64 = 1024;
 
-/// A key's length, from the shortest to the longest taken.
+/// A key's length, from the shortest to the longest taken. OpenAI's project
+/// keys run past 160 characters.
 const KEY_SHORTEST: usize = 20;
-const KEY_LONGEST: usize = 200;
+const KEY_LONGEST: usize = 256;
+
+/// The words in an OpenAI model's id that mark it as one that does not answer
+/// text in a chat: sound, pictures, search, tools of its own, or another API.
+const NOT_FOR_CHAT: [&str; 13] =
+    ["audio", "realtime", "tts", "transcribe", "image", "search", "instruct", "codex", "pro", "deep", "research", "embedding", "moderation"];
+
+// ---------------------------------------------------------------------------
+// The engines
+// ---------------------------------------------------------------------------
+
+/// An engine outside this computer, asked at its maker's API alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Engine {
+    Xai,
+    OpenAi,
+}
+
+impl Engine {
+    /// Every one, in the order the page shows them.
+    const ALL: [Self; 2] = [Self::Xai, Self::OpenAi];
+
+    /// The page's name for it.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Xai => "xai",
+            Self::OpenAi => "openai",
+        }
+    }
+
+    /// What the page's ids for its models start with.
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Xai => "xai:",
+            Self::OpenAi => "openai:",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Xai => "Grok",
+            Self::OpenAi => "GPT",
+        }
+    }
+
+    fn maker(self) -> &'static str {
+        match self {
+            Self::Xai => "xAI",
+            Self::OpenAi => "OpenAI",
+        }
+    }
+
+    fn host(self) -> &'static str {
+        match self {
+            Self::Xai => XAI_HOST,
+            Self::OpenAi => OPENAI_HOST,
+        }
+    }
+
+    fn base(self) -> &'static str {
+        match self {
+            Self::Xai => XAI_BASE,
+            Self::OpenAi => OPENAI_BASE,
+        }
+    }
+
+    /// The most models kept from its maker's list. OpenAI lists years of
+    /// models, so only its newest are kept.
+    fn most_models(self) -> usize {
+        match self {
+            Self::Xai => 30,
+            Self::OpenAi => 12,
+        }
+    }
+
+    /// The engine the page names `id`.
+    fn named(id: &str) -> Result<Self, String> {
+        Self::ALL.into_iter().find(|engine| engine.id() == id).ok_or_else(|| UNKNOWN.to_string())
+    }
+
+    /// The engine a page id for a model names, and the model's id at its maker.
+    fn of_model(id: &str) -> Option<(Self, &str)> {
+        Self::ALL.into_iter().find_map(|engine| id.strip_prefix(engine.prefix()).map(|model| (engine, model)))
+    }
+
+    /// True for an id that reads as one of this engine's models for text and
+    /// nothing more.
+    fn fits(self, id: &str) -> bool {
+        let plain = id.len() <= 100 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+        plain
+            && match self {
+                Self::Xai => id.starts_with("grok-"),
+                Self::OpenAi => openai_fits(id),
+            }
+    }
+
+    /// A model's name as the page shows it.
+    fn name_of(self, id: &str) -> String {
+        match self {
+            Self::Xai => id.split('-').filter(|word| !word.is_empty()).map(capital).collect::<Vec<_>>().join(" "),
+            Self::OpenAi => openai_name(id),
+        }
+    }
+
+    /// True for an https address on this engine's API, with no account in it
+    /// and no port of its own.
+    fn owns(self, url: &reqwest::Url) -> bool {
+        url.scheme() == "https" && url.username().is_empty() && url.password().is_none() && url.port().is_none() && url.domain() == Some(self.host())
+    }
+
+    /// What an engine says while the outbound gate is off.
+    fn gate_off(self) -> String {
+        format!("The gate is off. Turn it on to ask {}.", self.name())
+    }
+
+    /// What adding an engine says while the outbound gate is off.
+    fn gate_off_find(self) -> String {
+        format!("{} is added. Turn on the gate to find its models.", self.name())
+    }
+
+    /// What an answer says when the gate is turned off part way through.
+    fn gate_went_off(self) -> String {
+        format!("The gate went off, so {} stopped.", self.name())
+    }
+
+    fn not_added(self) -> String {
+        format!("{} is not added. Add it on the Installers page with the path to your {} key.", self.name(), self.maker())
+    }
+
+    fn not_listed(self) -> String {
+        format!("That {} model is not on the list. Refresh {}'s models on the Installers page.", self.name(), self.name())
+    }
+
+    fn no_path(self) -> String {
+        format!("Give the path to the file that holds your {} key.", self.maker())
+    }
+
+    fn whole_path(self) -> String {
+        format!("Give the whole path to the file that holds your {} key, starting with / or ~/, not the key itself.", self.maker())
+    }
+
+    fn unreachable(self) -> String {
+        format!("{} could not be reached.", self.name())
+    }
+
+    fn unreadable(self) -> String {
+        format!("{}'s list of models could not be read.", self.maker())
+    }
+
+    fn none_listed(self) -> String {
+        format!("{} listed no {} models for text.", self.maker(), self.name())
+    }
+
+    fn elsewhere(self) -> String {
+        format!("{} answered from somewhere else.", self.maker())
+    }
+}
+
+/// A word with its first letter a capital, when it starts with a letter.
+fn capital(word: &str) -> String {
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) if first.is_ascii_alphabetic() => first.to_ascii_uppercase().to_string() + letters.as_str(),
+        _ => word.to_string(),
+    }
+}
+
+/// "gpt-5-mini", "chatgpt-4o-latest", and "o4-mini" fit. A dated copy, such as
+/// "gpt-4o-2024-08-06", does not, nor does a model for sound, as
+/// "gpt-4o-audio-preview" is.
+fn openai_fits(id: &str) -> bool {
+    let family = id.starts_with("gpt-")
+        || id.starts_with("chatgpt-")
+        || id.strip_prefix('o').is_some_and(|rest| rest.starts_with(|letter: char| letter.is_ascii_digit()));
+    family && id.split('-').all(|word| !NOT_FOR_CHAT.contains(&word) && !(word.len() >= 4 && word.bytes().all(|byte| byte.is_ascii_digit())))
+}
+
+/// "gpt-5-mini" reads "GPT-5 Mini", "chatgpt-4o-latest" "ChatGPT-4o Latest",
+/// and "o4-mini" "o4 Mini".
+fn openai_name(id: &str) -> String {
+    let words: Vec<&str> = id.split('-').filter(|word| !word.is_empty()).collect();
+    let (head, rest) = match words.as_slice() {
+        ["gpt", version, rest @ ..] => (format!("GPT-{version}"), rest),
+        ["chatgpt", version, rest @ ..] => (format!("ChatGPT-{version}"), rest),
+        [first, rest @ ..] => ((*first).to_string(), rest),
+        [] => return String::new(),
+    };
+    std::iter::once(head).chain(rest.iter().map(|word| capital(word))).collect::<Vec<_>>().join(" ")
+}
 
 // ---------------------------------------------------------------------------
 // The key
 // ---------------------------------------------------------------------------
 
-/// The person's xAI key, read from their file for one call and dropped after
-/// it. It has no `Debug` and no `Display`, so nothing can print it.
+/// The person's key, read from their file for one call and dropped after it.
+/// It has no `Debug` and no `Display`, so nothing can print it.
 struct Key(String);
 
 /// The key in the file at `path`. A file that holds anything but one key is
@@ -131,52 +304,30 @@ fn home() -> Option<PathBuf> {
 
 /// The path the person gave, whole. Anything else, a key pasted in its place
 /// most of all, is refused, and the message never repeats it.
-fn checked_path(given: &str) -> Result<PathBuf, String> {
+fn checked_path(engine: Engine, given: &str) -> Result<PathBuf, String> {
     let given = given.trim();
     if given.is_empty() {
-        return Err(NO_PATH.to_string());
+        return Err(engine.no_path());
     }
     if given.chars().count() > PATH_MOST {
-        return Err(WHOLE_PATH.to_string());
+        return Err(engine.whole_path());
     }
     let path = match given.strip_prefix("~/").or_else(|| given.strip_prefix("~\\")) {
-        Some(rest) => home().ok_or_else(|| WHOLE_PATH.to_string())?.join(rest),
+        Some(rest) => home().ok_or_else(|| engine.whole_path())?.join(rest),
         None => PathBuf::from(given),
     };
     if !path.is_absolute() {
-        return Err(WHOLE_PATH.to_string());
+        return Err(engine.whole_path());
     }
     Ok(path)
 }
 
 // ---------------------------------------------------------------------------
-// Grok's models
+// The engines' models
 // ---------------------------------------------------------------------------
 
-/// True for an id that reads as one of Grok's models and nothing more.
-fn fits(id: &str) -> bool {
-    id.starts_with("grok-")
-        && id.len() <= 100
-        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-/// "grok-4.7" reads "Grok 4.7".
-fn name_of(id: &str) -> String {
-    id.split('-')
-        .filter(|word| !word.is_empty())
-        .map(|word| {
-            let mut letters = word.chars();
-            match letters.next() {
-                Some(first) if first.is_ascii_alphabetic() => first.to_ascii_uppercase().to_string() + letters.as_str(),
-                _ => word.to_string(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// One of Grok's models as kept: its id at xAI, and its window, 0 when xAI
-/// does not say.
+/// One of an engine's models as kept: its id at the maker, and its window, 0
+/// when the maker does not say.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 struct Found {
     id: String,
@@ -185,15 +336,16 @@ struct Found {
 }
 
 impl Found {
-    fn info(&self) -> ModelInfo {
-        ModelInfo { id: format!("{PREFIX}{}", self.id), name: name_of(&self.id), maker: MAKER.to_string(), context: self.context }
+    fn info(&self, engine: Engine) -> ModelInfo {
+        ModelInfo { id: format!("{}{}", engine.prefix(), self.id), name: engine.name_of(&self.id), maker: engine.maker().to_string(), context: self.context }
     }
 }
 
 /// The Grok models for text in xAI's list, each once, in its order.
-fn text_models(answer: &[u8]) -> Result<Vec<String>, String> {
-    let value: Value = serde_json::from_slice(answer).map_err(|_| UNREADABLE.to_string())?;
-    let listed = value.get("models").and_then(Value::as_array).ok_or_else(|| UNREADABLE.to_string())?;
+fn xai_models(answer: &[u8]) -> Result<Vec<String>, String> {
+    let engine = Engine::Xai;
+    let value: Value = serde_json::from_slice(answer).map_err(|_| engine.unreadable())?;
+    let listed = value.get("models").and_then(Value::as_array).ok_or_else(|| engine.unreadable())?;
     let mut ids: Vec<String> = Vec::new();
     for entry in listed {
         let Some(id) = entry.get("id").and_then(Value::as_str) else {
@@ -204,15 +356,15 @@ fn text_models(answer: &[u8]) -> Result<Vec<String>, String> {
             Some(Value::Array(kinds)) => kinds.iter().any(|kind| kind.as_str() == Some("text")),
             Some(_) => false,
         };
-        if text && fits(id) && !ids.iter().any(|kept| kept == id) {
+        if text && engine.fits(id) && !ids.iter().any(|kept| kept == id) {
             ids.push(id.to_string());
         }
-        if ids.len() == MOST_MODELS {
+        if ids.len() == engine.most_models() {
             break;
         }
     }
     if ids.is_empty() {
-        return Err("xAI listed no Grok models for text.".to_string());
+        return Err(engine.none_listed());
     }
     Ok(ids)
 }
@@ -231,14 +383,37 @@ fn windows(answer: &[u8]) -> HashMap<String, u32> {
     found
 }
 
+/// The GPT models for text in OpenAI's list, each once, newest first.
+fn openai_models(answer: &[u8]) -> Result<Vec<String>, String> {
+    let engine = Engine::OpenAi;
+    let value: Value = serde_json::from_slice(answer).map_err(|_| engine.unreadable())?;
+    let listed = value.get("data").and_then(Value::as_array).ok_or_else(|| engine.unreadable())?;
+    let mut found: Vec<(i64, &str)> = Vec::new();
+    for entry in listed {
+        let Some(id) = entry.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if engine.fits(id) && !found.iter().any(|(_, kept)| *kept == id) {
+            found.push((entry.get("created").and_then(Value::as_i64).unwrap_or(0), id));
+        }
+    }
+    // Models made at the same time keep the list's order.
+    found.sort_by_key(|(created, _)| std::cmp::Reverse(*created));
+    let ids: Vec<String> = found.into_iter().take(engine.most_models()).map(|(_, id)| id.to_string()).collect();
+    if ids.is_empty() {
+        return Err(engine.none_listed());
+    }
+    Ok(ids)
+}
+
 // ---------------------------------------------------------------------------
-// Asking xAI
+// Asking an engine
 // ---------------------------------------------------------------------------
 
-/// The one client for xAI, through the outbound gate. It follows no redirect
-/// and sends no cookie; the key goes only in the call it is read for.
-fn client(gate: &Gate) -> Result<reqwest::Client, String> {
-    gate.client(GATE_OFF, |builder| {
+/// The one client for an engine, through the outbound gate. It follows no
+/// redirect and sends no cookie; the key goes only in the call it is read for.
+fn client(engine: Engine, gate: &Gate) -> Result<reqwest::Client, String> {
+    gate.client(&engine.gate_off(), |builder| {
         builder
             .no_proxy()
             .https_only(true)
@@ -249,71 +424,73 @@ fn client(gate: &Gate) -> Result<reqwest::Client, String> {
     })
 }
 
-/// True for an https address on xAI's API, with no account in it and no port
-/// of its own.
-fn from_xai(url: &reqwest::Url) -> bool {
-    url.scheme() == "https" && url.username().is_empty() && url.password().is_none() && url.port().is_none() && url.domain() == Some(XAI_HOST)
-}
-
-/// Why xAI turned a call down, from its status alone. What xAI writes back is
-/// never shown: it could repeat what was sent.
-fn status_error(code: u16) -> String {
+/// Why the engine's maker turned a call down, from its status alone. What it
+/// writes back is never shown: it could repeat what was sent.
+fn status_error(engine: Engine, code: u16) -> String {
+    let maker = engine.maker();
     match code {
-        401 | 403 => format!("xAI did not take the key ({code}). Check the key file."),
-        404 => "xAI answered 404. It may no longer offer that model: refresh Grok's models in Settings.".to_string(),
-        429 => "xAI says too many requests, or no credits left (429). Wait a moment, or check your xAI account.".to_string(),
-        500..=599 => format!("xAI is not answering right now ({code})."),
-        _ => format!("xAI answered {code}."),
+        401 | 403 => format!("{maker} did not take the key ({code}). Check the key file."),
+        404 => format!("{maker} answered 404. It may no longer offer that model: refresh {}'s models on the Installers page.", engine.name()),
+        429 => format!("{maker} says too many requests, or no credits left (429). Wait a moment, or check your {maker} account."),
+        500..=599 => format!("{maker} is not answering right now ({code})."),
+        _ => format!("{maker} answered {code}."),
     }
 }
 
 /// An answer, read up to `most` bytes and no further.
-async fn read_capped<B: AsRef<[u8]>, E>(chunks: impl Stream<Item = Result<B, E>>, most: usize) -> Result<Vec<u8>, String> {
+async fn read_capped<B: AsRef<[u8]>, E>(engine: Engine, chunks: impl Stream<Item = Result<B, E>>, most: usize) -> Result<Vec<u8>, String> {
     let mut chunks = std::pin::pin!(chunks);
     let mut answer = Vec::new();
     while let Some(chunk) = chunks.next().await {
-        let chunk = chunk.map_err(|_| "xAI stopped answering part way through.".to_string())?;
+        let chunk = chunk.map_err(|_| format!("{} stopped answering part way through.", engine.maker()))?;
         if answer.len() + chunk.as_ref().len() > most {
-            return Err("xAI's answer was too large.".to_string());
+            return Err(format!("{}'s answer was too large.", engine.maker()));
         }
         answer.extend_from_slice(chunk.as_ref());
     }
     Ok(answer)
 }
 
-/// One of xAI's lists, `models` or `language-models`.
-async fn list(client: &reqwest::Client, key: &Key, which: &str) -> Result<Vec<u8>, String> {
+/// One of the engine's lists, such as `models`.
+async fn list(engine: Engine, client: &reqwest::Client, key: &Key, which: &str) -> Result<Vec<u8>, String> {
     let response = client
-        .get(format!("{XAI_BASE}/{which}"))
+        .get(format!("{}/{which}", engine.base()))
         .bearer_auth(&key.0)
         .timeout(LIST_WAIT)
         .send()
         .await
-        .map_err(|_| UNREACHABLE.to_string())?;
-    if !from_xai(response.url()) {
-        return Err("xAI answered from somewhere else.".to_string());
+        .map_err(|_| engine.unreachable())?;
+    if !engine.owns(response.url()) {
+        return Err(engine.elsewhere());
     }
     if !response.status().is_success() {
-        return Err(status_error(response.status().as_u16()));
+        return Err(status_error(engine, response.status().as_u16()));
     }
-    read_capped(response.bytes_stream(), MOST_BYTES).await
+    read_capped(engine, response.bytes_stream(), MOST_BYTES).await
 }
 
-/// Grok's models for text, with their windows where xAI gives them.
-async fn find_models(client: &reqwest::Client, key: &Key) -> Result<Vec<Found>, String> {
-    let ids = text_models(&list(client, key, "language-models").await?)?;
-    // The windows are a nicety: without them the models still answer.
-    let windows = list(client, key, "models").await.map(|answer| windows(&answer)).unwrap_or_default();
-    Ok(ids.into_iter().map(|id| Found { context: windows.get(&id).copied().unwrap_or(0), id }).collect())
+/// The engine's models for text, with their windows where its maker gives
+/// them.
+async fn find_models(engine: Engine, client: &reqwest::Client, key: &Key) -> Result<Vec<Found>, String> {
+    match engine {
+        Engine::Xai => {
+            let ids = xai_models(&list(engine, client, key, "language-models").await?)?;
+            // The windows are a nicety: without them the models still answer.
+            let windows = list(engine, client, key, "models").await.map(|answer| windows(&answer)).unwrap_or_default();
+            Ok(ids.into_iter().map(|id| Found { context: windows.get(&id).copied().unwrap_or(0), id }).collect())
+        }
+        // OpenAI's list gives no windows.
+        Engine::OpenAi => Ok(openai_models(&list(engine, client, key, "models").await?)?.into_iter().map(|id| Found { id, context: 0 }).collect()),
+    }
 }
 
 // ---------------------------------------------------------------------------
 // What the app keeps
 // ---------------------------------------------------------------------------
 
-/// What is kept for xAI: the path to the key, never the key, and the models
-/// found. The models stay after Grok is removed, so saved chats still name
-/// them.
+/// What is kept for one engine: the path to the key, never the key, and the
+/// models found. The models stay after the engine is removed, so saved chats
+/// still name them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Kept {
@@ -324,32 +501,60 @@ struct Kept {
 }
 
 impl Kept {
-    /// Only what reads right is kept: a whole path, and Grok's ids, each
-    /// once.
-    fn cleaned(mut self) -> Self {
+    /// Only what reads right is kept: a whole path, and the engine's ids,
+    /// each once.
+    fn cleaned(mut self, engine: Engine) -> Self {
         self.key_path = self.key_path.filter(|path| path.is_absolute());
         let mut models: Vec<Found> = Vec::new();
         for found in self.models {
-            if fits(&found.id) && !models.iter().any(|kept| kept.id == found.id) {
+            if engine.fits(&found.id) && !models.iter().any(|kept| kept.id == found.id) {
                 models.push(found);
             }
         }
-        models.truncate(MOST_MODELS);
+        models.truncate(engine.most_models());
         self.models = models;
         self
     }
 }
 
-#[derive(Default, Deserialize, Serialize)]
+/// What is kept for every engine. A file kept before an engine came along
+/// still reads, with nothing kept for it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 struct KeptFile {
     #[serde(default)]
     xai: Kept,
+    #[serde(default)]
+    openai: Kept,
+}
+
+impl KeptFile {
+    fn of(&self, engine: Engine) -> &Kept {
+        match engine {
+            Engine::Xai => &self.xai,
+            Engine::OpenAi => &self.openai,
+        }
+    }
+
+    fn of_mut(&mut self, engine: Engine) -> &mut Kept {
+        match engine {
+            Engine::Xai => &mut self.xai,
+            Engine::OpenAi => &mut self.openai,
+        }
+    }
+
+    fn cleaned(mut self) -> Self {
+        for engine in Engine::ALL {
+            let kept = std::mem::take(self.of_mut(engine));
+            *self.of_mut(engine) = kept.cleaned(engine);
+        }
+        self
+    }
 }
 
 /// The outside engines added, kept in the app's own folder.
 pub struct Outside {
     file: PathBuf,
-    kept: Mutex<Kept>,
+    kept: Mutex<KeptFile>,
 }
 
 /// An outside engine as the page shows it. It holds the key's path, never
@@ -357,6 +562,7 @@ pub struct Outside {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutsideStatus {
+    id: &'static str,
     name: &'static str,
     maker: &'static str,
     host: &'static str,
@@ -373,100 +579,107 @@ impl Outside {
         let kept = fs::read(&file)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<KeptFile>(&bytes).ok())
-            .map(|kept| kept.xai.cleaned())
+            .map(KeptFile::cleaned)
             .unwrap_or_default();
         Self { file, kept: Mutex::new(kept) }
     }
 
-    fn lock(&self) -> MutexGuard<'_, Kept> {
+    fn lock(&self) -> MutexGuard<'_, KeptFile> {
         self.kept.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// Changes what is kept, and keeps it for the next time the app opens.
-    /// Nothing changes when it cannot be kept.
-    fn change(&self, how: impl FnOnce(&mut Kept)) -> Result<(), String> {
+    /// Changes what is kept for one engine, and keeps it for the next time
+    /// the app opens. Nothing changes when it cannot be kept.
+    fn change(&self, engine: Engine, how: impl FnOnce(&mut Kept)) -> Result<(), String> {
         let mut kept = self.lock();
         let mut next = kept.clone();
-        how(&mut next);
-        let text = serde_json::to_string_pretty(&KeptFile { xai: next.clone() }).map_err(|_| "The app could not keep Grok's settings.".to_string())?;
+        how(next.of_mut(engine));
+        let text = serde_json::to_string_pretty(&next).map_err(|_| format!("The app could not keep {}'s settings.", engine.name()))?;
         match self.file.parent() {
             Some(folder) => fs::create_dir_all(folder),
             None => Ok(()),
         }
         .and_then(|()| fs::write(&self.file, text + "\n"))
-        .map_err(|error| format!("The app could not keep Grok's settings: {error}."))?;
+        .map_err(|error| format!("The app could not keep {}'s settings: {error}.", engine.name()))?;
         *kept = next;
         Ok(())
     }
 
-    fn key_path(&self) -> Option<PathBuf> {
-        self.lock().key_path.clone()
+    fn key_path(&self, engine: Engine) -> Option<PathBuf> {
+        self.lock().of(engine).key_path.clone()
     }
 
-    /// True when `id`, an id at xAI, is one of the models found.
-    fn knows(&self, id: &str) -> bool {
-        self.lock().models.iter().any(|found| found.id == id)
+    /// True when `id`, an id at the engine's maker, is one of the models found.
+    fn knows(&self, engine: Engine, id: &str) -> bool {
+        self.lock().of(engine).models.iter().any(|found| found.id == id)
     }
 
-    /// Grok as the page shows it. Nothing is asked of xAI.
-    pub fn status(&self) -> OutsideStatus {
-        let kept = self.lock().clone();
+    /// An engine as the page shows it. Nothing is asked of its maker.
+    fn status(&self, engine: Engine) -> OutsideStatus {
+        let kept = self.lock().of(engine).clone();
         OutsideStatus {
-            name: NAME,
-            maker: MAKER,
-            host: XAI_HOST,
+            id: engine.id(),
+            name: engine.name(),
+            maker: engine.maker(),
+            host: engine.host(),
             added: kept.key_path.is_some(),
             key_path: kept.key_path.as_ref().map(|path| path.display().to_string()),
-            models: kept.models.iter().map(Found::info).collect(),
+            models: kept.models.iter().map(|found| found.info(engine)).collect(),
             warning: kept.key_path.as_deref().and_then(warning_for),
             error: None,
         }
     }
 
-    /// Adds Grok with the path to the person's key. The path and the key in
-    /// it are checked first, and nothing is kept when either is refused.
-    /// With the gate on, Grok's models are found at once.
-    async fn add(&self, gate: &Gate, given: &str) -> Result<OutsideStatus, String> {
-        let path = checked_path(given)?;
-        drop(read_key(&path)?);
-        self.change(|kept| kept.key_path = Some(path))?;
-        if !gate.is_open() {
-            return Ok(OutsideStatus { error: Some(GATE_OFF_FIND.to_string()), ..self.status() });
-        }
-        // The path is kept even when xAI cannot be asked yet.
-        Ok(self.refresh(gate).await.unwrap_or_else(|error| OutsideStatus { error: Some(error), ..self.status() }))
+    /// Every engine as the page shows it, in the page's order.
+    pub fn statuses(&self) -> Vec<OutsideStatus> {
+        Engine::ALL.into_iter().map(|engine| self.status(engine)).collect()
     }
 
-    /// Asks xAI for Grok's models, unless the outbound gate is off. A refresh
-    /// that fails keeps the models found before.
-    async fn refresh(&self, gate: &Gate) -> Result<OutsideStatus, String> {
-        let client = client(gate)?;
-        let path = self.key_path().ok_or_else(|| NOT_ADDED.to_string())?;
+    /// Adds an engine with the path to the person's key. The path and the key
+    /// in it are checked first, and nothing is kept when either is refused.
+    /// With the gate on, the engine's models are found at once.
+    async fn add(&self, engine: Engine, gate: &Gate, given: &str) -> Result<OutsideStatus, String> {
+        let path = checked_path(engine, given)?;
+        drop(read_key(&path)?);
+        self.change(engine, |kept| kept.key_path = Some(path))?;
+        if !gate.is_open() {
+            return Ok(OutsideStatus { error: Some(engine.gate_off_find()), ..self.status(engine) });
+        }
+        // The path is kept even when the maker cannot be asked yet.
+        Ok(self.refresh(engine, gate).await.unwrap_or_else(|error| OutsideStatus { error: Some(error), ..self.status(engine) }))
+    }
+
+    /// Asks the engine's maker for its models, unless the outbound gate is
+    /// off. A refresh that fails keeps the models found before.
+    async fn refresh(&self, engine: Engine, gate: &Gate) -> Result<OutsideStatus, String> {
+        let client = client(engine, gate)?;
+        let path = self.key_path(engine).ok_or_else(|| engine.not_added())?;
         let key = read_key(&path)?;
         let found = tokio::select! {
-            found = find_models(&client, &key) => found?,
-            () = gate.closed() => return Err(GATE_OFF.to_string()),
+            found = find_models(engine, &client, &key) => found?,
+            () = gate.closed() => return Err(engine.gate_off()),
         };
         drop(key);
-        self.change(|kept| kept.models = found)?;
-        Ok(self.status())
+        self.change(engine, |kept| kept.models = found)?;
+        Ok(self.status(engine))
     }
 
-    /// Forgets the path to the key. The key file is never touched, and the
-    /// models found stay, so saved chats still name them.
-    fn remove(&self) -> Result<OutsideStatus, String> {
-        self.change(|kept| kept.key_path = None)?;
-        Ok(self.status())
+    /// Forgets the path to the engine's key. The key file is never touched,
+    /// and the models found stay, so saved chats still name them.
+    fn remove(&self, engine: Engine) -> Result<OutsideStatus, String> {
+        self.change(engine, |kept| kept.key_path = None)?;
+        Ok(self.status(engine))
     }
 }
 
-/// True for a page id that names one of Grok's models.
+/// True for a page id that names a model of an outside engine.
 pub fn is_outside(id: &str) -> bool {
-    id.starts_with(PREFIX)
+    Engine::of_model(id).is_some()
 }
 
-/// Asks Grok, unless the outbound gate is off: the same question the models
-/// on this computer get, with the same events back.
+/// Asks the engine that listed the model, unless the outbound gate is off:
+/// the same question the models on this computer get, with the same events
+/// back.
 pub async fn run_chat(
     gate: &Gate,
     outside: &Outside,
@@ -474,15 +687,14 @@ pub async fn run_chat(
     cancel: &mut watch::Receiver<bool>,
     emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
-    let model = request
-        .model
-        .strip_prefix(PREFIX)
-        .filter(|id| outside.knows(id))
-        .ok_or_else(|| "That Grok model is not on the list. Refresh Grok's models in Settings.".to_string())?;
+    let (engine, model) = Engine::of_model(&request.model).ok_or_else(|| NOT_OUTSIDE.to_string())?;
+    if !outside.knows(engine, model) {
+        return Err(engine.not_listed());
+    }
     engine::checked_messages(&request.messages)?;
     // The gate first: with it off, the key is not even read.
-    let client = client(gate)?;
-    let path = outside.key_path().ok_or_else(|| NOT_ADDED.to_string())?;
+    let client = client(engine, gate)?;
+    let path = outside.key_path(engine).ok_or_else(|| engine.not_added())?;
     let key = read_key(&path)?;
     let body = serde_json::json!({
         "model": model,
@@ -491,25 +703,26 @@ pub async fn run_chat(
         "stream_options": { "include_usage": true },
         "max_completion_tokens": request.max_tokens.unwrap_or(engine::DEFAULT_MAX_TOKENS),
     });
-    let sending = client.post(format!("{XAI_BASE}/chat/completions")).bearer_auth(&key.0).json(&body).send();
+    let sending = client.post(format!("{}/chat/completions", engine.base())).bearer_auth(&key.0).json(&body).send();
     drop(key);
     let response = tokio::select! {
         _ = cancel.changed() => return Ok(ChatDone { stopped: true, ..ChatDone::default() }),
-        () = gate.closed() => return Err(GATE_WENT_OFF.to_string()),
-        response = sending => response.map_err(|_| UNREACHABLE.to_string())?,
+        () = gate.closed() => return Err(engine.gate_went_off()),
+        response = sending => response.map_err(|_| engine.unreachable())?,
     };
-    if !from_xai(response.url()) {
-        return Err("xAI answered from somewhere else.".to_string());
+    if !engine.owns(response.url()) {
+        return Err(engine.elsewhere());
     }
     if !response.status().is_success() {
-        return Err(status_error(response.status().as_u16()));
+        return Err(status_error(engine, response.status().as_u16()));
     }
-    read_answer(gate, response.bytes_stream(), cancel, emit).await
+    read_answer(engine, gate, response.bytes_stream(), cancel, emit).await
 }
 
-/// Reads Grok's answer as it comes, until it ends, Stop is pressed, or the
-/// gate is turned off.
+/// Reads the engine's answer as it comes, until it ends, Stop is pressed, or
+/// the gate is turned off.
 async fn read_answer<B: AsRef<[u8]>, E>(
+    engine: Engine,
     gate: &Gate,
     reply: impl Stream<Item = Result<B, E>>,
     cancel: &mut watch::Receiver<bool>,
@@ -517,38 +730,44 @@ async fn read_answer<B: AsRef<[u8]>, E>(
 ) -> Result<ChatDone, String> {
     let gate_off = async {
         gate.closed().await;
-        GATE_WENT_OFF.to_string()
+        engine.gate_went_off()
     };
-    engine::read_reply(reply, cancel, gate_off, emit, "Grok stopped answering part way through.").await
+    let broke = format!("{} stopped answering part way through.", engine.name());
+    engine::read_reply(reply, cancel, gate_off, emit, &broke).await
 }
 
 // ---------------------------------------------------------------------------
 // What the page asks for
 // ---------------------------------------------------------------------------
 
-/// Grok as kept. Nothing is asked of xAI.
+/// Every outside engine as kept. Nothing is asked of any maker.
 #[tauri::command]
-pub fn outside_status(outside: tauri::State<'_, Outside>) -> OutsideStatus {
-    outside.status()
+pub fn outside_status(outside: tauri::State<'_, Outside>) -> Vec<OutsideStatus> {
+    outside.statuses()
 }
 
-/// Adds Grok with the path to the person's key. The page sends the path,
-/// never the key.
+/// Adds the engine the page names with the path to the person's key. The
+/// page sends the path, never the key.
 #[tauri::command]
-pub async fn add_outside(key_path: String, outside: tauri::State<'_, Outside>, gate: tauri::State<'_, Gate>) -> Result<OutsideStatus, String> {
-    outside.add(&gate, &key_path).await
+pub async fn add_outside(
+    engine: String,
+    key_path: String,
+    outside: tauri::State<'_, Outside>,
+    gate: tauri::State<'_, Gate>,
+) -> Result<OutsideStatus, String> {
+    outside.add(Engine::named(&engine)?, &gate, &key_path).await
 }
 
-/// Asks xAI for Grok's models again.
+/// Asks the engine's maker for its models again.
 #[tauri::command]
-pub async fn refresh_outside(outside: tauri::State<'_, Outside>, gate: tauri::State<'_, Gate>) -> Result<OutsideStatus, String> {
-    outside.refresh(&gate).await
+pub async fn refresh_outside(engine: String, outside: tauri::State<'_, Outside>, gate: tauri::State<'_, Gate>) -> Result<OutsideStatus, String> {
+    outside.refresh(Engine::named(&engine)?, &gate).await
 }
 
-/// Forgets the path to the key.
+/// Forgets the path to the engine's key.
 #[tauri::command]
-pub fn remove_outside(outside: tauri::State<'_, Outside>) -> Result<OutsideStatus, String> {
-    outside.remove()
+pub fn remove_outside(engine: String, outside: tauri::State<'_, Outside>) -> Result<OutsideStatus, String> {
+    outside.remove(Engine::named(&engine)?)
 }
 
 #[cfg(test)]
@@ -556,13 +775,18 @@ mod tests {
     // Brad, 2026-11-17: "user can add their outside inference, start with
     // Grok and Grok ai. user adds it manually, they will need to provide or
     // specify a path to a key, now, the Rusty Business™ can query Grok for the
-    // same question." And: "you can use grok by it's self too."
+    // same question." And: "you can use grok by it's self too." And, of the
+    // engines after Grok: "and claude and codex/gpt and gemmini".
 
     use super::*;
     use tauri::async_runtime::block_on;
 
-    /// Plainly not a key anyone holds.
+    /// Plainly not keys anyone holds.
     const FAKE_KEY: &str = "xai-not-a-real-key-only-for-these-tests-0123456789";
+    const FAKE_OPENAI_KEY: &str = "sk-not-a-real-key-only-for-these-tests-0123456789";
+
+    const XAI: Engine = Engine::Xai;
+    const OPENAI: Engine = Engine::OpenAi;
 
     fn folder(name: &str) -> PathBuf {
         let folder = std::env::temp_dir().join(format!("rusty-outside-{name}-{}", std::process::id()));
@@ -596,34 +820,44 @@ mod tests {
         block_on(run_chat(gate, outside, request, &mut stopped, |_| {}))
     }
 
+    fn found(id: &str) -> Vec<Found> {
+        vec![Found { id: id.into(), context: 0 }]
+    }
+
     #[test]
     fn the_key_never_leaves_rust() {
         let place = folder("key");
         let path = key_file(&place, &format!("{FAKE_KEY}\n"));
         let outside = Outside::new(place.join("outside.json"));
-        let status = block_on(outside.add(&Gate::at(false), path.to_str().unwrap())).unwrap();
+        let status = block_on(outside.add(XAI, &Gate::at(false), path.to_str().unwrap())).unwrap();
         assert!(status.added);
         assert_eq!(status.key_path.as_deref(), path.to_str());
-        assert_eq!(status.error.as_deref(), Some(GATE_OFF_FIND));
+        assert_eq!(status.error, Some(XAI.gate_off_find()));
         assert_eq!(read_key(&path).unwrap().0, FAKE_KEY);
 
         // Not in what the page is told, not in the app's own file.
-        let told = serde_json::to_string(&outside.status()).unwrap();
+        let told = serde_json::to_string(&outside.statuses()).unwrap();
         assert!(!told.contains(FAKE_KEY) && !told.contains("not-a-real-key"), "{told}");
         let kept = fs::read_to_string(place.join("outside.json")).unwrap();
         assert!(!kept.contains(FAKE_KEY) && kept.contains("keyPath"), "{kept}");
-        // The page is told these names, and no other.
+        // The page is told these names, and no other, for every engine.
         let told: Value = serde_json::from_str(&told).unwrap();
-        let mut names: Vec<&str> = told.as_object().unwrap().keys().map(String::as_str).collect();
-        names.sort_unstable();
-        assert_eq!(names, ["added", "error", "host", "keyPath", "maker", "models", "name", "warning"]);
-        assert_eq!((told["name"].as_str(), told["maker"].as_str(), told["host"].as_str()), (Some("Grok"), Some("xAI"), Some("api.x.ai")));
+        let told = told.as_array().unwrap();
+        assert_eq!(told.len(), Engine::ALL.len());
+        for engine in told {
+            let mut names: Vec<&str> = engine.as_object().unwrap().keys().map(String::as_str).collect();
+            names.sort_unstable();
+            assert_eq!(names, ["added", "error", "host", "id", "keyPath", "maker", "models", "name", "warning"]);
+        }
+        let named = |engine: &Value| [&engine["id"], &engine["name"], &engine["maker"], &engine["host"]].map(|value| value.as_str().unwrap().to_string());
+        assert_eq!(named(&told[0]), ["xai", "Grok", "xAI", "api.x.ai"]);
+        assert_eq!(named(&told[1]), ["openai", "GPT", "OpenAI", "api.openai.com"]);
 
         // Not in any message, whatever goes wrong.
         let mut errors = vec![
             chat(&Gate::at(false), &outside, &request("xai:grok-4.7")).unwrap_err(),
-            block_on(outside.refresh(&Gate::at(false))).unwrap_err(),
-            checked_path(FAKE_KEY).unwrap_err(),
+            block_on(outside.refresh(XAI, &Gate::at(false))).unwrap_err(),
+            checked_path(XAI, FAKE_KEY).unwrap_err(),
         ];
         for (name, text) in [("spaced", format!("{FAKE_KEY} {FAKE_KEY}")), ("short", "xai-short".to_string())] {
             errors.push(read_key(&key_file(&folder(name), &text)).err().unwrap());
@@ -638,19 +872,22 @@ mod tests {
     fn a_key_pasted_where_the_path_goes_is_refused_and_not_kept() {
         let place = folder("pasted");
         let outside = Outside::new(place.join("outside.json"));
-        for pasted in [FAKE_KEY, &format!("  {FAKE_KEY}\n"), "xai-abc/def"] {
-            let error = block_on(outside.add(&Gate::at(true), pasted)).unwrap_err();
-            assert_eq!(error, WHOLE_PATH);
-            assert!(!error.contains(pasted.trim()));
+        for (engine, key) in [(XAI, FAKE_KEY), (OPENAI, FAKE_OPENAI_KEY)] {
+            for pasted in [key, &format!("  {key}\n"), "xai-abc/def"] {
+                let error = block_on(outside.add(engine, &Gate::at(true), pasted)).unwrap_err();
+                assert_eq!(error, engine.whole_path());
+                assert!(!error.contains(pasted.trim()));
+            }
+            assert_eq!(block_on(outside.add(engine, &Gate::at(true), "   ")).unwrap_err(), engine.no_path());
+            assert_eq!(block_on(outside.add(engine, &Gate::at(true), &"/a".repeat(PATH_MOST))).unwrap_err(), engine.whole_path());
         }
-        assert_eq!(block_on(outside.add(&Gate::at(true), "   ")).unwrap_err(), NO_PATH);
-        assert_eq!(block_on(outside.add(&Gate::at(true), &"/a".repeat(PATH_MOST))).unwrap_err(), WHOLE_PATH);
+        assert_eq!(OPENAI.whole_path(), "Give the whole path to the file that holds your OpenAI key, starting with / or ~/, not the key itself.");
         assert!(!place.join("outside.json").exists(), "a refused path was kept");
-        assert!(!outside.status().added);
+        assert!(outside.statuses().iter().all(|status| !status.added));
         // A whole path, or one from the home folder, is taken.
-        assert_eq!(checked_path(" /Users/me/.config/xai-key ").unwrap(), PathBuf::from("/Users/me/.config/xai-key"));
+        assert_eq!(checked_path(XAI, " /Users/me/.config/xai-key ").unwrap(), PathBuf::from("/Users/me/.config/xai-key"));
         if let Some(home) = home() {
-            assert_eq!(checked_path("~/.config/xai-key").unwrap(), home.join(".config/xai-key"));
+            assert_eq!(checked_path(OPENAI, "~/.config/openai/key").unwrap(), home.join(".config/openai/key"));
         }
         fs::remove_dir_all(&place).unwrap();
     }
@@ -668,25 +905,29 @@ mod tests {
             "short".to_string(),
             format!("{FAKE_KEY}\n{FAKE_KEY}"),
             format!("XAI_API_KEY={FAKE_KEY} # mine"),
+            format!("OPENAI_API_KEY = {FAKE_OPENAI_KEY}"),
             format!("{FAKE_KEY}é"),
             "k".repeat(KEY_LONGEST + 1),
         ] {
             assert_eq!(read_key(&key_file(&place, &text)).err().unwrap(), not_just, "{text:?}");
         }
-        // Space around the key is fine.
+        // Space around the key is fine, and so is a key as long as OpenAI's
+        // project keys.
         assert_eq!(read_key(&key_file(&place, &format!("\n  {FAKE_KEY}  \n"))).unwrap().0, FAKE_KEY);
+        let long = format!("sk-proj-{}", "n".repeat(160));
+        assert_eq!(read_key(&key_file(&place, &long)).unwrap().0, long);
         // A path that is not whole is refused before any file is looked at.
         for relative in ["xai-key", "./xai-key", "config/xai-key", "~xai-key"] {
-            assert_eq!(checked_path(relative).unwrap_err(), WHOLE_PATH, "{relative}");
+            assert_eq!(checked_path(XAI, relative).unwrap_err(), XAI.whole_path(), "{relative}");
         }
-        // Adding Grok reads the file first, and keeps no path it refused.
+        // Adding an engine reads the file first, and keeps no path it refused.
         let outside = Outside::new(place.join("outside.json"));
         let missing = place.join("missing");
-        assert!(block_on(outside.add(&Gate::at(false), missing.to_str().unwrap())).unwrap_err().starts_with("There is no key file"));
+        assert!(block_on(outside.add(OPENAI, &Gate::at(false), missing.to_str().unwrap())).unwrap_err().starts_with("There is no key file"));
         let short = key_file(&place, "short");
-        assert_eq!(block_on(outside.add(&Gate::at(false), short.to_str().unwrap())).unwrap_err(), not_just);
+        assert_eq!(block_on(outside.add(XAI, &Gate::at(false), short.to_str().unwrap())).unwrap_err(), not_just);
         assert!(!place.join("outside.json").exists(), "a path to no key was kept");
-        assert!(!outside.status().added);
+        assert!(outside.statuses().iter().all(|status| !status.added));
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -703,7 +944,7 @@ mod tests {
         // It is still read: the warning is advice.
         assert!(read_key(&path).is_ok());
         let outside = Outside::new(place.join("outside.json"));
-        let status = block_on(outside.add(&Gate::at(false), path.to_str().unwrap())).unwrap();
+        let status = block_on(outside.add(XAI, &Gate::at(false), path.to_str().unwrap())).unwrap();
         assert_eq!(status.warning, Some(warning));
         fs::remove_dir_all(&place).unwrap();
     }
@@ -713,15 +954,19 @@ mod tests {
     fn with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read() {
         let place = folder("gate");
         let outside = Outside::new(place.join("outside.json"));
-        // A path to no file at all: reading it would say so.
-        outside.change(|kept| kept.key_path = Some(place.join("no-such-key"))).unwrap();
-        outside.change(|kept| kept.models = vec![Found { id: "grok-4.7".into(), context: 0 }]).unwrap();
-        assert_eq!(chat(&Gate::at(false), &outside, &request("xai:grok-4.7")).unwrap_err(), GATE_OFF);
-        assert_eq!(block_on(outside.refresh(&Gate::at(false))).unwrap_err(), GATE_OFF);
-        assert_eq!(client(&Gate::at(false)).unwrap_err(), GATE_OFF);
-        // With it on, the key is read, and its absence said, before anything
-        // is sent.
-        assert!(chat(&Gate::at(true), &outside, &request("xai:grok-4.7")).unwrap_err().starts_with("There is no key file"));
+        for (engine, model) in [(XAI, "grok-4.7"), (OPENAI, "gpt-5-mini")] {
+            // A path to no file at all: reading it would say so.
+            outside.change(engine, |kept| kept.key_path = Some(place.join("no-such-key"))).unwrap();
+            outside.change(engine, |kept| kept.models = found(model)).unwrap();
+            let asked = request(&format!("{}{model}", engine.prefix()));
+            assert_eq!(chat(&Gate::at(false), &outside, &asked).unwrap_err(), engine.gate_off());
+            assert_eq!(block_on(outside.refresh(engine, &Gate::at(false))).unwrap_err(), engine.gate_off());
+            assert_eq!(client(engine, &Gate::at(false)).unwrap_err(), engine.gate_off());
+            // With it on, the key is read, and its absence said, before
+            // anything is sent.
+            assert!(chat(&Gate::at(true), &outside, &asked).unwrap_err().starts_with("There is no key file"));
+        }
+        assert_eq!(OPENAI.gate_off(), "The gate is off. Turn it on to ask GPT.");
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -729,23 +974,59 @@ mod tests {
     fn only_grok_models_found_are_asked() {
         let place = folder("models");
         let outside = Outside::new(place.join("outside.json"));
-        outside.change(|kept| kept.models = vec![Found { id: "grok-4.7".into(), context: 0 }]).unwrap();
-        let refused = "That Grok model is not on the list. Refresh Grok's models in Settings.";
-        for model in ["xai:grok-9", "grok-4.7", "xai:", "xai:../grok-4.7", "phi-4"] {
-            assert_eq!(chat(&Gate::at(true), &outside, &request(model)).unwrap_err(), refused, "{model}");
+        outside.change(XAI, |kept| kept.models = found("grok-4.7")).unwrap();
+        for model in ["xai:grok-9", "xai:", "xai:../grok-4.7"] {
+            assert_eq!(chat(&Gate::at(true), &outside, &request(model)).unwrap_err(), XAI.not_listed(), "{model}");
+        }
+        for model in ["grok-4.7", "phi-4", "openai", "XAI:grok-4.7"] {
+            assert_eq!(chat(&Gate::at(true), &outside, &request(model)).unwrap_err(), NOT_OUTSIDE, "{model}");
         }
         let mut empty = request("xai:grok-4.7");
         empty.messages.clear();
         assert_eq!(chat(&Gate::at(true), &outside, &empty).unwrap_err(), "There is nothing to send.");
-        assert!(is_outside("xai:grok-4.7") && !is_outside("mlx-community/phi-4-4bit") && !is_outside("grok-4.7"));
+        assert!(is_outside("xai:grok-4.7") && is_outside("openai:gpt-5") && !is_outside("mlx-community/phi-4-4bit") && !is_outside("grok-4.7"));
         fs::remove_dir_all(&place).unwrap();
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn a_model_is_asked_only_of_the_engine_that_listed_it() {
+        let place = folder("which");
+        let outside = Outside::new(place.join("outside.json"));
+        outside.change(XAI, |kept| kept.models = found("grok-4.7")).unwrap();
+        outside.change(OPENAI, |kept| kept.models = found("gpt-5-mini")).unwrap();
+        // Each engine's model, named as the other's, is refused before the
+        // gate or the key is looked at.
+        assert_eq!(chat(&Gate::at(false), &outside, &request("openai:grok-4.7")).unwrap_err(), OPENAI.not_listed());
+        assert_eq!(chat(&Gate::at(false), &outside, &request("xai:gpt-5-mini")).unwrap_err(), XAI.not_listed());
+        // Each as its own reaches the gate.
+        assert_eq!(chat(&Gate::at(false), &outside, &request("openai:gpt-5-mini")).unwrap_err(), OPENAI.gate_off());
+        assert_eq!(chat(&Gate::at(false), &outside, &request("xai:grok-4.7")).unwrap_err(), XAI.gate_off());
+        assert_eq!(Engine::of_model("openai:gpt-5-mini"), Some((OPENAI, "gpt-5-mini")));
+        assert_eq!(Engine::of_model("xai:grok-4.7"), Some((XAI, "grok-4.7")));
+        assert_eq!(Engine::of_model("anthropic:claude"), None);
+        fs::remove_dir_all(&place).unwrap();
+    }
+
+    #[test]
+    fn an_engine_the_app_does_not_know_is_refused() {
+        assert_eq!(Engine::named("xai"), Ok(XAI));
+        assert_eq!(Engine::named("openai"), Ok(OPENAI));
+        for unknown in ["", "XAI", "OpenAI", "anthropic", "google", "openai ", "../xai"] {
+            assert_eq!(Engine::named(unknown), Err(UNKNOWN.to_string()), "{unknown:?}");
+        }
+        // Each engine's names stand apart.
+        for engine in Engine::ALL {
+            assert_eq!(engine.prefix(), format!("{}:", engine.id()));
+            assert_eq!(Engine::ALL.iter().filter(|other| other.id() == engine.id() || other.host() == engine.host()).count(), 1);
+        }
     }
 
     #[test]
     fn grok_is_asked_at_xais_api_alone_over_https() {
         assert_eq!(XAI_BASE, "https://api.x.ai/v1");
         assert_eq!(XAI_BASE, format!("https://{XAI_HOST}/v1"));
-        assert!(from_xai(&reqwest::Url::parse("https://api.x.ai/v1/chat/completions").unwrap()));
+        assert!(XAI.owns(&reqwest::Url::parse("https://api.x.ai/v1/chat/completions").unwrap()));
         for away in [
             "http://api.x.ai/v1/chat/completions",
             "https://api.x.ai:8443/v1",
@@ -754,17 +1035,39 @@ mod tests {
             "https://x.ai/v1",
             "https://evilapi.x.ai/v1",
             "https://127.0.0.1/v1",
+            "https://api.openai.com/v1",
         ] {
-            assert!(!from_xai(&reqwest::Url::parse(away).unwrap()), "{away}");
+            assert!(!XAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
         }
         // The client goes over https only: a stand-in on plain http is never
         // reached.
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let sent = block_on(client(&Gate::at(true)).unwrap().get(format!("http://127.0.0.1:{port}/v1/models")).send());
-        assert!(sent.is_err());
-        listener.set_nonblocking(true).unwrap();
-        assert!(listener.accept().is_err(), "the client reached the stand-in over plain http");
+        for engine in Engine::ALL {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let sent = block_on(client(engine, &Gate::at(true)).unwrap().get(format!("http://127.0.0.1:{port}/v1/models")).send());
+            assert!(sent.is_err());
+            listener.set_nonblocking(true).unwrap();
+            assert!(listener.accept().is_err(), "the client reached the stand-in over plain http");
+        }
+    }
+
+    #[test]
+    fn gpt_is_asked_at_openais_api_alone_over_https() {
+        assert_eq!(OPENAI_BASE, "https://api.openai.com/v1");
+        assert_eq!(OPENAI_BASE, format!("https://{OPENAI_HOST}/v1"));
+        assert!(OPENAI.owns(&reqwest::Url::parse("https://api.openai.com/v1/chat/completions").unwrap()));
+        for away in [
+            "http://api.openai.com/v1/chat/completions",
+            "https://api.openai.com:8443/v1",
+            "https://someone:pass@api.openai.com/v1",
+            "https://api.openai.com.example.com/v1",
+            "https://openai.com/v1",
+            "https://chatgpt.com/v1",
+            "https://notapi.openai.com/v1",
+            "https://api.x.ai/v1",
+        ] {
+            assert!(!OPENAI.owns(&reqwest::Url::parse(away).unwrap()), "{away}");
+        }
     }
 
     #[test]
@@ -781,63 +1084,137 @@ mod tests {
             { "id": "grok-4.7/../x", "output_modalities": ["text"] },
             { "id": "grok-<b>", "output_modalities": ["text"] },
             { "id": format!("grok-{}", "x".repeat(100)) },
+            { "id": "gpt-5" },
             { "id": 7 },
             { "name": "no id" },
         ]});
-        let ids = text_models(listed.to_string().as_bytes()).unwrap();
+        let ids = xai_models(listed.to_string().as_bytes()).unwrap();
         assert_eq!(ids, ["grok-4.7", "grok-420-reasoning", "grok-4.3"]);
-        assert_eq!(text_models(b"not json").unwrap_err(), UNREADABLE);
-        assert_eq!(text_models(b"{}").unwrap_err(), UNREADABLE);
-        assert_eq!(text_models(br#"{"models":[{"id":"grok-imagine-image","output_modalities":["image"]}]}"#).unwrap_err(), "xAI listed no Grok models for text.");
+        assert_eq!(xai_models(b"not json").unwrap_err(), XAI.unreadable());
+        assert_eq!(xai_models(b"{}").unwrap_err(), XAI.unreadable());
+        assert_eq!(xai_models(br#"{"models":[{"id":"grok-imagine-image","output_modalities":["image"]}]}"#).unwrap_err(), "xAI listed no Grok models for text.");
         let many: Vec<Value> = (0..50).map(|n| serde_json::json!({ "id": format!("grok-{n}") })).collect();
-        assert_eq!(text_models(serde_json::json!({ "models": many }).to_string().as_bytes()).unwrap().len(), MOST_MODELS);
+        assert_eq!(xai_models(serde_json::json!({ "models": many }).to_string().as_bytes()).unwrap().len(), XAI.most_models());
 
         let windows = windows(br#"{"data":[{"id":"grok-4.7","context_length":256000},{"id":"grok-4.3","context_length":null},{"id":"big","context_length":99999999999}]}"#);
         assert_eq!(windows.get("grok-4.7"), Some(&256_000));
         assert_eq!(windows.get("grok-4.3"), None);
         assert_eq!(windows.get("big"), Some(&u32::MAX));
 
-        assert_eq!(name_of("grok-4.7"), "Grok 4.7");
-        assert_eq!(name_of("grok-420-reasoning"), "Grok 420 Reasoning");
+        assert_eq!(XAI.name_of("grok-4.7"), "Grok 4.7");
+        assert_eq!(XAI.name_of("grok-420-reasoning"), "Grok 420 Reasoning");
         assert_eq!(
-            Found { id: "grok-4.7".into(), context: 256_000 }.info(),
+            Found { id: "grok-4.7".into(), context: 256_000 }.info(XAI),
             ModelInfo { id: "xai:grok-4.7".into(), name: "Grok 4.7".into(), maker: "xAI".into(), context: 256_000 }
+        );
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn openais_list_gives_gpt_models_for_text_newest_first_with_their_names() {
+        let listed = serde_json::json!({ "object": "list", "data": [
+            { "id": "gpt-4o", "created": 1_715_367_049, "owned_by": "system" },
+            { "id": "gpt-5-mini", "created": 1_754_425_928 },
+            { "id": "gpt-5", "created": 1_754_425_777 },
+            { "id": "o4-mini", "created": 1_744_225_351 },
+            { "id": "chatgpt-4o-latest", "created": 1_723_515_131 },
+            { "id": "gpt-3.5-turbo-16k" },
+            // A dated copy of a model already listed.
+            { "id": "gpt-4o-2024-08-06", "created": 1_722_814_719 },
+            { "id": "gpt-4-0613", "created": 1_686_588_896 },
+            // Models for sound, pictures, search, other APIs, or none of text.
+            { "id": "gpt-4o-audio-preview", "created": 1_800_000_000 },
+            { "id": "gpt-realtime", "created": 1_800_000_000 },
+            { "id": "gpt-4o-mini-tts" },
+            { "id": "gpt-4o-transcribe" },
+            { "id": "gpt-image-1" },
+            { "id": "gpt-4o-search-preview" },
+            { "id": "gpt-3.5-turbo-instruct" },
+            { "id": "gpt-5-codex" },
+            { "id": "gpt-5-pro" },
+            { "id": "o3-deep-research" },
+            { "id": "text-embedding-3-large" },
+            { "id": "omni-moderation-latest" },
+            { "id": "dall-e-3" },
+            { "id": "whisper-1" },
+            { "id": "tts-1" },
+            { "id": "davinci-002" },
+            { "id": "grok-4.7" },
+            // Starts with o, but is no o-series model.
+            { "id": "omni-latest", "created": 1_800_000_000 },
+            // Not ids at all.
+            { "id": "gpt-5/../x" },
+            { "id": "gpt-<b>" },
+            { "id": format!("gpt-{}", "x".repeat(100)) },
+            { "id": 7 },
+            { "id": "gpt-5", "created": 1 },
+        ]});
+        let ids = openai_models(listed.to_string().as_bytes()).unwrap();
+        assert_eq!(ids, ["gpt-5-mini", "gpt-5", "o4-mini", "chatgpt-4o-latest", "gpt-4o", "gpt-3.5-turbo-16k"]);
+        assert_eq!(openai_models(b"not json").unwrap_err(), "OpenAI's list of models could not be read.");
+        assert_eq!(openai_models(br#"{"models":[]}"#).unwrap_err(), OPENAI.unreadable());
+        assert_eq!(openai_models(br#"{"data":[{"id":"dall-e-3"}]}"#).unwrap_err(), "OpenAI listed no GPT models for text.");
+        // Only the newest are kept.
+        let many: Vec<Value> = (0..50).map(|n| serde_json::json!({ "id": format!("gpt-{n}"), "created": n })).collect();
+        let newest = openai_models(serde_json::json!({ "data": many }).to_string().as_bytes()).unwrap();
+        assert_eq!(newest.len(), OPENAI.most_models());
+        assert_eq!(newest.first().map(String::as_str), Some("gpt-49"));
+
+        for (id, name) in [
+            ("gpt-5-mini", "GPT-5 Mini"),
+            ("gpt-4.1-nano", "GPT-4.1 Nano"),
+            ("gpt-4o", "GPT-4o"),
+            ("chatgpt-4o-latest", "ChatGPT-4o Latest"),
+            ("o4-mini", "o4 Mini"),
+            ("o3", "o3"),
+            ("gpt-3.5-turbo-16k", "GPT-3.5 Turbo 16k"),
+        ] {
+            assert_eq!(OPENAI.name_of(id), name, "{id}");
+        }
+        assert_eq!(
+            Found { id: "gpt-5-mini".into(), context: 0 }.info(OPENAI),
+            ModelInfo { id: "openai:gpt-5-mini".into(), name: "GPT-5 Mini".into(), maker: "OpenAI".into(), context: 0 }
         );
     }
 
     #[test]
     fn xais_refusals_are_said_plainly() {
-        assert_eq!(status_error(401), "xAI did not take the key (401). Check the key file.");
-        assert_eq!(status_error(403), "xAI did not take the key (403). Check the key file.");
-        assert!(status_error(404).contains("refresh Grok's models"));
-        assert!(status_error(429).contains("too many requests"));
-        assert_eq!(status_error(503), "xAI is not answering right now (503).");
-        assert_eq!(status_error(418), "xAI answered 418.");
+        assert_eq!(status_error(XAI, 401), "xAI did not take the key (401). Check the key file.");
+        assert_eq!(status_error(XAI, 403), "xAI did not take the key (403). Check the key file.");
+        assert!(status_error(XAI, 404).contains("refresh Grok's models on the Installers page"));
+        assert!(status_error(XAI, 429).contains("too many requests"));
+        assert_eq!(status_error(XAI, 503), "xAI is not answering right now (503).");
+        assert_eq!(status_error(XAI, 418), "xAI answered 418.");
+        assert_eq!(status_error(OPENAI, 401), "OpenAI did not take the key (401). Check the key file.");
+        assert_eq!(status_error(OPENAI, 429), "OpenAI says too many requests, or no credits left (429). Wait a moment, or check your OpenAI account.");
         let chunks = |sizes: &[usize]| futures_util::stream::iter(sizes.iter().map(|size| Ok::<_, ()>(vec![b'x'; *size])).collect::<Vec<_>>());
-        assert_eq!(block_on(read_capped(chunks(&[400, 600]), 1000)).unwrap().len(), 1000);
-        assert_eq!(block_on(read_capped(chunks(&[400, 601]), 1000)).unwrap_err(), "xAI's answer was too large.");
+        assert_eq!(block_on(read_capped(XAI, chunks(&[400, 600]), 1000)).unwrap().len(), 1000);
+        assert_eq!(block_on(read_capped(XAI, chunks(&[400, 601]), 1000)).unwrap_err(), "xAI's answer was too large.");
+        assert_eq!(block_on(read_capped(OPENAI, chunks(&[1001]), 1000)).unwrap_err(), "OpenAI's answer was too large.");
     }
 
     #[test]
     fn turning_the_gate_off_stops_grok_part_way_through() {
         let piece = |text: &str| Ok::<_, std::io::Error>(format!("data: {}\n\n", serde_json::json!({ "choices": [{ "delta": { "content": text } }] })).into_bytes());
-        // A stand-in for xAI that sends two pieces, then nothing more.
+        // A stand-in for the engine that sends two pieces, then nothing more.
         let reply = || futures_util::stream::iter(vec![piece("2+2 "), piece("is")]).chain(futures_util::stream::pending());
-        let gate = Gate::at(true);
-        let switch = gate.clone();
-        let turned_off = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            let _ = switch.set(false);
-        });
-        let (_stop, mut stopped) = watch::channel(false);
-        let mut heard = String::new();
-        // Were the gate not heard, the stand-in would never end, so the wait
-        // is short and the test fails rather than hangs.
-        let reading = read_answer(&gate, reply(), &mut stopped, |event| heard.push_str(&format!("{event:?}")));
-        let ended = block_on(async { tokio::time::timeout(Duration::from_secs(10), reading).await }).expect("turning the gate off did not stop Grok");
-        assert_eq!(ended.unwrap_err(), GATE_WENT_OFF);
-        assert!(heard.contains("2+2") && heard.contains("is"), "{heard}");
-        turned_off.join().unwrap();
+        for engine in Engine::ALL {
+            let gate = Gate::at(true);
+            let switch = gate.clone();
+            let turned_off = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(200));
+                let _ = switch.set(false);
+            });
+            let (_stop, mut stopped) = watch::channel(false);
+            let mut heard = String::new();
+            // Were the gate not heard, the stand-in would never end, so the
+            // wait is short and the test fails rather than hangs.
+            let reading = read_answer(engine, &gate, reply(), &mut stopped, |event| heard.push_str(&format!("{event:?}")));
+            let ended = block_on(async { tokio::time::timeout(Duration::from_secs(10), reading).await }).expect("turning the gate off did not stop the engine");
+            assert_eq!(ended.unwrap_err(), engine.gate_went_off());
+            assert!(heard.contains("2+2") && heard.contains("is"), "{heard}");
+            turned_off.join().unwrap();
+        }
 
         // Stop keeps what came.
         let (stop, mut stopped) = watch::channel(false);
@@ -846,7 +1223,7 @@ mod tests {
             let _ = stop.send(true);
             stop
         });
-        let done = block_on(read_answer(&Gate::at(true), reply(), &mut stopped, |_| {})).unwrap();
+        let done = block_on(read_answer(OPENAI, &Gate::at(true), reply(), &mut stopped, |_| {})).unwrap();
         assert!(done.stopped);
         assert_eq!(done.answer, "2+2 is");
         drop(stopper.join().unwrap());
@@ -857,18 +1234,43 @@ mod tests {
         let place = folder("remove");
         let path = key_file(&place, FAKE_KEY);
         let outside = Outside::new(place.join("outside.json"));
-        block_on(outside.add(&Gate::at(false), path.to_str().unwrap())).unwrap();
-        outside.change(|kept| kept.models = vec![Found { id: "grok-4.7".into(), context: 256_000 }]).unwrap();
-        let status = outside.remove().unwrap();
+        block_on(outside.add(XAI, &Gate::at(false), path.to_str().unwrap())).unwrap();
+        outside.change(XAI, |kept| kept.models = vec![Found { id: "grok-4.7".into(), context: 256_000 }]).unwrap();
+        let status = outside.remove(XAI).unwrap();
         assert!(!status.added && status.key_path.is_none());
         assert_eq!(status.models.len(), 1, "saved chats would lose the model's name");
         assert!(path.exists(), "the key file was touched");
         assert_eq!(fs::read_to_string(&path).unwrap(), FAKE_KEY);
         // Removed stays removed.
         let again = Outside::new(place.join("outside.json"));
-        assert!(!again.status().added);
-        assert_eq!(again.status().models.len(), 1);
-        assert_eq!(chat(&Gate::at(true), &again, &request("xai:grok-4.7")).unwrap_err(), NOT_ADDED);
+        assert!(!again.status(XAI).added);
+        assert_eq!(again.status(XAI).models.len(), 1);
+        assert_eq!(chat(&Gate::at(true), &again, &request("xai:grok-4.7")).unwrap_err(), XAI.not_added());
+        assert_eq!(XAI.not_added(), "Grok is not added. Add it on the Installers page with the path to your xAI key.");
+        fs::remove_dir_all(&place).unwrap();
+    }
+
+    // Brad, 2026-11-17: "and claude and codex/gpt and gemmini".
+    #[test]
+    fn each_engine_keeps_its_own_key_path_and_models() {
+        let place = folder("each");
+        let path = key_file(&place, FAKE_OPENAI_KEY);
+        let outside = Outside::new(place.join("outside.json"));
+        block_on(outside.add(XAI, &Gate::at(false), path.to_str().unwrap())).unwrap();
+        outside.change(XAI, |kept| kept.models = found("grok-4.7")).unwrap();
+        let status = block_on(outside.add(OPENAI, &Gate::at(false), path.to_str().unwrap())).unwrap();
+        assert_eq!((status.id, status.added, status.error), ("openai", true, Some(OPENAI.gate_off_find())));
+        outside.change(OPENAI, |kept| kept.models = found("gpt-5-mini")).unwrap();
+        // Removing GPT leaves Grok as it was.
+        outside.remove(OPENAI).unwrap();
+        let again = Outside::new(place.join("outside.json"));
+        let [grok, gpt] = [again.status(XAI), again.status(OPENAI)];
+        assert!(grok.added && !gpt.added);
+        assert_eq!(grok.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["xai:grok-4.7"]);
+        assert_eq!(gpt.models.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["openai:gpt-5-mini"]);
+        assert_eq!(chat(&Gate::at(true), &again, &request("openai:gpt-5-mini")).unwrap_err(), OPENAI.not_added());
+        let kept = fs::read_to_string(place.join("outside.json")).unwrap();
+        assert!(!kept.contains(FAKE_OPENAI_KEY) && kept.contains("\"openai\""), "{kept}");
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -876,30 +1278,48 @@ mod tests {
     fn a_kept_file_is_read_with_care() {
         let place = folder("kept");
         let file = place.join("outside.json");
-        for text in ["", "not json", "[]", r#"{"xai":7}"#] {
+        for text in ["", "not json", "[]", r#"{"xai":7}"#, r#"{"openai":"x"}"#] {
             fs::write(&file, text).unwrap();
-            assert_eq!(*Outside::new(file.clone()).lock(), Kept::default(), "{text:?}");
+            assert_eq!(*Outside::new(file.clone()).lock(), KeptFile::default(), "{text:?}");
         }
+        // A file kept before GPT came along still reads.
+        fs::write(&file, r#"{"xai":{"keyPath":"/keys/xai","models":[{"id":"grok-4.7"}]}}"#).unwrap();
+        let kept = Outside::new(file.clone()).lock().clone();
+        assert_eq!(kept.xai, Kept { key_path: Some(PathBuf::from("/keys/xai")), models: found("grok-4.7") });
+        assert_eq!(kept.openai, Kept::default());
+        // Only each engine's own models, each once, are kept.
         fs::write(
             &file,
-            r#"{"xai":{"keyPath":"relative/key","models":[{"id":"grok-4.7","context":1},{"id":"grok-4.7"},{"id":"../x"},{"id":"phi-4"}]}}"#,
+            r#"{"xai":{"keyPath":"relative/key","models":[{"id":"grok-4.7","context":1},{"id":"grok-4.7"},{"id":"../x"},{"id":"phi-4"},{"id":"gpt-5"}]},
+               "openai":{"keyPath":"/keys/openai","models":[{"id":"gpt-5"},{"id":"grok-4.7"},{"id":"gpt-image-1"},{"id":"gpt-5"}]}}"#,
         )
         .unwrap();
         let kept = Outside::new(file.clone()).lock().clone();
-        assert_eq!(kept, Kept { key_path: None, models: vec![Found { id: "grok-4.7".into(), context: 1 }] });
+        assert_eq!(kept.xai, Kept { key_path: None, models: vec![Found { id: "grok-4.7".into(), context: 1 }] });
+        assert_eq!(kept.openai, Kept { key_path: Some(PathBuf::from("/keys/openai")), models: found("gpt-5") });
         fs::remove_dir_all(&place).unwrap();
     }
 
     #[test]
     #[ignore = "asks xAI itself with the key at RUSTY_XAI_KEY_FILE; run with --ignored"]
     fn grok_answers_two_plus_two() {
-        let path = PathBuf::from(std::env::var("RUSTY_XAI_KEY_FILE").expect("RUSTY_XAI_KEY_FILE names the key file"));
-        let place = folder("live");
+        answers_two_plus_two(XAI, "RUSTY_XAI_KEY_FILE");
+    }
+
+    #[test]
+    #[ignore = "asks OpenAI itself with the key at RUSTY_OPENAI_KEY_FILE; run with --ignored"]
+    fn gpt_answers_two_plus_two() {
+        answers_two_plus_two(OPENAI, "RUSTY_OPENAI_KEY_FILE");
+    }
+
+    fn answers_two_plus_two(engine: Engine, variable: &str) {
+        let path = PathBuf::from(std::env::var(variable).unwrap_or_else(|_| panic!("{variable} names the key file")));
+        let place = folder(engine.id());
         let outside = Outside::new(place.join("outside.json"));
         let gate = Gate::at(true);
-        let status = block_on(outside.add(&gate, path.to_str().unwrap())).unwrap();
+        let status = block_on(outside.add(engine, &gate, path.to_str().unwrap())).unwrap();
         assert_eq!(status.error, None);
-        let model = status.models.first().expect("xAI listed a model").id.clone();
+        let model = status.models.first().expect("the maker listed a model").id.clone();
         let done = chat(&gate, &outside, &request(&model)).unwrap();
         assert!(done.answer.contains('4'), "{}", done.answer);
         fs::remove_dir_all(&place).unwrap();

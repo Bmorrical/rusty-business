@@ -38,7 +38,7 @@ import {
   nameAnswers,
   namesLine,
   onDiskLine,
-  OUTSIDE_PREFIX,
+  OUTSIDE_PREFIXES,
   outsideModelsLine,
   parseGrades,
   pickedMakers,
@@ -366,7 +366,7 @@ test("the gate's line says what off and on mean", () => {
   assert.equal(gateLine(false), "Gate off. Nothing leaves this computer.");
   assert.equal(
     gateLine(true),
-    "Gate on. The app may go online to check for updates, download models, start the stack, and ask Grok.",
+    "Gate on. The app may go online to check for updates, download models, start the stack, and ask the outside engines you add.",
   );
   // Anything but a plain yes reads as off.
   for (const open of [undefined, null, 0, ""]) assert.equal(gateLine(open), gateLine(false));
@@ -537,12 +537,16 @@ test("the models asked are named in one line, with the Oxford comma", () => {
 // you can use grok by it's self too."
 const GROK = { id: "xai:grok-4", name: "Grok 4", maker: "xAI", context: 262_144 };
 const GROK_UNKNOWN = { id: "xai:grok-mini", name: "Grok Mini", maker: "xAI", context: 0 };
+// Brad, 2026-11-17: "and claude and codex/gpt and gemmini". OpenAI's list
+// gives no windows, so a GPT model's is never known.
+const OPENAI_GPT = { id: "openai:gpt-5", name: "GPT-5", maker: "OpenAI", context: 0 };
 
-test("Grok's models are told apart from the models on this computer", () => {
-  assert.equal(OUTSIDE_PREFIX, "xai:");
+test("the outside engines' models are told apart from the models on this computer", () => {
+  assert.deepEqual(OUTSIDE_PREFIXES, ["xai:", "openai:"]);
   assert.ok(isOutside(GROK.id));
-  for (const id of ["microsoft/phi-4", "", undefined, null, "grok-4", "local/xai:grok"]) {
-    assert.equal(isOutside(id), false, `${id} read as Grok`);
+  assert.ok(isOutside(OPENAI_GPT.id));
+  for (const id of ["microsoft/phi-4", "", undefined, null, "grok-4", "gpt-5", "local/xai:grok", "local/openai:gpt-5", "openai", "OPENAI:gpt-5"]) {
+    assert.equal(isOutside(id), false, `${id} read as an outside engine's`);
   }
 });
 
@@ -551,11 +555,14 @@ test("a chip says when a model is asked online", () => {
   assert.equal(chipDetail(GROK), "xAI · online · 256K");
   // A window xAI did not give is left out, not shown as 0K.
   assert.equal(chipDetail(GROK_UNKNOWN), "xAI · online");
+  assert.equal(chipDetail(OPENAI_GPT), "OpenAI · online");
 });
 
-test("Grok can answer alone, even when its window is not known", () => {
+test("an outside engine can answer alone, even when its window is not known", () => {
   assert.equal(answersLine([GROK]), "Grok 4 by xAI answers, with room for 262,144 tokens.");
   assert.equal(answersLine([GROK_UNKNOWN]), "Grok Mini by xAI answers.");
+  assert.equal(answersLine([OPENAI_GPT]), "GPT-5 by OpenAI answers.");
+  assert.equal(answersLine([GROK, OPENAI_GPT]), "Grok 4 and GPT-5 answer in turn, side by side.");
   assert.equal(
     answersLine([{ name: "Phi-4", maker: "Microsoft", context: 16_384 }, GROK]),
     "Phi-4 and Grok 4 answer in turn, side by side.",
@@ -567,18 +574,20 @@ test("Grok can answer alone, even when its window is not known", () => {
 });
 
 test("a key pasted where the path goes is told from a path", () => {
-  for (const path of ["/Users/me/.config/xai/key", "~/xai-key.txt", "~\\keys\\xai", "C:\\keys\\xai.txt", "c:/keys/xai", "\\\\server\\keys", "  ~/padded  "]) {
+  for (const path of ["/Users/me/.config/xai/key", "~/.config/openai/key", "~/xai-key.txt", "~\\keys\\xai", "C:\\keys\\xai.txt", "c:/keys/xai", "\\\\server\\keys", "  ~/padded  "]) {
     assert.ok(looksLikePath(path), `${path} did not read as a path`);
   }
-  for (const text of ["xai-0123456789abcdefghijklmnopqrstuvwxyz", "key.txt", "~", "~key", "", undefined, "C:keys"]) {
+  for (const text of ["xai-0123456789abcdefghijklmnopqrstuvwxyz", "sk-proj-not-a-real-key-0123456789abcdefghij", "key.txt", "~", "~key", "", undefined, "C:keys"]) {
     assert.equal(looksLikePath(text), false, `${text} read as a path`);
   }
 });
 
-test("Settings names Grok's models, or that none is found yet", () => {
+test("the Installers page names each engine's models, or that none is found yet", () => {
   assert.equal(outsideModelsLine({ name: "Grok", models: [GROK, GROK_UNKNOWN] }), "Grok's models: Grok 4 and Grok Mini.");
+  assert.equal(outsideModelsLine({ name: "GPT", models: [OPENAI_GPT] }), "GPT's models: GPT-5.");
   assert.equal(outsideModelsLine({ name: "Grok", models: [] }), "No Grok models found yet.");
-  assert.equal(outsideModelsLine(null), "No Grok models found yet.");
+  assert.equal(outsideModelsLine({ name: "GPT" }), "No GPT models found yet.");
+  assert.equal(outsideModelsLine(null), "No models found yet.");
 });
 
 // Brad, 2026-11-17: "The results are graded and summarized by grok after all
@@ -726,9 +735,13 @@ test("the page names the model behind each answer the grader numbered", () => {
   assert.doesNotMatch(gradeMessages("Q", ["One.", "Two."], 0)[1].content, /Phi|gpt/);
 });
 
-test("Grok grades until another model is picked, and none when No grading is", () => {
+test("the first outside engine grades until another model is picked, and none when No grading is", () => {
   const phi = { id: PHI, name: "Phi-4" };
   assert.equal(graderFor(null, [phi, GROK, GROK_UNKNOWN]), GROK);
+  // In the Installers page's order: Grok's first, then GPT's.
+  assert.equal(graderFor(null, [phi, GROK, OPENAI_GPT]), GROK);
+  assert.equal(graderFor(null, [phi, OPENAI_GPT]), OPENAI_GPT, "GPT does not grade when Grok is not on hand");
+  assert.equal(graderFor(OPENAI_GPT.id, [phi, GROK, OPENAI_GPT]), OPENAI_GPT);
   assert.equal(graderFor(undefined, [phi]), null, "a model on this computer grades without being picked");
   assert.equal(graderFor("", [phi, GROK]), null, "No grading still grades");
   assert.equal(graderFor(PHI, [phi, GROK]), phi);
