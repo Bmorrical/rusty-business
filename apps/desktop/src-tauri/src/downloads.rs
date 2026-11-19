@@ -715,6 +715,11 @@ impl Downloads {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// True while a download is running.
+    pub fn running(&self) -> bool {
+        self.slot().is_some()
+    }
+
     /// Stops the download that is running, if one is.
     pub fn stop(&self) {
         if let Some(cancel) = self.slot().as_ref() {

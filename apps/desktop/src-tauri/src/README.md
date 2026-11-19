@@ -12,6 +12,8 @@ The desktop app's Rust code.
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it, `mlx_lm.server` on a Mac and llama.cpp's `llama-server` on Windows and Linux |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
+| `deactivated.rs` | The models switched off: left out of questions, grading, and comparisons, with their files kept |
+| `uninstall.rs` | Uninstall: moves a model's folder or file to the Trash, never deletes |
 | `outside.rs`  | The engines outside this computer, Grok, GPT, Claude, and Gemini: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, Anthropic's, or Google's API through the gate |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
@@ -37,6 +39,7 @@ Three more live in `engine.rs`, each with tests:
 Three more live in `models.rs`, each with tests:
 
 - It only reads. Nothing in the models folder is written, moved, or removed.
+  Uninstall, in `uninstall.rs`, is the one way a model leaves it.
 - The app keeps no list of its own. The disk is asked every time.
 - Only models on the list are reported, and only when whole: a download that
   stopped part way, or a GGUF model missing one of its parts, is not counted.
@@ -69,6 +72,27 @@ Six more live in `downloads.rs`, each with tests:
 - One download at a time, and Cancel stops it and leaves nothing behind.
 - Once a model is whole on Windows or Linux, `llama-server` is asked to read
   its models folder again, so the new model is listed without a restart.
+
+Two more live in `deactivated.rs`, each with tests:
+
+- A model switched off stays off, the next time the app opens too, until
+  the person switches it on. Its files stay where they are.
+- Only a model the app could offer is kept off: one on the list, or one of
+  an outside engine's. Anything else is passed over, and a switch that
+  cannot be kept changes nothing.
+
+Three more live in `uninstall.rs`, each with tests:
+
+- Nothing deletes. A model's folder, or its one GGUF file, goes to the
+  Trash (the Recycle Bin on Windows), where the person can take it back.
+  On a Mac, the file manager moves it, so the app never asks to control
+  Finder.
+- Only a model on the list, only from the folder the engine reads, and only
+  that model's own folder or file. A name that steps out of the folder is
+  refused, and nothing else is touched.
+- Nothing moves while a model downloads, and a move the Trash refuses leaves
+  the model where it was. A model moved is switched back on, so it is not
+  kept off if it comes back.
 
 Four more live in `stack.rs`, each with tests:
 

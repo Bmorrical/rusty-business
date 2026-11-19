@@ -42,7 +42,7 @@ until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
 OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
 with your own key.
 
-**Status:** version 0.6.1, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.7.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -265,6 +265,14 @@ added has a Show button instead. Settings adds or removes a maker with one
 click. Removing a maker hides its models and deletes nothing: they stay on
 the computer, and saved chats still name them. One maker always stays
 picked.
+
+In Settings, under Models, each model has a switch, the outside engines'
+too. A model switched off is left out of questions, grading, and
+comparisons, and its files stay. Beside the switch for a model on this
+computer, Uninstall asks first, then moves the model's files to the Trash
+(the Recycle Bin on Windows), where you can take them back. On a Mac, the
+models sit in the Hugging Face cache, so other apps that use that cache lose
+the model too.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is

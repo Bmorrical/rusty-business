@@ -655,7 +655,7 @@ test('the stand-in picks the makers as the app does before the person picks', ()
   );
 });
 
-test('the stand-in answers the eight calls the pictures need, and refuses the rest', async () => {
+test('the stand-in answers the ten calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -696,6 +696,10 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   // The outbound gate is off, as on a first run, and the pictures leave it so.
   assert.equal(await invoke('gate_status'), false);
 
+  // No model is switched off, and Uninstall would move one to the Trash, as on a Mac.
+  assert.deepEqual(plain(await invoke('deactivated_models')), []);
+  assert.deepEqual(plain(await invoke('uninstall_place')), { trash: 'the Trash', sharedCache: true });
+
   // No outside engine is added, and each comes in the fields outside.rs gives
   // the page, in the order it gives them.
   assert.deepEqual(plain(await invoke('outside_status')), OUTSIDE_NOT_ADDED);
@@ -714,8 +718,9 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   assert.ok(read(OUTSIDE).includes(`pub const ANTHROPIC_HOST: &str = "${OUTSIDE_NOT_ADDED[2].host}";`), 'the stand-in gives Claude a host outside.rs does not ask');
   assert.ok(read(OUTSIDE).includes(`pub const GOOGLE_HOST: &str = "${OUTSIDE_NOT_ADDED[3].host}";`), 'the stand-in gives Gemini a host outside.rs does not ask');
 
-  // A call that would send, save, trash, or download has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside']) {
+  // A call that would send, save, trash, download, switch a model off, or
+  // uninstall one has no place in a picture.
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside', 'set_model_active', 'uninstall_model']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

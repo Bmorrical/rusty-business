@@ -90,6 +90,7 @@ test("Settings lets the user pick the grader, or none, and says what goes to an 
     'numbered and without the models\' names',
     'Until you pick one, the first outside engine on hand grades, in the order the Installers page lists them.',
     'The model picked is not on hand, so the answers are not graded.',
+    'The model picked is switched off, so the answers are not graded.',
     'Outside engines are on hand only while the gate is on.',
     'v-if="grader && isOutside(grader.id)"',
     "{{ grader.name }} grades on {{ grader.maker }}'s computers, so the question and every answer, the answers",
@@ -120,7 +121,7 @@ test("Settings lets the user pick the grader, or none, and says what goes to an 
   // so it never takes their place or shows one that is not true.
   assert.match(
     app,
-    /<p v-if="chosen\.length" class="quiet">\{\{ answersLine\(chosen\) \}\}<\/p>\s+<p v-else-if="starting" class="quiet">Starting the engine\.\.\.<\/p>\s+<p v-else-if="engine\?\.reachable" class="quiet">The engine has none of this app's models on hand\.<\/p>\s+<p v-if="many && grader" class="quiet">\{\{ gradesLine\(grader\) \}\}<\/p>/,
+    /<p v-if="chosen\.length" class="quiet">\{\{ answersLine\(chosen\) \}\}<\/p>\s+<p v-else-if="allOff" class="quiet">[\s\S]*?<\/p>\s+<p v-else-if="starting" class="quiet">Starting the engine\.\.\.<\/p>\s+<p v-else-if="engine\?\.reachable" class="quiet">The engine has none of this app's models on hand\.<\/p>\s+<p v-if="many && grader" class="quiet">\{\{ gradesLine\(grader\) \}\}<\/p>/,
     'the line on who grades breaks the empty chat\'s other lines',
   );
 });
