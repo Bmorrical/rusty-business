@@ -114,6 +114,7 @@ function run(prepare, { env = {}, script = SCRIPT } = {}) {
         GITHUB_SHA: COMMIT,
         GITHUB_STEP_SUMMARY: summary,
         GH_TOKEN: TOKEN,
+        MAC_SIGNED: 'false',
         STUB_LOG: log,
         STUB_FAIL: '__never__',
         STUB_TAGS: '',
@@ -222,6 +223,31 @@ test('a release asks once whether the tag is there, then makes it at this commit
     ].join('\n'),
     'the run summary does not give the five checksums',
   );
+});
+
+// Brad, 2026-11-19: "keep shipping self-signed as an option until all the
+// peices are ready, when ready we can light it up". The sign job says
+// whether it signed, and the notes give the steps for the app that went out.
+test('the notes give the steps to open the Mac app as it went out, signed or not', () => {
+  const notesOf = (signed) => {
+    const result = run((folder) => ['publish', distIn(folder)], { env: { MAC_SIGNED: signed } });
+    assert.equal(result.status, 0, result.stderr);
+    return result.calls[1][10];
+  };
+  const unsigned = notesOf('false');
+  const signed = notesOf('true');
+  const open = 'Privacy & Security, and choose Open Anyway.';
+  const asked = '2. Open the app. It is signed, and notarized by Apple, so macOS asks once whether to open an app from the internet: choose Open.';
+  assert.ok(unsigned.includes(`2. Open the app. It is not signed yet, so macOS stops it the first time: open System Settings, then ${open}`));
+  assert.ok(!unsigned.includes(asked), 'the unsigned notes say the app is signed');
+  assert.ok(signed.includes(asked), 'the signed notes do not say the app is signed');
+  assert.ok(!signed.includes(open), 'the signed notes still send a person to Open Anyway');
+  assert.ok(!signed.includes('so macOS stops it'), 'the signed notes still say macOS stops it');
+  // Windows is not signed either way, yet.
+  for (const notes of [unsigned, signed]) {
+    assert.ok(notes.includes('It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.'));
+  }
+  assert.equal(signed.replace(asked, ''), unsigned.replace(/^2\. Open the app\. It is not signed yet, so macOS.*$/m, ''), 'the notes differ in more than the Mac step');
 });
 
 test('a version already tagged stops the run before anything is made', () => {
@@ -335,7 +361,7 @@ test('a folder that does not hold exactly the five downloads and their matching 
   }
 });
 
-test('bad arguments, or a bad commit, repository, or token, reach no gh call', () => {
+test('bad arguments, or a bad commit, repository, token, or word from the sign job, reach no gh call', () => {
   const argCases = [[], ['publish'], ['publish', 'dist', 'more'], ['delete', 'dist'], ['upload', 'dist'], ['edit', 'dist']];
   for (const args of argCases) {
     const result = run((folder) => args.map((arg) => (arg === 'dist' ? distIn(folder) : arg)));
@@ -352,6 +378,10 @@ test('bad arguments, or a bad commit, repository, or token, reach no gh call', (
     'a repository with a command in it': { GITHUB_REPOSITORY: 'Bmorrical/rusty;true' },
     'a repository with a path in it': { GITHUB_REPOSITORY: 'Bmorrical/rusty/../x' },
     'no token': { GH_TOKEN: '' },
+    'no word from the sign job': { MAC_SIGNED: '' },
+    'a word from the sign job but true or false': { MAC_SIGNED: 'yes' },
+    'true in capitals': { MAC_SIGNED: 'True' },
+    'true, then more': { MAC_SIGNED: 'true\nfalse' },
   };
   for (const [name, env] of Object.entries(envCases)) {
     const result = run((folder) => ['publish', distIn(folder)], { env });
