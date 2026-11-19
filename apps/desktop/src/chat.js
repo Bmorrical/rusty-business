@@ -757,6 +757,44 @@ export function installLine(maker, model) {
   return model.onDisk && !maker.picked ? `${line}, shown once ${maker.name} is added` : line;
 }
 
+// "I should be able to deactivate and uninstall a model." A model switched
+// off stays where it is, but is left out of the models a question goes to,
+// out of grading, and out of every comparison. Rust keeps the ids switched
+// off, `off` here.
+
+/** The models switched on, in the list's order. */
+export function switchedOn(models, off) {
+  const away = new Set(off ?? []);
+  return (models ?? []).filter((entry) => !away.has(entry.id));
+}
+
+/** True when none of a model's ids is switched off. */
+export function isOn(ids, off) {
+  const away = new Set(off ?? []);
+  return !(ids ?? []).some((id) => away.has(id));
+}
+
+/** Under a model in Settings: its line, and that it is switched off. */
+export function modelLine(model, off) {
+  const line = listedLine(model);
+  return model.ids?.length && !isOn(model.ids, off) ? `${line}, switched off` : line;
+}
+
+/**
+ * The question before Uninstall moves a model: "Move Phi-4 to the Trash?",
+ * and, where models sit in the Hugging Face cache, that other apps that read
+ * the cache lose it too. `place` is where Rust says it goes.
+ */
+export function uninstallAsk(name, place) {
+  const ask = `Move ${name} to ${place?.trash || "the Trash"}?`;
+  return place?.sharedCache ? `${ask} Other apps that use the Hugging Face cache lose it too.` : ask;
+}
+
+/** After Uninstall: "Phi-4 is in the Trash." */
+export function uninstalledLine(name, place) {
+  return `${name} is in ${place?.trash || "the Trash"}.`;
+}
+
 /**
  * The starts of the model ids that name an outside engine's models: Grok's,
  * asked at xAI, GPT's, asked at OpenAI, Claude's, asked at Anthropic, and

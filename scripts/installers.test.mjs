@@ -142,7 +142,8 @@ test('Settings changes the makers and points to the Installers page, but downloa
   const app = read(APP);
   const settings = pageOf(app, 'settings');
   for (const part of ['download(', 'install(', '<progress', 'cancelDownload', 'stoppedNote', 'key-path']) {
-    assert.ok(!settings.includes(part), `Settings has ${part} again; it belongs on the Installers page`);
+    // Uninstall, in Settings under Models, moves a model to the Trash; it is not an install.
+    assert.ok(!settings.replaceAll('uninstall(', '').includes(part), `Settings has ${part} again; it belongs on the Installers page`);
   }
   assert.match(settings, /To install a model or add an outside engine, go to the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'Settings no longer points to the Installers page');
   assert.ok(settings.includes('id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>'), 'the Settings title no longer takes the focus');

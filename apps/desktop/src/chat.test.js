@@ -78,6 +78,11 @@ import {
   parseFacts,
   systemPrompt,
   withMaker,
+  isOn,
+  modelLine,
+  switchedOn,
+  uninstallAsk,
+  uninstalledLine,
   withPick,
 } from "./chat.js";
 
@@ -971,4 +976,49 @@ test("a call with raw line breaks in its strings is still read", () => {
   const reply = 'Editing.\n\n```\n{"tool": "edit", "path": "a.js", "find": "<a>\n  old\n</a>", "replace": "<a>new</a>"}\n```';
   assert.deepEqual(parseToolCall(reply).args, { path: "a.js", find: "<a>\n  old\n</a>", replace: "<a>new</a>" });
   assert.match(parseToolCall('```\n{"tool": "edit", "path": \n```').error, /not valid JSON/);
+});
+
+// Brad, 2026-11-19: "next story, I should be able to deactivate and uninstall
+// a model. I can't do that currently from what I can see."
+test("a model switched off is left out of the questions, grading, and comparisons", () => {
+  const phi = { id: PHI, name: "Phi-4", maker: "Microsoft" };
+  const oss = { id: "mlx-community/gpt-oss-20b-MXFP4-Q8", name: "gpt-oss 20B", maker: "OpenAI" };
+  const onHand = [phi, oss, GROK, OPENAI_GPT];
+  assert.deepEqual(switchedOn(onHand, []), onHand, "every model starts on");
+  assert.deepEqual(switchedOn(onHand, undefined), onHand);
+  const shown = switchedOn(onHand, [oss.id, GROK.id]);
+  assert.deepEqual(shown, [phi, OPENAI_GPT], "the rest keep the list's order");
+  // A question, and a comparison of several, can go only to models switched on.
+  const ids = shown.map((entry) => entry.id);
+  // As the page picks: the picks kept, else the first model switched on.
+  assert.deepEqual(keptPicks(ids, [oss.id, GROK.id], ids.slice(0, 1)), [phi.id], "a pick switched off falls back to the first on");
+  assert.deepEqual(keptPicks(ids, [oss.id, phi.id, OPENAI_GPT.id]), [phi.id, OPENAI_GPT.id]);
+  // The grader comes from the same list: Grok switched off does not grade.
+  assert.equal(graderFor(null, shown), OPENAI_GPT);
+  assert.equal(graderFor(GROK.id, shown), null, "a grader switched off is not on hand");
+  assert.equal(graderFor(null, switchedOn([phi, GROK], [GROK.id])), null);
+});
+
+test("a model with several copies here is on only while every copy is", () => {
+  const copies = ["someone/Phi-4", "someone/Phi-4-8bit"];
+  assert.equal(isOn(copies, []), true);
+  assert.equal(isOn(copies, ["someone/Phi-4-8bit"]), false);
+  assert.equal(isOn([], ["someone/Phi-4"]), true, "a model not here has nothing to switch");
+  assert.equal(isOn(undefined, undefined), true);
+  const phi = { name: "Phi-4", license: "MIT", onDisk: true, offer: null, ids: copies };
+  assert.equal(modelLine(phi, []), "MIT · on this computer");
+  assert.equal(modelLine(phi, ["someone/Phi-4"]), "MIT · on this computer, switched off");
+  const away = { name: "Gemma 4 26B", license: "Apache 2.0", onDisk: false, offer: null, ids: [] };
+  assert.equal(modelLine(away, ["someone/Phi-4"]), listedLine(away));
+});
+
+test("Uninstall asks first, names where the model goes, and warns of the shared cache", () => {
+  assert.equal(
+    uninstallAsk("Phi-4", { trash: "the Trash", sharedCache: true }),
+    "Move Phi-4 to the Trash? Other apps that use the Hugging Face cache lose it too.",
+  );
+  assert.equal(uninstallAsk("Phi-4", { trash: "the Recycle Bin", sharedCache: false }), "Move Phi-4 to the Recycle Bin?");
+  assert.equal(uninstallAsk("Phi-4", null), "Move Phi-4 to the Trash?", "before Rust answers, it says the Trash");
+  assert.equal(uninstalledLine("gpt-oss 20B", { trash: "the Recycle Bin" }), "gpt-oss 20B is in the Recycle Bin.");
+  assert.equal(uninstalledLine("gpt-oss 20B", undefined), "gpt-oss 20B is in the Trash.");
 });

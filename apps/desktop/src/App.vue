@@ -42,12 +42,14 @@ import {
   greeting,
   groups,
   installLine,
+  isOn,
   isOutside,
   keptPicks,
   listedLine,
   looksLikePath,
   memoryRequest,
   meterLine,
+  modelLine,
   moreLine,
   namesLine,
   onDiskLine,
@@ -63,9 +65,12 @@ import {
   showsUpdate,
   stackLine,
   startLine,
+  switchedOn,
   systemPrompt,
   titleFrom,
   tokensPerSecond,
+  uninstallAsk,
+  uninstalledLine,
   UPDATE_EVERY,
   updateDetail,
   updateLine,
@@ -134,6 +139,15 @@ const gateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
+// "I should be able to deactivate and uninstall a model." The ids Rust keeps
+// switched off, where an uninstalled model goes, and what the page is doing.
+const off = ref([]);
+const switching = ref(false);
+const modelNote = ref("");
+const outsideOffNote = ref("");
+const uninstallPlace = ref(null);
+const askUninstall = ref("");
+const uninstalling = ref("");
 const freeing = ref(false);
 const freeNote = ref("");
 // The outside engines, as Rust keeps them, in the Installers page's order.
@@ -198,8 +212,15 @@ function blankSession(project = null) {
 
 // An outside engine's models are offered only while the gate is on and the
 // engine is added.
-const outsideModels = computed(() => (gate.value ? outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []) : []));
-const models = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
+const outsideListed = computed(() => outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []));
+const outsideModels = computed(() => (gate.value ? outsideListed.value : []));
+// Every model on hand, switched on or off.
+const onHand = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
+// A model switched off is left out of the models a question can go to, the
+// grader's place, and every comparison, since each of those reads this list.
+const models = computed(() => switchedOn(onHand.value, off.value));
+// Models are on hand, and every one of them is switched off.
+const allOff = computed(() => onHand.value.length > 0 && !models.value.length);
 // The models a question goes to, in the list's order.
 const chosen = computed(() => models.value.filter((entry) => picked.value.includes(entry.id)));
 const many = computed(() => chosen.value.length > 1);
@@ -500,6 +521,57 @@ async function readMakers() {
   }
 }
 
+/** The models switched off, as Rust keeps them. */
+async function readOff() {
+  try {
+    off.value = await invoke("deactivated_models");
+  } catch (error) {
+    modelNote.value = String(error);
+  }
+}
+
+/**
+ * Switches a model on or off: every id it has here, or an outside engine's
+ * one. The models a question goes to follow the switch.
+ */
+async function setActive(ids, active, outsideModel = false) {
+  if (switching.value || busy.value) return;
+  const note = outsideModel ? outsideOffNote : modelNote;
+  switching.value = true;
+  note.value = "";
+  try {
+    for (const id of ids) off.value = await invoke("set_model_active", { id, active });
+  } catch (error) {
+    // Rust kept what it could; it says why the rest was not.
+    note.value = String(error);
+    await readOff();
+  } finally {
+    switching.value = false;
+    pickModels(picked.value);
+  }
+}
+
+/**
+ * Uninstall: Rust moves each of the model's ids, its folder or file, to the
+ * Trash, where the person can take it back. Nothing is deleted.
+ */
+async function uninstall(entry) {
+  askUninstall.value = "";
+  if (uninstalling.value || busy.value || downloading.value) return;
+  uninstalling.value = entry.name;
+  modelNote.value = "";
+  try {
+    for (const id of entry.ids ?? []) await invoke("uninstall_model", { id });
+    modelNote.value = uninstalledLine(entry.name, uninstallPlace.value);
+  } catch (error) {
+    modelNote.value = String(error);
+  } finally {
+    uninstalling.value = "";
+    await Promise.all([readMakers(), readOff()]);
+    await checkEngine();
+  }
+}
+
 async function setMaker(name, on, box) {
   // A checkbox shows what Rust kept. Vue leaves a box alone when the pick did
   // not change, so a refused click would otherwise stay ticked.
@@ -538,6 +610,7 @@ async function openPage(name) {
   nextTick(() => pageTitle.value?.focus());
   await readMakers();
   await readOutside();
+  await readOff();
 }
 
 /** Back to the chat. */
@@ -1349,7 +1422,8 @@ function modelName(id) {
   // A model whose maker was removed is set aside, not offered, but a saved
   // chat still names the model that wrote it.
   // So does a chat an outside engine answered after the engine is removed.
-  const known = [...models.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
+  // A model switched off still names the chats it wrote.
+  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -1394,6 +1468,13 @@ onMounted(async () => {
   await readOutside();
   // The makers picked are kept on this computer, so they need no gate.
   await readMakers();
+  // So are the models switched off, and where Uninstall moves a model.
+  await readOff();
+  try {
+    uninstallPlace.value = await invoke("uninstall_place");
+  } catch {
+    // The question then says "the Trash".
+  }
   // The stack can take minutes, so the page does not wait for it.
   checkStack();
   // So does the check for a new version, which asks GitHub.
@@ -1860,6 +1941,10 @@ onBeforeUnmount(() => {
             <p class="quiet">
               The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
             </p>
+            <p class="quiet">
+              Switch a model off to leave it out of questions, grading, and comparisons. Its files stay. Uninstall moves
+              a model's files to {{ uninstallPlace?.trash || "the Trash" }}, where you can take them back.
+            </p>
             <p class="quiet small">
               To install a model or add an outside engine, go to the
               <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
@@ -1892,7 +1977,42 @@ onBeforeUnmount(() => {
                   <li v-for="entry in maker.models" :key="entry.name" class="offer">
                     <span class="offer-text">
                       <span class="offer-name">{{ entry.name }}</span>
-                      <span class="quiet small">{{ listedLine(entry) }}</span>
+                      <span class="quiet small">{{ modelLine(entry, off) }}</span>
+                    </span>
+                    <template v-if="entry.ids?.length && askUninstall === entry.name">
+                      <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
+                      <button
+                        class="link"
+                        type="button"
+                        :aria-label="`Yes, move ${entry.name}`"
+                        :disabled="busy || Boolean(downloading)"
+                        @click="uninstall(entry)"
+                      >
+                        Yes
+                      </button>
+                      <button class="link" type="button" @click="askUninstall = ''">No</button>
+                    </template>
+                    <span v-else-if="entry.ids?.length" class="model-buttons">
+                      <button
+                        class="switch model-switch"
+                        type="button"
+                        role="switch"
+                        :aria-checked="isOn(entry.ids, off)"
+                        :aria-label="`Use ${entry.name}`"
+                        :disabled="switching || busy || Boolean(uninstalling)"
+                        @click="setActive(entry.ids, !isOn(entry.ids, off))"
+                      >
+                        <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                        <span class="quiet small">{{ isOn(entry.ids, off) ? "On" : "Off" }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        :aria-label="`Uninstall ${entry.name}`"
+                        :disabled="busy || Boolean(downloading) || Boolean(uninstalling)"
+                        @click="askUninstall = entry.name"
+                      >
+                        {{ uninstalling === entry.name ? "Moving..." : "Uninstall" }}
+                      </button>
                     </span>
                   </li>
                 </ul>
@@ -1900,6 +2020,37 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+            <p v-if="modelNote" class="small" role="alert">{{ modelNote }}</p>
+
+            <h3 class="gap-above">Outside models</h3>
+            <p class="quiet">A model switched off stays with its maker, and is left out here the same way.</p>
+            <ul v-if="outsideListed.length" class="maker-models" aria-label="Outside models">
+              <li v-for="entry in outsideListed" :key="entry.id" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ entry.name }}</span>
+                  <span class="quiet small">
+                    {{ chipDetail(entry) }}{{ isOn([entry.id], off) ? "" : ", switched off" }}
+                  </span>
+                </span>
+                <button
+                  class="switch model-switch"
+                  type="button"
+                  role="switch"
+                  :aria-checked="isOn([entry.id], off)"
+                  :aria-label="`Use ${entry.name}`"
+                  :disabled="switching || busy"
+                  @click="setActive([entry.id], !isOn([entry.id], off), true)"
+                >
+                  <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                  <span class="quiet small">{{ isOn([entry.id], off) ? "On" : "Off" }}</span>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="quiet small">
+              No outside engine is added. Add one on the
+              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            </p>
+            <p v-if="outsideOffNote" class="small" role="alert">{{ outsideOffNote }}</p>
 
             <h3 class="gap-above">Loaded models</h3>
             <p class="quiet">
@@ -1926,14 +2077,17 @@ onBeforeUnmount(() => {
                   {{ entry.name }} · {{ chipDetail(entry) }}
                 </option>
                 <option v-if="graderAway" :value="graderAway" disabled>
-                  {{ modelName(graderAway) || "A model not on hand" }} · not on hand
+                  {{ modelName(graderAway) || "A model not on hand" }} · {{ off.includes(graderAway) ? "switched off" : "not on hand" }}
                 </option>
               </select>
             </div>
             <p v-if="graderPick === null" class="quiet small">
               Until you pick one, the first outside engine on hand grades, in the order the Installers page lists them.
             </p>
-            <p v-if="graderAway" class="quiet small">
+            <p v-if="graderAway && off.includes(graderAway)" class="quiet small">
+              The model picked is switched off, so the answers are not graded.
+            </p>
+            <p v-else-if="graderAway" class="quiet small">
               The model picked is not on hand, so the answers are not graded.
               <template v-if="isOutside(graderAway)">Outside engines are on hand only while the gate is on.</template>
             </p>
@@ -1970,7 +2124,7 @@ onBeforeUnmount(() => {
           <span v-if="models.length" class="quiet small picks-label">
             <span class="dot" :class="engineOn ? 'live' : 'off'" aria-hidden="true"></span>Ask
           </span>
-          <span v-else class="quiet small">No model on hand</span>
+          <span v-else class="quiet small">{{ allOff ? "Every model is switched off" : "No model on hand" }}</span>
           <button
             v-for="entry in models"
             :key="entry.id"
@@ -2056,6 +2210,13 @@ onBeforeUnmount(() => {
             <div class="hello">
               <p class="display lead">{{ currentProject ? currentProject.name : hello }}.</p>
               <p v-if="chosen.length" class="quiet">{{ answersLine(chosen) }}</p>
+              <p v-else-if="allOff" class="quiet">
+                Every model on hand is switched off. Switch one on in
+                <button class="link in-text" type="button" @click="
+                    settingsTab = 'models';
+                    openPage('settings');
+                  ">Settings, Models</button>.
+              </p>
               <p v-else-if="starting" class="quiet">Starting the engine...</p>
               <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
               <p v-if="many && grader" class="quiet">{{ gradesLine(grader) }}</p>
@@ -2180,7 +2341,7 @@ onBeforeUnmount(() => {
             v-model="draft"
             rows="2"
             aria-label="Your message"
-            :placeholder="chosen.length ? `Message ${namesLine(chosen.map((entry) => entry.name))}` : 'No model on hand'"
+            :placeholder="chosen.length ? `Message ${namesLine(chosen.map((entry) => entry.name))}` : allOff ? 'Every model is switched off' : 'No model on hand'"
             :disabled="!chosen.length"
             @input="resizeComposer"
             @keydown="onKeydown"
@@ -3238,6 +3399,32 @@ button.switch {
 .engine-buttons {
   display: flex;
   gap: 0.5rem;
+}
+
+/* A model's switch and Uninstall, in Settings. */
+.model-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+button.switch.model-switch {
+  width: auto;
+  padding: 0.3rem 0.2rem;
+  font-weight: 400;
+}
+
+.offer:has(.ask-uninstall) {
+  flex-wrap: wrap;
+}
+
+/* While Uninstall asks, the model keeps its line and the question sits below. */
+.offer:has(.ask-uninstall) .offer-text {
+  flex-basis: 100%;
+}
+
+.ask-uninstall {
+  flex: 1 1 14rem;
 }
 
 .key-file code {
