@@ -1,6 +1,7 @@
 mod downloads;
 mod engine;
 mod models;
+mod projects;
 mod sessions;
 mod stack;
 mod starter;
@@ -22,6 +23,7 @@ pub fn run() {
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             app.manage(sessions::Store::new(data.join("sessions")));
+            app.manage(projects::Projects::new(data.join("projects"), data.join("memory.md")));
             app.manage(starter::Starter::new(data.join("engine.log")));
             app.manage(stack::Stack::new(data.join("stack"), data.join("stack.log"), stack::FRONT_DOOR_PORT));
             // What a download left when the app last quit part way is thrown away.
@@ -42,6 +44,14 @@ pub fn run() {
             sessions::load_session,
             sessions::save_session,
             sessions::trash_session,
+            sessions::search_sessions,
+            sessions::arrange_session,
+            projects::list_projects,
+            projects::save_project,
+            projects::trash_project,
+            projects::load_memory,
+            projects::save_memory,
+            projects::remember,
             update::check_update,
             update::open_update,
         ])

@@ -50,6 +50,11 @@ pub struct Session {
     pub updated_at: u64,
     #[serde(default)]
     pub messages: Vec<Turn>,
+    /// The project the chat belongs to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -60,6 +65,48 @@ pub struct SessionSummary {
     pub model: String,
     pub updated_at: u64,
     pub turns: usize,
+    pub project: Option<String>,
+    pub pinned: bool,
+}
+
+/// A chat that matched a search, with the words around the first match.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Found {
+    #[serde(flatten)]
+    pub session: SessionSummary,
+    pub snippet: String,
+}
+
+const SNIPPET_AROUND: usize = 40;
+const FOUND_LIMIT: usize = 50;
+
+fn summary(session: Session) -> SessionSummary {
+    SessionSummary {
+        turns: session.messages.len(),
+        id: session.id,
+        title: session.title,
+        model: session.model,
+        updated_at: session.updated_at,
+        project: session.project,
+        pinned: session.pinned,
+    }
+}
+
+/// The words around the first place `needle` (lower case) appears in `text`,
+/// on one line, or None when it does not.
+fn snippet(text: &str, needle: &str) -> Option<String> {
+    let characters: Vec<char> = text.chars().collect();
+    let lower: Vec<char> = characters.iter().map(|character| character.to_lowercase().next().unwrap_or(*character)).collect();
+    let wanted: Vec<char> = needle.chars().collect();
+    let at = lower.windows(wanted.len()).position(|window| window == wanted.as_slice())?;
+    let start = at.saturating_sub(SNIPPET_AROUND);
+    let end = (at + wanted.len() + SNIPPET_AROUND).min(characters.len());
+    let middle: String = characters[start..end].iter().collect();
+    let middle = middle.split_whitespace().collect::<Vec<_>>().join(" ");
+    let before = if start > 0 { "..." } else { "" };
+    let after = if end < characters.len() { "..." } else { "" };
+    Some(format!("{before}{middle}{after}"))
 }
 
 pub struct Store {
@@ -105,8 +152,14 @@ impl Store {
     /// Every saved session, newest first. A file that cannot be read is
     /// skipped, never removed.
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
+        let mut summaries: Vec<SessionSummary> = self.read_all()?.into_iter().map(summary).collect();
+        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(summaries)
+    }
+
+    fn read_all(&self) -> Result<Vec<Session>, String> {
         self.ready()?;
-        let mut summaries = Vec::new();
+        let mut sessions = Vec::new();
         for entry in fs::read_dir(&self.dir).map_err(failed("Could not read the sessions folder"))?.flatten() {
             let path = entry.path();
             if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
@@ -121,16 +174,43 @@ impl Store {
             if !valid_id(&session.id) {
                 continue;
             }
-            summaries.push(SessionSummary {
-                id: session.id,
-                title: session.title,
-                model: session.model,
-                updated_at: session.updated_at,
-                turns: session.messages.len(),
-            });
+            sessions.push(session);
         }
-        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        Ok(summaries)
+        Ok(sessions)
+    }
+
+    /// Chats whose title or words hold `query`, ignoring case, newest first.
+    pub fn search(&self, query: &str) -> Result<Vec<Found>, String> {
+        let needle = query.trim().to_lowercase();
+        if needle.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut found = Vec::new();
+        for session in self.read_all()? {
+            let hit = snippet(&session.title, &needle)
+                .map(|_| String::new())
+                .or_else(|| session.messages.iter().find_map(|turn| snippet(&turn.content, &needle)));
+            if let Some(snippet) = hit {
+                found.push(Found { session: summary(session), snippet });
+            }
+        }
+        found.sort_by(|a, b| b.session.updated_at.cmp(&a.session.updated_at));
+        found.truncate(FOUND_LIMIT);
+        Ok(found)
+    }
+
+    /// Pins a chat, or moves it into a project or out of one, without
+    /// changing when it was last written to.
+    pub fn arrange(&self, id: &str, pinned: bool, project: Option<String>) -> Result<SessionSummary, String> {
+        let mut session = self.load(id)?;
+        session.pinned = pinned;
+        session.project = project.filter(|project| !project.is_empty());
+        let text = serde_json::to_string_pretty(&session).map_err(|_| "Could not write the session.".to_string())?;
+        let path = self.path(id)?;
+        let partial = path.with_extension("json.partial");
+        fs::write(&partial, text).map_err(failed("Could not save the session"))?;
+        fs::rename(&partial, &path).map_err(failed("Could not save the session"))?;
+        Ok(summary(session))
     }
 
     pub fn load(&self, id: &str) -> Result<Session, String> {
@@ -183,6 +263,21 @@ pub fn load_session(store: tauri::State<'_, Store>, id: String) -> Result<Sessio
 #[tauri::command]
 pub fn save_session(store: tauri::State<'_, Store>, session: Session) -> Result<Session, String> {
     store.save(session)
+}
+
+#[tauri::command]
+pub fn search_sessions(store: tauri::State<'_, Store>, query: String) -> Result<Vec<Found>, String> {
+    store.search(&query)
+}
+
+#[tauri::command]
+pub fn arrange_session(
+    store: tauri::State<'_, Store>,
+    id: String,
+    pinned: bool,
+    project: Option<String>,
+) -> Result<SessionSummary, String> {
+    store.arrange(&id, pinned, project)
 }
 
 #[tauri::command]
@@ -277,6 +372,35 @@ mod tests {
         assert_eq!(kept.len(), 1);
         let text = fs::read_to_string(kept[0].path()).unwrap();
         assert_eq!(serde_json::from_str::<Session>(&text).unwrap(), saved);
+    }
+
+    #[test]
+    fn search_finds_titles_and_words_ignoring_case() {
+        let store = scratch_store();
+        let sums = store.save(chat("Sums")).unwrap();
+        let mut other = chat("Paleo weekend");
+        other.messages[1].content = "Buy eggs, bacon, and SWEET potatoes for the weekend.".to_string();
+        let paleo = store.save(other).unwrap();
+        assert_eq!(store.search("sums").unwrap()[0].session.id, sums.id);
+        let found = store.search("sweet").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].session.id, paleo.id);
+        assert!(found[0].snippet.contains("SWEET potatoes"));
+        assert!(store.search("  ").unwrap().is_empty());
+        assert!(store.search("nowhere").unwrap().is_empty());
+    }
+
+    #[test]
+    fn arranging_pins_and_files_a_chat_without_moving_it_in_time() {
+        let store = scratch_store();
+        let saved = store.save(chat("Sums")).unwrap();
+        let arranged = store.arrange(&saved.id, true, Some("gledit".to_string())).unwrap();
+        assert!(arranged.pinned);
+        assert_eq!(arranged.project.as_deref(), Some("gledit"));
+        assert_eq!(arranged.updated_at, saved.updated_at);
+        let back = store.arrange(&saved.id, false, Some(String::new())).unwrap();
+        assert!(!back.pinned && back.project.is_none());
+        assert!(store.arrange("../x", true, None).is_err());
     }
 
     #[test]

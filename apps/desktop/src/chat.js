@@ -22,13 +22,15 @@ export function titleFrom(text) {
  * side (a reply that was stopped before it began) are joined, because some
  * models refuse a chat whose turns do not alternate.
  */
-export function requestMessages(turns) {
+export function requestMessages(turns, system = "") {
   const messages = [];
+  const instructions = String(system ?? "").trim();
+  if (instructions) messages.push({ role: "system", content: instructions });
   for (const turn of turns ?? []) {
     const content = String(turn.content ?? "").trim();
     if (!content || !["system", "user", "assistant"].includes(turn.role)) continue;
     const last = messages[messages.length - 1];
-    if (last && last.role === turn.role) {
+    if (last && last.role === turn.role && turn.role !== "system") {
       last.content = `${last.content}\n\n${content}`;
     } else {
       messages.push({ role: turn.role, content });
@@ -213,4 +215,117 @@ export function updateDetail(update) {
 export function checkedLine(update, current) {
   if (update?.version) return updateLine(update);
   return current ? `Rusty Business™ ${current} is the newest version.` : "This is the newest version.";
+}
+
+/**
+ * What the model is told before a chat: what it remembers about the person,
+ * and, in a project, the project's name, instructions, and memory. Empty when
+ * there is nothing to tell.
+ */
+export function systemPrompt(memory, project) {
+  const parts = [];
+  const section = (heading, text) => {
+    const body = String(text ?? "").trim();
+    if (body) parts.push(`${heading}:\n<memory>\n${body}\n</memory>`);
+  };
+  section("What you remember about the user", memory);
+  if (project) {
+    parts.push(`This conversation is part of the user's "${project.name}" project.`);
+    const instructions = String(project.instructions ?? "").trim();
+    if (instructions) parts.push(`<project_instructions>\n${instructions}\n</project_instructions>`);
+    section("What you remember about this project", project.memory);
+  }
+  if (!parts.length) return "";
+  return [
+    "You have a long-term memory. Use what you remember naturally, without announcing it. When the user asks you to remember something, acknowledge it briefly.",
+    ...parts,
+  ].join("\n\n");
+}
+
+/**
+ * The request that asks the model what, in the person's latest message, is
+ * worth remembering. It answers with JSON alone.
+ */
+export function memoryRequest(message, memory, project) {
+  const scopes = project
+    ? `The chat is part of the "${project.name}" project. Use "project" for facts that only matter to it, and "user" for facts about the user in general.`
+    : 'Use "user" for every fact.';
+  const known = [memory, project?.memory].map((text) => String(text ?? "").trim()).filter(Boolean).join("\n");
+  const system = [
+    "You keep a chat assistant's long-term memory about the user. Read the user's message and list new facts worth remembering in later chats.",
+    "Save a fact when the user asks you to remember something, or shares a lasting detail about themselves, their preferences, their work, or their plans. Do not save questions, one-off requests, temporary details, or anything already remembered. Most messages hold nothing worth saving, so an empty list is the usual answer.",
+    'Write each fact as a short sentence, like "Lives in Denver". Answer with JSON only, in this shape: {"memories":[{"content":"...","scope":"user"}]}',
+    scopes,
+    known ? `Already remembered:\n<memory>\n${known}\n</memory>` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return [
+    { role: "system", content: system },
+    { role: "user", content: String(message ?? "") },
+  ];
+}
+
+/**
+ * The facts in the model's answer to memoryRequest, split by where they go.
+ * An answer that is not the JSON asked for gives none: a small model that
+ * strays saves nothing rather than something wrong.
+ */
+export function parseFacts(answer, inProject) {
+  const facts = { user: [], project: [] };
+  const text = String(answer ?? "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return facts;
+  let parsed;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return facts;
+  }
+  const list = Array.isArray(parsed?.memories) ? parsed.memories : [];
+  for (const entry of list.slice(0, 5)) {
+    const content = typeof entry?.content === "string" ? entry.content.trim() : "";
+    if (!content) continue;
+    if (inProject && entry.scope === "project") facts.project.push(content);
+    else facts.user.push(content);
+  }
+  return facts;
+}
+
+/**
+ * The side's lists: each project's chats, the pinned chats, and the rest by
+ * age. A chat in a project that no longer exists counts as in none. Each
+ * list keeps the order given, which is newest first.
+ */
+export function arrangeSessions(sessions, projects, now = Date.now()) {
+  const known = new Set((projects ?? []).map((project) => project.id));
+  const byProject = {};
+  for (const project of projects ?? []) byProject[project.id] = [];
+  const pinned = [];
+  const ages = [
+    { label: "Today", items: [] },
+    { label: "Previous 7 days", items: [] },
+    { label: "Previous 30 days", items: [] },
+    { label: "Older", items: [] },
+  ];
+  const today = new Date(now);
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  for (const entry of sessions ?? []) {
+    if (entry.project && known.has(entry.project)) byProject[entry.project].push(entry);
+    else if (entry.pinned) pinned.push(entry);
+    else {
+      const days = (startOfToday - entry.updatedAt) / 86_400_000;
+      const age = entry.updatedAt >= startOfToday ? 0 : days <= 7 ? 1 : days <= 30 ? 2 : 3;
+      ages[age].items.push(entry);
+    }
+  }
+  return { byProject, pinned, ages: ages.filter((age) => age.items.length) };
+}
+
+/** "Good morning", "Good afternoon", or "Good evening", by the hour. */
+export function greeting(hour) {
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  return "Good evening";
 }

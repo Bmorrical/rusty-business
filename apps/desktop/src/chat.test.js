@@ -27,6 +27,11 @@ import {
   titleFrom,
   tokensPerSecond,
   tokensUsed,
+  arrangeSessions,
+  greeting,
+  memoryRequest,
+  parseFacts,
+  systemPrompt,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -318,4 +323,70 @@ test("Check for updates says what it found", () => {
 
 test("the page asks once a day while it stays open", () => {
   assert.equal(UPDATE_EVERY, 86_400_000);
+});
+
+test("the system message comes first, and is left out when empty", () => {
+  const turns = [{ role: "user", content: "Hi" }];
+  assert.deepEqual(requestMessages(turns, "Be brief."), [
+    { role: "system", content: "Be brief." },
+    { role: "user", content: "Hi" },
+  ]);
+  assert.deepEqual(requestMessages(turns, "  "), [{ role: "user", content: "Hi" }]);
+});
+
+test("the system prompt carries memory and the project, and nothing when there is none", () => {
+  assert.equal(systemPrompt("", null), "");
+  const global = systemPrompt("Lives in Jacksonville.", null);
+  assert.match(global, /What you remember about the user:\n<memory>\nLives in Jacksonville\.\n<\/memory>/);
+  assert.doesNotMatch(global, /project/);
+  const project = systemPrompt("", { name: "Gledit", instructions: "Be terse.", memory: "- For small businesses" });
+  assert.match(project, /"Gledit" project/);
+  assert.match(project, /<project_instructions>\nBe terse\.\n<\/project_instructions>/);
+  assert.match(project, /What you remember about this project:\n<memory>\n- For small businesses/);
+  assert.doesNotMatch(project, /about the user/);
+});
+
+test("the memory request names the scopes and what is already known", () => {
+  const [system, user] = memoryRequest("I moved to Denver", "Likes Rust", { name: "Odd Stereo", memory: "A podcast" });
+  assert.equal(user.content, "I moved to Denver");
+  assert.match(system.content, /"Odd Stereo" project/);
+  assert.match(system.content, /Likes Rust\nA podcast/);
+  assert.match(memoryRequest("x", "", null)[0].content, /Use "user" for every fact/);
+});
+
+test("facts are read from JSON, even wrapped in words, and nothing from anything else", () => {
+  const answer = 'Sure: {"memories":[{"content":" Lives in Denver ","scope":"user"},{"content":"Ships Friday","scope":"project"},{"content":""}]}';
+  assert.deepEqual(parseFacts(answer, true), { user: ["Lives in Denver"], project: ["Ships Friday"] });
+  assert.deepEqual(parseFacts(answer, false), { user: ["Lives in Denver", "Ships Friday"], project: [] });
+  for (const bad of ["", "no facts", "{not json}", '{"memories":"x"}', null]) {
+    assert.deepEqual(parseFacts(bad, true), { user: [], project: [] });
+  }
+});
+
+test("the side lists projects' chats, then pinned, then the rest by age", () => {
+  const now = new Date(2026, 10, 18, 20, 0).getTime();
+  const day = 86_400_000;
+  const sessions = [
+    { id: "a", updatedAt: now - 1000, project: "p1" },
+    { id: "b", updatedAt: now - 2000, pinned: true },
+    { id: "c", updatedAt: now - 3000 },
+    { id: "d", updatedAt: now - 3 * day },
+    { id: "e", updatedAt: now - 20 * day, project: "gone" },
+    { id: "f", updatedAt: now - 90 * day },
+  ];
+  const side = arrangeSessions(sessions, [{ id: "p1" }, { id: "p2" }], now);
+  assert.deepEqual(side.byProject.p1.map((entry) => entry.id), ["a"]);
+  assert.deepEqual(side.byProject.p2, []);
+  assert.deepEqual(side.pinned.map((entry) => entry.id), ["b"]);
+  assert.deepEqual(
+    side.ages.map((age) => [age.label, age.items.map((entry) => entry.id)]),
+    [["Today", ["c"]], ["Previous 7 days", ["d"]], ["Previous 30 days", ["e"]], ["Older", ["f"]]],
+  );
+});
+
+test("the greeting follows the hour", () => {
+  assert.equal(greeting(8), "Good morning");
+  assert.equal(greeting(13), "Good afternoon");
+  assert.equal(greeting(20), "Good evening");
+  assert.equal(greeting(2), "Good evening");
 });
