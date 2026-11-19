@@ -966,3 +966,9 @@ test("a tool call in a plain fence is not shown as code", () => {
     "Listing.|```js|go();|```",
   );
 });
+
+test("a call with raw line breaks in its strings is still read", () => {
+  const reply = 'Editing.\n\n```\n{"tool": "edit", "path": "a.js", "find": "<a>\n  old\n</a>", "replace": "<a>new</a>"}\n```';
+  assert.deepEqual(parseToolCall(reply).args, { path: "a.js", find: "<a>\n  old\n</a>", replace: "<a>new</a>" });
+  assert.match(parseToolCall('```\n{"tool": "edit", "path": \n```').error, /not valid JSON/);
+});

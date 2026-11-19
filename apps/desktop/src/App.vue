@@ -1247,8 +1247,7 @@ async function useTool(project, call, reply) {
 /** Links in a reply stay put: the window never leaves the chat. */
 /** An answer's words. A tool block it ends with is shown as its step instead. */
 function replyText(turn) {
-  if (turn.tool) return shownReply(withoutToolFences(turn.content));
-  return turn.pending ? shownReply(turn.content) : String(turn.content ?? "").trim();
+  return turn.tool || turn.pending ? shownReply(withoutToolFences(turn.content)) : String(turn.content ?? "").trim();
 }
 
 const copied = ref(null);

@@ -522,10 +522,8 @@ export function parseToolCall(text) {
   // JSON, such as in a README the model writes, stays part of the call.
   const match = /```tool[^\n]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/.exec(source) ?? plainToolFence(source);
   if (!match) return null;
-  let call;
-  try {
-    call = JSON.parse(match[1].trim());
-  } catch {
+  const call = readCall(match[1]);
+  if (call === undefined) {
     return { tool: "", args: {}, before: source.slice(0, match.index).trim(), error: "The tool block was not valid JSON." };
   }
   if (!call || typeof call !== "object" || !TOOLS.includes(call.tool)) {
@@ -536,31 +534,56 @@ export function parseToolCall(text) {
 }
 
 /**
+ * A tool block's JSON, or undefined when it is not JSON. Line breaks and tabs
+ * a model writes raw inside a string, as small models do with code, are read
+ * as the escapes it meant.
+ */
+function readCall(body) {
+  const text = String(body ?? "").trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    let fixed = "";
+    let inString = false;
+    let escaped = false;
+    for (const char of text) {
+      if (inString && !escaped && char === "\n") fixed += "\\n";
+      else if (inString && !escaped && char === "\r") fixed += "\\r";
+      else if (inString && !escaped && char === "\t") fixed += "\\t";
+      else fixed += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = inString;
+      else if (char === '"') inString = !inString;
+    }
+    try {
+      return JSON.parse(fixed);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/** Whether a fence's body is meant as a tool call, valid JSON or not. */
+function looksLikeCall(body) {
+  return /^\s*\{\s*"tool"\s*:/.test(body);
+}
+
+/**
  * A tool call some models put in a plain or json fence instead of a tool
  * one: the first such fence that holds a call to a tool the app has.
  */
 function plainToolFence(source) {
   for (const found of source.matchAll(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/g)) {
-    try {
-      const call = JSON.parse(found[1].trim());
-      if (call && TOOLS.includes(call.tool)) return found;
-    } catch {
-      // Not a call; keep looking.
-    }
+    if (looksLikeCall(found[1])) return found;
   }
   return null;
 }
 
 /** A reply's text without the plain or json fences that hold tool calls. */
 export function withoutToolFences(text) {
-  return String(text ?? "").replace(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/g, (whole, body) => {
-    try {
-      const call = JSON.parse(body.trim());
-      return call && TOOLS.includes(call.tool) ? "" : whole;
-    } catch {
-      return whole;
-    }
-  });
+  return String(text ?? "").replace(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/g, (whole, body) =>
+    looksLikeCall(body) ? "" : whole,
+  );
 }
 
 /** The tool a bare set of arguments points to, from the keys it has. */
