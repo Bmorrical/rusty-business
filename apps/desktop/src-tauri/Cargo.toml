@@ -1,6 +1,6 @@
 [package]
 name = "rusty-business"
-version = "0.5.0"
+version = "0.6.0"
 description = "A desktop window for models that run on this computer"
 edition = "2024"
 license = "MIT"

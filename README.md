@@ -23,7 +23,7 @@ until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
 OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
 with your own key.
 
-**Status:** version 0.5.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.6.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or build it from source with one
 command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
