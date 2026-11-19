@@ -14,10 +14,19 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
-Nothing is picked yet.
+- **Reading images.** Images dropped on a message, and scanned PDFs, are
+  read by a model that can see. That means mlx-vlm in the engine and a
+  vision model on the Models list, such as Qwen2.5-VL 7B at about 5 GB.
+- **Making images.** Ask for a picture and it appears in the chat, made on
+  this computer: mflux in the engine and a FLUX model of 6 to 12 GB.
 
 ## Later
 
+- **A router over specialist models.** A small, fast classifier picks the
+  best model for each message: one base model with an adapter per task,
+  such as web coding, UI design, or project planning, so switching costs
+  next to nothing. It ships first with the general model alone, noting what
+  it would have picked, so real use shows which specialists to train.
 - **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
   Windows and Linux need an engine of their own. It is not chosen yet.
 
@@ -63,3 +72,14 @@ Nothing is picked yet.
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
   GitHub when the window opens, once a day, and when you click Check for
   updates. It installs nothing itself.
+- **Projects, memory, and search.** Chats group into projects, each with
+  its own instructions and memory; a global memory goes with every chat and
+  grows as you talk. Chats can be pinned and searched.
+- **A Models page.** Settings lists every model the app can download, and
+  marks the ones already on this computer.
+- **Projects that work in a folder.** A project can point at a folder on
+  this computer. The model lists, reads, and searches its files, and edits
+  or writes them only after you press Apply.
+- **Formatted replies.** Replies show their Markdown, tables, code, and math.
+- **Attached files.** PDF, Word, PowerPoint, spreadsheets, CSV, and text or
+  code files are read into text on this computer and go with the message.
