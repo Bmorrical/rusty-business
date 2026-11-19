@@ -32,6 +32,11 @@ tokio = { version = "1", features = ["sync", "macros", "time"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 libc = "0.2"
+# Attachments: the text of PDFs, Word files, and spreadsheets, read on this
+# computer. zip is the version calamine already uses, so it is built once.
+calamine = "0.30"
+pdf-extract = "0.12.1"
+zip = { version = "4", default-features = false, features = ["deflate"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -39,5 +44,7 @@ libc = "0.2"
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# Panics unwind, so a file that breaks the PDF reader costs one attachment,
+# not the app: see attachments.rs.
+panic = "unwind"
 strip = true

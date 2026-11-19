@@ -3,6 +3,7 @@ import { renderMarkdown } from "./markdown.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import {
   arrangeSessions,
@@ -13,6 +14,8 @@ import {
   modelShelf,
   changeLines,
   findToolCall,
+  attachmentLine,
+  attachmentTokens,
   shownReply,
   TOOL_STEPS,
   toolLabel,
@@ -49,6 +52,9 @@ const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // Line icons, drawn at 24 by 24 with a round stroke.
 const ICONS = {
+  clip: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
+  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6",
+  close: "M18 6 6 18M6 6l12 12",
   compose: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm10 17-4.35-4.35",
   folder:
@@ -138,7 +144,19 @@ const models = computed(() => engine.value?.models ?? []);
 const model = computed(() => models.value.find((entry) => entry.id === modelId.value) ?? null);
 const used = computed(() => tokensUsed(current.value.messages));
 const full = computed(() => fullness(used.value, model.value?.context));
-const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boolean(model.value));
+/** Files read and waiting to go with the next message. */
+const attached = ref([]);
+/** How many files are still being read. */
+const attaching = ref(0);
+const dropping = ref(false);
+let stopDropping = null;
+const canSend = computed(
+  () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && Boolean(model.value) && !attaching.value,
+);
+/** True when the waiting files would nearly fill the model's window. */
+const tooBig = computed(
+  () => Boolean(model.value) && attached.value.length > 0 && attachmentTokens(attached.value) + (used.value || 0) > model.value.context * 0.85,
+);
 const offers = computed(() => firstRunOffers(engine.value));
 const quick = computed(() => quickest(offers.value));
 const shelf = computed(() => modelShelf(engine.value));
@@ -577,10 +595,12 @@ async function send() {
   const chosen = model.value;
   const project = currentProject.value;
   problem.value = "";
-  if (!session.messages.length) session.title = titleFrom(text);
+  const files = attached.value;
+  if (!session.messages.length) session.title = titleFrom(text || files[0]?.name);
   session.model = chosen.id;
-  session.messages.push({ role: "user", content: text });
+  session.messages.push(files.length ? { role: "user", content: text, attachments: files } : { role: "user", content: text });
   draft.value = "";
+  attached.value = [];
   busy.value = true;
   halted = false;
   stickToBottom = true;
@@ -630,7 +650,49 @@ async function send() {
   }
   busy.value = false;
   focusComposer();
-  if (answered) learning = learn(text, chosen.id, project);
+  if (answered && text) learning = learn(text, chosen.id, project);
+}
+
+/** Reads files into text, to go with the next message. */
+async function attachPaths(paths) {
+  for (const path of paths ?? []) {
+    attaching.value += 1;
+    try {
+      const file = await invoke("read_attachment", { path });
+      if (!attached.value.some((known) => known.name === file.name && known.text === file.text)) {
+        attached.value = [...attached.value, file];
+      }
+    } catch (error) {
+      problem.value = String(error);
+    } finally {
+      attaching.value -= 1;
+    }
+  }
+  focusComposer();
+}
+
+async function pickFiles() {
+  try {
+    await attachPaths(await invoke("pick_files"));
+  } catch (error) {
+    problem.value = String(error);
+  }
+}
+
+function detach(index) {
+  attached.value = attached.value.filter((_, at) => at !== index);
+}
+
+/** Files dropped on the window are attached, while a chat is open. */
+function onDrop(event) {
+  const kind = event.payload?.type;
+  const chatting = view.value !== "settings";
+  if (kind === "enter" || kind === "over") dropping.value = chatting;
+  else if (kind === "leave") dropping.value = false;
+  else if (kind === "drop") {
+    dropping.value = false;
+    if (chatting) attachPaths(event.payload.paths);
+  }
 }
 
 /** One reply from the model, streamed into the chat. Null when it failed. */
@@ -817,6 +879,15 @@ onMounted(async () => {
   // So does the check for a new version, which asks GitHub.
   checkUpdate();
   updateTimer = window.setInterval(checkUpdate, UPDATE_EVERY);
+  // Dropping files is a nicety; the page works without it.
+  try {
+    getCurrentWebview()
+      .onDragDropEvent(onDrop)
+      .then((stop) => (stopDropping = stop))
+      .catch(() => {});
+  } catch {
+    // No webview to listen to.
+  }
   await Promise.all([checkEngine(), refreshSessions(), refreshProjects(), loadMemory()]);
   focusComposer();
 });
@@ -827,6 +898,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("click", onWindowClick);
   window.clearInterval(updateTimer);
   window.clearInterval(clockTimer);
+  stopDropping?.();
 });
 </script>
 
@@ -1027,6 +1099,10 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="main">
+      <div v-if="dropping" class="drop" aria-hidden="true">
+        <p class="display">Drop to attach</p>
+        <p class="quiet small">PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files</p>
+      </div>
       <section v-if="showsUpdate(update, updateLater)" class="update" role="status" aria-label="New version">
         <div class="update-words">
           <p>
@@ -1221,7 +1297,16 @@ onBeforeUnmount(() => {
             :class="turn.role"
           >
             <template v-if="turn.role === 'user'">
-              <p class="bubble">{{ turn.content }}</p>
+              <ul v-if="turn.attachments?.length" class="files sent" aria-label="Attached files">
+                <li v-for="(file, at) in turn.attachments" :key="at" class="file" :title="file.name">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+                  <span class="file-text">
+                    <span class="file-name">{{ file.name }}</span>
+                    <span class="file-line">{{ attachmentLine(file) }}</span>
+                  </span>
+                </li>
+              </ul>
+              <p v-if="turn.content" class="bubble">{{ turn.content }}</p>
             </template>
             <template v-else>
               <details v-if="turn.thinking" class="thinking">
@@ -1269,6 +1354,20 @@ onBeforeUnmount(() => {
 
         <footer class="compose">
           <div class="box">
+            <ul v-if="attached.length || attaching" class="files" aria-label="Files to send">
+              <li v-for="(file, at) in attached" :key="at" class="file" :title="file.name">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+                <span class="file-text">
+                  <span class="file-name">{{ file.name }}</span>
+                  <span class="file-line">{{ attachmentLine(file) }}</span>
+                </span>
+                <button class="file-x" type="button" :aria-label="`Remove ${file.name}`" @click="detach(at)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.close" /></svg>
+                </button>
+              </li>
+              <li v-if="attaching" class="file reading quiet small">Reading...</li>
+            </ul>
+            <p v-if="tooBig" class="too-big small">These files may not fit in {{ model.name }}'s window. Try fewer, or a model with a bigger one.</p>
             <textarea
               ref="composer"
               v-model="draft"
@@ -1280,6 +1379,9 @@ onBeforeUnmount(() => {
               @keydown="onKeydown"
             ></textarea>
             <div class="box-row">
+              <button class="icon attach" type="button" aria-label="Attach files" title="Attach files" :disabled="busy" @click="pickFiles">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.clip" /></svg>
+              </button>
               <span class="quiet small model-note">{{ model ? model.name : "" }}</span>
               <button v-if="busy" class="send stop" type="button" aria-label="Stop" title="Stop" @click="stop">
                 <span class="stop-square" aria-hidden="true"></span>
@@ -1961,6 +2063,7 @@ kbd {
 
 /* The chat. */
 .main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2793,5 +2896,113 @@ textarea.memory:focus,
 
 .prose .katex-display {
   margin: 0;
+}
+
+.drop {
+  position: absolute;
+  inset: 0.75rem;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 2px dashed var(--accent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  pointer-events: none;
+}
+
+.drop .display {
+  font-size: 2rem;
+  margin: 0;
+}
+
+.box-row .model-note {
+  flex: 1;
+  margin-left: 0.4rem;
+}
+
+.attach svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.files {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.6rem;
+  padding: 0;
+}
+
+.files.sent {
+  justify-content: flex-end;
+  margin: 0 0 0.4rem;
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 16rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raised);
+  padding: 0.45rem 0.6rem;
+}
+
+.file > svg {
+  color: var(--accent);
+}
+
+.file.reading {
+  padding: 0.6rem 0.8rem;
+}
+
+.file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-name {
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-line {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.file-x {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  padding: 0.15rem;
+  color: var(--quiet);
+  border-radius: 6px;
+}
+
+.file-x:hover {
+  color: var(--ink);
+}
+
+.file-x svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.too-big {
+  margin: 0 0 0.5rem;
+  color: var(--bad);
 }
 </style>

@@ -11,6 +11,9 @@ import {
   changeLines,
   parseToolCall,
   findToolCall,
+  withAttachments,
+  attachmentTokens,
+  attachmentLine,
   shownReply,
   toolLabel,
   toolResult,
@@ -447,4 +450,19 @@ test("a call left in the thinking, as gpt-oss does, is still found", () => {
   assert.equal(findToolCall("The entry point is main.js.", '{"path":"src"}'), null);
   assert.equal(findToolCall("", "Just thinking."), null);
   assert.equal(findToolCall('Look.\n```tool\n{"tool":"list","path":"."}\n```', "").block, "");
+});
+
+test("attached files go to the model before the message, and say when they were cut", () => {
+  const turn = {
+    role: "user",
+    content: "Sum the totals.",
+    attachments: [{ name: "sales.csv", kind: "CSV", text: "west,10", chars: 7, cut: false }],
+  };
+  assert.equal(withAttachments(turn), '<attachment name="sales.csv">\nwest,10\n</attachment>\n\nSum the totals.');
+  assert.match(withAttachments({ content: "", attachments: [{ name: "a", text: "x", chars: 9000, cut: true }] }), /first 1 characters of 9,000\.\)\n<\/attachment>\n\nThe user attached the files above\.$/);
+  assert.equal(requestMessages([turn])[0].content, withAttachments(turn));
+  assert.equal(withAttachments({ content: " hi " }), "hi");
+  assert.equal(attachmentTokens([{ text: "1234567" }]), 2);
+  assert.equal(attachmentLine({ kind: "PDF", chars: 12400, cut: true }), "PDF · 12K characters, cut short");
+  assert.equal(savedTurn(turn).attachments.length, 1);
 });

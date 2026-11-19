@@ -1,3 +1,4 @@
+mod attachments;
 mod downloads;
 mod engine;
 mod models;
@@ -56,6 +57,8 @@ pub fn run() {
             workspace::workspace_overview,
             workspace::workspace_tool,
             workspace::pick_folder,
+            attachments::read_attachment,
+            attachments::pick_files,
             update::check_update,
             update::open_update,
         ])

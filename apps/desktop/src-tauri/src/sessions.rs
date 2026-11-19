@@ -38,6 +38,9 @@ pub struct Turn {
     /// True on what a step found, which goes back to the model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_result: Option<bool>,
+    /// Files attached to a message, with their text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

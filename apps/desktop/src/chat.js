@@ -27,7 +27,7 @@ export function requestMessages(turns, system = "") {
   const instructions = String(system ?? "").trim();
   if (instructions) messages.push({ role: "system", content: instructions });
   for (const turn of turns ?? []) {
-    const content = String(turn.content ?? "").trim();
+    const content = withAttachments(turn);
     if (!content || !["system", "user", "assistant"].includes(turn.role)) continue;
     const last = messages[messages.length - 1];
     if (last && last.role === turn.role && turn.role !== "system") {
@@ -143,7 +143,7 @@ export function dayLabel(milliseconds, now = Date.now()) {
 /** A turn as it is saved: no window-only fields, no empty ones. */
 export function savedTurn(turn) {
   const saved = { role: turn.role, content: turn.content ?? "" };
-  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult"]) {
+  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult", "attachments"]) {
     const value = turn[key];
     if (value !== undefined && value !== null && value !== "" && value !== false) saved[key] = value;
   }
@@ -468,4 +468,35 @@ export function changeLines(call) {
   }
   if (call?.tool === "write") return split(args.content).map((text) => ({ kind: "new", text }));
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// Files attached to a message
+// ---------------------------------------------------------------------------
+
+/** A message's words, with the text of each file attached to it first. */
+export function withAttachments(turn) {
+  const text = String(turn?.content ?? "").trim();
+  const files = (turn?.attachments ?? []).filter((file) => file?.text);
+  if (!files.length) return text;
+  const blocks = files.map((file) => {
+    const cut = file.cut ? `\n(The file goes on; this is the first ${formatCount(file.text.length)} characters of ${formatCount(file.chars)}.)` : "";
+    return `<attachment name="${String(file.name).replace(/"/g, "'")}">\n${file.text}${cut}\n</attachment>`;
+  });
+  return [...blocks, text || "The user attached the files above."].join("\n\n");
+}
+
+/**
+ * Roughly how many tokens files take, at about 3.5 characters a token: close
+ * enough to warn before a model's window overflows.
+ */
+export function attachmentTokens(files) {
+  return Math.ceil((files ?? []).reduce((sum, file) => sum + String(file?.text ?? "").length, 0) / 3.5);
+}
+
+/** "PDF · 12K characters": a file's label in the chat. */
+export function attachmentLine(file) {
+  const size = Number(file?.chars ?? 0);
+  const amount = size >= 1000 ? `${Math.round(size / 1000)}K characters` : `${size} characters`;
+  return `${file?.kind ?? "File"} · ${amount}${file?.cut ? ", cut short" : ""}`;
 }
