@@ -127,15 +127,28 @@ test('pin 1 says signing waits behind a switch, and downloads ship unsigned unti
 });
 
 // Brad, 2026-11-19: "add an engine to linux and windows distro's", with
-// llama.cpp's Vulkan build, and models "Maker first, then ggml-org".
-test('the engine for Windows and Linux is next, and is llama.cpp', () => {
+// llama.cpp's Vulkan build, and models "Maker first, then ggml-org". Then,
+// with the Mac's signing kept in 0.6.0: "everything else is roadmap". So the
+// app starting llama.cpp is done, the engine inside the downloads is next,
+// and Windows's signing switch follows the Mac's.
+test('the engine for Windows and Linux is next, inside the downloads, and is llama.cpp', () => {
   const engine = itemsOf(section('Next').body).find((item) => item.title === 'An engine for Windows and Linux.');
   assert.ok(engine, 'the roadmap does not have the engine for Windows and Linux next');
-  assert.match(engine.text, /llama\.cpp's `llama-server`/);
+  assert.match(engine.text, /llama\.cpp's `llama-server` inside the download/);
   assert.match(engine.text, /the Vulkan build/);
-  assert.match(engine.text, /GGUF files, from the maker's own copy first, then ggml-org's\./);
+  assert.match(engine.text, /checked by its SHA-256/);
+  assert.match(engine.text, /the Vulkan loader/);
   const later = itemsOf(section('Later').body).map((item) => item.title);
   assert.ok(!later.includes('An engine for Windows and Linux.'), 'the engine is still in Later');
+});
+
+test('everything else is roadmap: the app starting llama.cpp is done, and Windows signing follows the Mac', () => {
+  const started = itemsOf(section('Done').body).find((item) => item.title === 'The app starts llama.cpp on Windows and Linux.');
+  assert.ok(started, 'the roadmap does not have the app starting llama.cpp done');
+  assert.match(started.text, /when it is installed/);
+  assert.match(started.text, /GGUF files, from the maker's own copy first, then ggml-org's/);
+  const [first] = itemsOf(section('Pinned').body);
+  assert.match(first.text, /the Mac's is being built first, and Windows's follows\./, 'pin 1 does not say the Mac signs first');
 });
 
 test('every mention of a pin points at a pin that is there', () => {
