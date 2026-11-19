@@ -24,6 +24,9 @@ pub fn run() {
         .manage(update::Updates::default())
         .setup(|app| {
             let data = app.path().app_data_dir()?;
+            // The app's own models folder, which `llama-server` reads on
+            // Windows and Linux. A Mac's engine reads the Hugging Face cache.
+            models::use_own_folder(data.join("models"));
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(starter::Starter::new(data.join("engine.log")));
             // The outbound gate: off until the person turns it on.
