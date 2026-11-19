@@ -893,10 +893,9 @@ mod tests {
     fn the_report_carries_the_models_the_app_can_download() {
         let offered = first_status().offers;
         assert_eq!(offered, crate::downloads::offers());
-        if cfg!(target_os = "macos") {
-            let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
-            assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
-        }
+        // Every system, now that Windows and Linux have GGUF models.
+        let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
+        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
     }
 
     #[test]
