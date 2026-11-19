@@ -142,8 +142,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   than your computer can hold. Rusty Business™ runs only what your computer
   can, and asks four engines outside it, Grok, GPT, Claude, and Gemini, each with
   your own key.
-- **Pictures and files.** Ollama's app takes images and dropped files. Rusty
-  Business™ takes words.
+- **Pictures.** Ollama's app takes images. Rusty Business™ takes words and
+  dropped files, but no images yet.
 
 ### The same either way
 
@@ -170,7 +170,7 @@ run models on your own computer. Here are the three side by side.
 | A model too big for memory | Not run here; Grok, GPT, Claude, or Gemini, with your own key, answers from its maker's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
 | For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
-| Pictures and files | Words only | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
+| Pictures and files | Files, no images yet | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
 
 What this says of Ollama and Colibri was read from their own pages, and they
 are where to check it. Ollama and Colibri are trademarks of their owners.
@@ -502,8 +502,8 @@ next.
   legacy. (On the roadmap: Grok through xAI's newer API.)
 - **A grade reads one question.** The grader reads the question and its
   answers, not the chat before them.
-- **Words only.** It takes no pictures and no files, and it shows an answer as
-  plain text. (On the roadmap: Pictures.)
+- **No pictures yet.** It reads attached PDF, Word, PowerPoint, spreadsheet,
+  and text files, but not images. (On the roadmap: Reading images.)
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the

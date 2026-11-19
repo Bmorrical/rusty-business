@@ -640,6 +640,42 @@ pub async fn start_engine(starter: tauri::State<'_, Starter>) -> Result<StartRep
     Ok(starter.bring_up(&base, &look(), PATIENCE).await)
 }
 
+/// What freeing the memory did.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeReport {
+    /// An engine this app started was stopped, and the memory it held let go.
+    pub freed: bool,
+    /// The engine answers again, with nothing loaded.
+    pub answering: bool,
+}
+
+/// Lets go of the memory a loaded model takes, while the app stays open. The
+/// engine this app started is stopped, and so is the program it started for
+/// its model, then a new one is started with nothing loaded. The next chat
+/// loads its model again. An engine the app did not start is left alone.
+#[tauri::command]
+pub async fn free_memory(app: tauri::AppHandle) -> Result<FreeReport, String> {
+    use tauri::Manager;
+    let stopper = app.clone();
+    let freed = tauri::async_runtime::spawn_blocking(move || {
+        let starter = stopper.state::<Starter>();
+        let ours = starter.running();
+        if ours {
+            starter.stop();
+        }
+        ours
+    })
+    .await
+    .map_err(|error| format!("The app could not stop the engine: {error}."))?;
+    if !freed {
+        return Ok(FreeReport { freed: false, answering: false });
+    }
+    let base = engine::base_url()?;
+    let report = app.state::<Starter>().bring_up(&base, &look(), PATIENCE).await;
+    Ok(FreeReport { freed: true, answering: report.answering })
+}
+
 #[cfg(test)]
 mod tests {
     // Brad, on what the app does by itself: "it should search and up the local

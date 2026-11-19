@@ -62,7 +62,7 @@ test('the answers are graded once all are in, and never after Stop', () => {
 test('the grader reads the question and the answers alone, and asks the way every model is asked', () => {
   const grade = functionOf(read(APP), 'grade');
   assert.ok(grade.includes('const answers = gradedAnswers(round).map((turn) => turn.content);'), 'the grader reads more of an answer than its words');
-  assert.ok(grade.includes('const messages = gradeMessages(round.question?.content, answers, judge.context);'), 'the grader reads more than the question and the answers');
+  assert.ok(grade.includes('const messages = gradeMessages(withAttachments(round.question), answers, judge.context);'), 'the grader reads more than the question and the answers');
   assert.ok(grade.includes('const error = await ask(reply, judge, messages);'), 'the grader is asked some other way');
   assert.ok(!grade.includes('invoke('), 'the grader is asked around the app\'s own way of asking a model');
   assert.ok(grade.includes('{ role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true }'), 'the grade is no longer kept as a turn of its own');

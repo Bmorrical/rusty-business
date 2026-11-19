@@ -14,6 +14,20 @@ import {
   downloaded,
   downloadLine,
   firstRunOffers,
+  modelShelf,
+  changeLines,
+  parseToolCall,
+  findToolCall,
+  withAttachments,
+  attachmentTokens,
+  attachmentLine,
+  shownReply,
+  toolLabel,
+  toolResult,
+  WRITE_TOOLS,
+  workspacePrompt,
+  describesWork,
+  withoutToolFences,
   formatCount,
   formatSize,
   formatWindow,
@@ -58,6 +72,11 @@ import {
   titleFrom,
   tokensPerSecond,
   tokensUsed,
+  arrangeSessions,
+  greeting,
+  memoryRequest,
+  parseFacts,
+  systemPrompt,
   withMaker,
   withPick,
 } from "./chat.js";
@@ -267,6 +286,13 @@ test("the picker shows only on a first run, with none of the app's models anywhe
   assert.deepEqual(firstRunOffers({ reachable: false, onDisk: [] }), []);
 });
 
+test("the Models settings list every download, marking the ones already here", () => {
+  const shelf = modelShelf({ onDisk: [OFFERS[0]], models: [{ id: OFFERS[1].id }], offers: OFFERS });
+  assert.deepEqual(shelf.map((offer) => offer.here), [true, true, false]);
+  assert.equal(shelf[2].name, "Nemotron 3.5 Lightning");
+  assert.deepEqual(modelShelf(null), []);
+});
+
 test("the quickest to start is the smallest download", () => {
   assert.equal(quickest(OFFERS), "mlx-community/phi-4-4bit");
   assert.equal(quickest([OFFERS[2], OFFERS[1]]), "mlx-community/gpt-oss-20b-MXFP4-Q8");
@@ -367,6 +393,136 @@ test("Check for updates says what it found", () => {
 
 test("the page asks once a day while it stays open", () => {
   assert.equal(UPDATE_EVERY, 86_400_000);
+});
+
+test("the system message comes first, and is left out when empty", () => {
+  const turns = [{ role: "user", content: "Hi" }];
+  assert.deepEqual(requestMessages(turns, null, "Be brief."), [
+    { role: "system", content: "Be brief." },
+    { role: "user", content: "Hi" },
+  ]);
+  assert.deepEqual(requestMessages(turns, null, "  "), [{ role: "user", content: "Hi" }]);
+});
+
+test("the system prompt carries memory and the project, and nothing when there is none", () => {
+  assert.equal(systemPrompt("", null), "");
+  const global = systemPrompt("Lives in Jacksonville.", null);
+  assert.match(global, /What you remember about the user:\n<memory>\nLives in Jacksonville\.\n<\/memory>/);
+  assert.doesNotMatch(global, /project/);
+  const project = systemPrompt("", { name: "Gledit", instructions: "Be terse.", memory: "- For small businesses" });
+  assert.match(project, /"Gledit" project/);
+  assert.match(project, /<project_instructions>\nBe terse\.\n<\/project_instructions>/);
+  assert.match(project, /What you remember about this project:\n<memory>\n- For small businesses/);
+  assert.doesNotMatch(project, /about the user/);
+});
+
+test("the memory request names the scopes and what is already known", () => {
+  const [system, user] = memoryRequest("I moved to Denver", "Likes Rust", { name: "Odd Stereo", memory: "A podcast" });
+  assert.equal(user.content, "I moved to Denver");
+  assert.match(system.content, /"Odd Stereo" project/);
+  assert.match(system.content, /Likes Rust\nA podcast/);
+  assert.match(memoryRequest("x", "", null)[0].content, /Use "user" for every fact/);
+});
+
+test("facts are read from JSON, even wrapped in words, and nothing from anything else", () => {
+  const answer = 'Sure: {"memories":[{"content":" Lives in Denver ","scope":"user"},{"content":"Ships Friday","scope":"project"},{"content":""}]}';
+  assert.deepEqual(parseFacts(answer, true), { user: ["Lives in Denver"], project: ["Ships Friday"] });
+  assert.deepEqual(parseFacts(answer, false), { user: ["Lives in Denver", "Ships Friday"], project: [] });
+  for (const bad of ["", "no facts", "{not json}", '{"memories":"x"}', null]) {
+    assert.deepEqual(parseFacts(bad, true), { user: [], project: [] });
+  }
+});
+
+test("the side lists projects' chats, then pinned, then the rest by age", () => {
+  const now = new Date(2026, 10, 18, 20, 0).getTime();
+  const day = 86_400_000;
+  const sessions = [
+    { id: "a", updatedAt: now - 1000, project: "p1" },
+    { id: "b", updatedAt: now - 2000, pinned: true },
+    { id: "c", updatedAt: now - 3000 },
+    { id: "d", updatedAt: now - 3 * day },
+    { id: "e", updatedAt: now - 20 * day, project: "gone" },
+    { id: "f", updatedAt: now - 90 * day },
+  ];
+  const side = arrangeSessions(sessions, [{ id: "p1" }, { id: "p2" }], now);
+  assert.deepEqual(side.byProject.p1.map((entry) => entry.id), ["a"]);
+  assert.deepEqual(side.byProject.p2, []);
+  assert.deepEqual(side.pinned.map((entry) => entry.id), ["b"]);
+  assert.deepEqual(
+    side.ages.map((age) => [age.label, age.items.map((entry) => entry.id)]),
+    [["Today", ["c"]], ["Previous 7 days", ["d"]], ["Previous 30 days", ["e"]], ["Older", ["f"]]],
+  );
+});
+
+test("the greeting follows the hour", () => {
+  assert.equal(greeting(8), "Good morning");
+  assert.equal(greeting(13), "Good afternoon");
+  assert.equal(greeting(20), "Good evening");
+  assert.equal(greeting(2), "Good evening");
+});
+
+test("a reply's tool block is read, and shown without the block", () => {
+  const reply = 'Let me look.\n\n```tool\n{"tool": "read", "path": "src/app.js", "from": 2}\n```';
+  assert.deepEqual(parseToolCall(reply), { tool: "read", args: { path: "src/app.js", from: 2 }, before: "Let me look." });
+  assert.equal(shownReply(reply), "Let me look.");
+  assert.equal(shownReply("Half way ```to"), "Half way ```to");
+  // An example of the format, with words after it, is not a call to hide.
+  const example = 'Like this:\n```tool\n{"tool": "list", "path": "."}\n```\nThen wait.';
+  assert.equal(shownReply(example), example);
+  assert.equal(shownReply('Looking.\n```tool\n{"tool": "li'), "Looking.");
+  // A fence inside the JSON is not the block's end.
+  const readme = '```tool\n{"tool": "write", "path": "README.md", "content": "Run:\\n```\\nmake\\n```"}\n```';
+  assert.deepEqual(parseToolCall(readme).args, { path: "README.md", content: "Run:\n```\nmake\n```" });
+  assert.equal(parseToolCall("No tools here."), null);
+  assert.match(parseToolCall("```tool\n{nope}\n```").error, /not valid JSON/);
+  assert.match(parseToolCall('```tool\n{"tool": "delete"}\n```').error, /no tool called delete/);
+  assert.equal(toolLabel({ tool: "read", args: { path: "a.js", from: 2, to: 9 } }), "Read a.js:2-9");
+  assert.equal(toolLabel({ tool: "search", args: { text: "x" } }), 'Searched for "x"');
+  assert.equal(toolResult({ tool: "list" }, "src/\n"), '<tool_result tool="list">\nsrc/\n</tool_result>');
+  assert.ok(WRITE_TOOLS.includes("edit") && !WRITE_TOOLS.includes("read"));
+  assert.match(workspacePrompt({ folder: "/Users/me/code/site" }, "src/"), /"site"[\s\S]*<folder>\nsrc\/\n<\/folder>/);
+});
+
+test("a change reads as lines gone and lines new", () => {
+  assert.deepEqual(changeLines({ tool: "edit", args: { find: "a\nb", replace: "c\n" } }), [
+    { kind: "gone", text: "a" },
+    { kind: "gone", text: "b" },
+    { kind: "new", text: "c" },
+  ]);
+  assert.deepEqual(changeLines({ tool: "write", args: { content: "x" } }), [{ kind: "new", text: "x" }]);
+  assert.deepEqual(changeLines({ tool: "read", args: {} }), []);
+});
+
+test("a call left in the thinking, as gpt-oss does, is still found", () => {
+  const thinking = 'Let\'s list src folder.\n\n{"path":"src"}';
+  assert.deepEqual(findToolCall("", thinking), {
+    tool: "list",
+    args: { path: "src" },
+    before: "",
+    block: '```tool\n{"tool":"list","path":"src"}\n```',
+  });
+  assert.equal(findToolCall("", '{"path":"src/app.js"}').tool, "read");
+  assert.equal(findToolCall("", '{"text":"main("}').tool, "search");
+  assert.equal(findToolCall("", '{"path":"a.js","find":"x","replace":"y"}').tool, "edit");
+  // A real answer wins, and thinking with no call finds nothing.
+  assert.equal(findToolCall("The entry point is main.js.", '{"path":"src"}'), null);
+  assert.equal(findToolCall("", "Just thinking."), null);
+  assert.equal(findToolCall('Look.\n```tool\n{"tool":"list","path":"."}\n```', "").block, "");
+});
+
+test("attached files go to the model before the message, and say when they were cut", () => {
+  const turn = {
+    role: "user",
+    content: "Sum the totals.",
+    attachments: [{ name: "sales.csv", kind: "CSV", text: "west,10", chars: 7, cut: false }],
+  };
+  assert.equal(withAttachments(turn), '<attachment name="sales.csv">\nwest,10\n</attachment>\n\nSum the totals.');
+  assert.match(withAttachments({ content: "", attachments: [{ name: "a", text: "x", chars: 9000, cut: true }] }), /first 1 characters of 9,000\.\)\n<\/attachment>\n\nThe user attached the files above\.$/);
+  assert.equal(requestMessages([turn])[0].content, withAttachments(turn));
+  assert.equal(withAttachments({ content: " hi " }), "hi");
+  assert.equal(attachmentTokens([{ text: "1234567" }]), 2);
+  assert.equal(attachmentLine({ kind: "PDF", chars: 12400, cut: true }), "PDF · 12K characters, cut short");
+  assert.equal(savedTurn(turn).attachments.length, 1);
 });
 
 // Brad, 2026-11-17: "there is a hard switch / circuit breaker to hard stop all
@@ -790,4 +946,29 @@ test("the first outside engine grades until another model is picked, and none wh
   assert.equal(graderFor(GROK.id, [phi]), null);
   assert.equal(graderFor(null, undefined), null);
   assert.equal(gradesLine(GROK), "Grok 4 grades the answers once all are in.");
+});
+
+test("a reply that shows code instead of using the tools is caught", () => {
+  assert.ok(describesWork("Here is the file:\n\n```yaml\nname: Dog Trainer\n```"));
+  assert.ok(!describesWork("Done. The game is stubbed in games/dog-trainer."));
+  assert.ok(!describesWork('Looking.\n```tool\n{"tool": "list", "path": "."}\n```'));
+});
+
+test("a tool call in a plain fence is read too", () => {
+  const reply = 'I will list the files.\n\n```\n{"tool": "list", "path": "."}\n```\n\nThen make the game.\n\n```js\nfunction go() {}\n```';
+  assert.deepEqual(parseToolCall(reply), { tool: "list", args: { path: "." }, before: "I will list the files." });
+  assert.equal(parseToolCall("```\n{\"name\": \"x\"}\n```"), null);
+});
+
+test("a tool call in a plain fence is not shown as code", () => {
+  assert.equal(
+    withoutToolFences('Listing.\n\n```\n{"tool": "list", "path": "."}\n```\n\n```js\ngo();\n```').replace(/\n+/g, "|"),
+    "Listing.|```js|go();|```",
+  );
+});
+
+test("a call with raw line breaks in its strings is still read", () => {
+  const reply = 'Editing.\n\n```\n{"tool": "edit", "path": "a.js", "find": "<a>\n  old\n</a>", "replace": "<a>new</a>"}\n```';
+  assert.deepEqual(parseToolCall(reply).args, { path: "a.js", find: "<a>\n  old\n</a>", replace: "<a>new</a>" });
+  assert.match(parseToolCall('```\n{"tool": "edit", "path": \n```').error, /not valid JSON/);
 });

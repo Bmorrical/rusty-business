@@ -1,13 +1,16 @@
+mod attachments;
 mod downloads;
 mod engine;
 mod gate;
 mod makers;
 mod models;
 mod outside;
+mod projects;
 mod sessions;
 mod stack;
 mod starter;
 mod update;
+mod workspace;
 
 use tauri::Manager;
 
@@ -28,6 +31,7 @@ pub fn run() {
             // Windows and Linux. A Mac's engine reads the Hugging Face cache.
             models::use_own_folder(data.join("models"));
             app.manage(sessions::Store::new(data.join("sessions")));
+            app.manage(projects::Projects::new(data.join("projects"), data.join("memory.md")));
             app.manage(starter::Starter::new(data.join("engine.log")));
             // The outbound gate: off until the person turns it on.
             let gate = gate::Gate::new(data.join("gate"));
@@ -48,6 +52,7 @@ pub fn run() {
             engine::chat_stream,
             engine::stop_chat,
             starter::start_engine,
+            starter::free_memory,
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,
@@ -55,6 +60,19 @@ pub fn run() {
             sessions::load_session,
             sessions::save_session,
             sessions::trash_session,
+            sessions::search_sessions,
+            sessions::arrange_session,
+            projects::list_projects,
+            projects::save_project,
+            projects::trash_project,
+            projects::load_memory,
+            projects::save_memory,
+            projects::remember,
+            workspace::workspace_overview,
+            workspace::workspace_tool,
+            workspace::pick_folder,
+            attachments::read_attachment,
+            attachments::pick_files,
             update::check_update,
             update::open_update,
             gate::gate_status,

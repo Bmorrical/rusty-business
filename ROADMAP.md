@@ -23,13 +23,22 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   releases, pinned to one release and checked by its SHA-256. The Linux
   packages ask for the Vulkan loader. Until then, the app starts
   `llama-server` when it is installed on the computer.
+- **Reading images.** Images dropped on a message, and scanned PDFs, are
+  read by a model that can see. That means mlx-vlm in the engine and a
+  vision model on the Models list, such as Qwen2.5-VL 7B at about 5 GB.
+- **Making images.** Ask for a picture and it appears in the chat, made on
+  this computer: mflux in the engine and a FLUX model of 6 to 12 GB.
 
 ## Later
 
+- **A router over specialist models.** A small, fast classifier picks the
+  best model for each message: one base model with an adapter per task,
+  such as web coding, UI design, or project planning, so switching costs
+  next to nothing. It ships first with the general model alone, noting what
+  it would have picked, so real use shows which specialists to train.
 - **Grok through xAI's newer API.** The app asks Grok through the chat API
   that xAI now calls legacy. Its Responses API is the one to move to, with
   the same key and the same rules.
-- **Pictures.** Add an image to a question and ask about it.
 - **A look at the desktop.** Select text, or point at the screen, and ask
   about what is there.
 - **Skills.** Tell the app how you like its answers, such as short unless
@@ -128,3 +137,14 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   starts: on 127.0.0.1, offline, one model at a time. The five models come
   as GGUF files, from the maker's own copy first, then ggml-org's, each file
   checked against its pinned size and checksum.
+- **Projects, memory, and search.** Chats group into projects, each with
+  its own instructions and memory; a global memory goes with every chat and
+  grows as you talk. Chats can be pinned and searched.
+- **A Models page.** Settings lists every model the app can download, and
+  marks the ones already on this computer.
+- **Projects that work in a folder.** A project can point at a folder on
+  this computer. The model lists, reads, and searches its files, and edits
+  or writes them only after you press Apply.
+- **Formatted replies.** Replies show their Markdown, tables, code, and math.
+- **Attached files.** PDF, Word, PowerPoint, spreadsheets, CSV, and text or
+  code files are read into text on this computer and go with the message.
