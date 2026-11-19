@@ -39,8 +39,10 @@ test-services: ## Format, lint, and unit tests for the API, worker, and shared c
 test-repo: ## The repository's own rules (every test file in scripts)
 	node --test scripts/*.test.mjs
 
-test-desktop: ## The desktop app's tests (page, then Rust)
+test-desktop: ## The desktop app's tests: the page's, then format, lint, and tests for its Rust
 	cd apps/desktop && { [ -d node_modules ] || npm ci; } && npm test && npm run build
+	cd apps/desktop/src-tauri && cargo fmt --check
+	cd apps/desktop/src-tauri && cargo clippy --all-targets --locked -- -D warnings
 	cd apps/desktop/src-tauri && cargo test --locked
 
 test-live: ## The API's tests against the running stack

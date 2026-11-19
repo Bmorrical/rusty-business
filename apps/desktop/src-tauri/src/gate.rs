@@ -46,7 +46,10 @@ impl Gate {
     /// but "on", it is off.
     pub fn new(file: PathBuf) -> Self {
         let open = fs::read_to_string(&file).is_ok_and(|text| text.trim() == ON);
-        Self { file, open: Arc::new(watch::Sender::new(open)) }
+        Self {
+            file,
+            open: Arc::new(watch::Sender::new(open)),
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -69,13 +72,22 @@ impl Gate {
             None => Ok(()),
         }
         .and_then(|()| fs::write(&self.file, word(open)));
-        kept.map(|()| open).map_err(|error| format!("The gate is {}, but the app could not keep that for next time: {error}.", word(open)))
+        kept.map(|()| open).map_err(|error| {
+            format!(
+                "The gate is {}, but the app could not keep that for next time: {error}.",
+                word(open)
+            )
+        })
     }
 
     /// A client for reaching past this computer: only while the gate is on,
     /// only over https, and never through a proxy. `refused` says what waits
     /// while the gate is off; `shape` adds the caller's own rules.
-    pub fn client(&self, refused: &str, shape: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder) -> Result<reqwest::Client, String> {
+    pub fn client(
+        &self,
+        refused: &str,
+        shape: impl FnOnce(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
+    ) -> Result<reqwest::Client, String> {
         if !self.is_open() {
             return Err(refused.to_string());
         }
@@ -90,7 +102,10 @@ impl Gate {
     /// A gate that keeps nothing, for tests.
     #[cfg(test)]
     pub fn at(open: bool) -> Self {
-        Self { file: PathBuf::from("/nowhere/gate"), open: Arc::new(watch::Sender::new(open)) }
+        Self {
+            file: PathBuf::from("/nowhere/gate"),
+            open: Arc::new(watch::Sender::new(open)),
+        }
     }
 }
 
@@ -104,7 +119,11 @@ pub fn gate_status(gate: tauri::State<'_, Gate>) -> bool {
 /// the check for a new version, a start of the stack, and an outside engine's
 /// answer stop by themselves.
 #[tauri::command]
-pub fn set_gate(open: bool, gate: tauri::State<'_, Gate>, downloads: tauri::State<'_, Downloads>) -> Result<bool, String> {
+pub fn set_gate(
+    open: bool,
+    gate: tauri::State<'_, Gate>,
+    downloads: tauri::State<'_, Downloads>,
+) -> Result<bool, String> {
     let set = gate.set(open);
     if !open {
         downloads.stop();
@@ -136,7 +155,10 @@ mod tests {
         fs::create_dir_all(&place).unwrap();
         for kept in ["", "off", "yes", "true", "1", "ON", "on please", "\u{0}"] {
             fs::write(place.join("gate"), kept).unwrap();
-            assert!(!Gate::new(place.join("gate")).is_open(), "{kept:?} read as on");
+            assert!(
+                !Gate::new(place.join("gate")).is_open(),
+                "{kept:?} read as on"
+            );
         }
         fs::write(place.join("gate"), "on\n").unwrap();
         assert!(Gate::new(place.join("gate")).is_open());
@@ -149,9 +171,15 @@ mod tests {
         let gate = Gate::new(place.join("app").join("gate"));
         assert_eq!(gate.set(true), Ok(true));
         assert!(gate.is_open());
-        assert!(Gate::new(place.join("app").join("gate")).is_open(), "on was not kept");
+        assert!(
+            Gate::new(place.join("app").join("gate")).is_open(),
+            "on was not kept"
+        );
         assert_eq!(gate.set(false), Ok(false));
-        assert!(!Gate::new(place.join("app").join("gate")).is_open(), "off was not kept");
+        assert!(
+            !Gate::new(place.join("app").join("gate")).is_open(),
+            "off was not kept"
+        );
         fs::remove_dir_all(&place).unwrap();
     }
 
@@ -163,7 +191,10 @@ mod tests {
         fs::write(place.join("app"), "").unwrap();
         let gate = Gate::new(place.join("app").join("gate"));
         let error = gate.set(true).unwrap_err();
-        assert!(error.starts_with("The gate is on, but the app could not keep that for next time: "), "{error}");
+        assert!(
+            error.starts_with("The gate is on, but the app could not keep that for next time: "),
+            "{error}"
+        );
         assert!(gate.is_open());
         let error = gate.set(false).unwrap_err();
         assert!(error.starts_with("The gate is off, but"), "{error}");
@@ -191,25 +222,46 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         // A caller cannot loosen it: the gate's own rules come last.
-        let client = Gate::at(true).client("", |builder| builder.https_only(false)).unwrap();
+        let client = Gate::at(true)
+            .client("", |builder| builder.https_only(false))
+            .unwrap();
         // Were plain http let through, the stand-in would never answer, so the
         // wait is short and the test fails rather than hangs.
-        let error = block_on(client.get(format!("http://127.0.0.1:{port}/")).timeout(Duration::from_secs(5)).send()).unwrap_err();
+        let error = block_on(
+            client
+                .get(format!("http://127.0.0.1:{port}/"))
+                .timeout(Duration::from_secs(5))
+                .send(),
+        )
+        .unwrap_err();
         assert!(error.is_builder(), "{error}");
         listener.set_nonblocking(true).unwrap();
-        assert!(listener.accept().is_err(), "the client reached the stand-in over plain http");
+        assert!(
+            listener.accept().is_err(),
+            "the client reached the stand-in over plain http"
+        );
     }
 
     #[test]
     fn turning_the_gate_off_is_heard_at_once() {
         let gate = Gate::at(true);
         let listening = gate.clone();
-        let heard = std::thread::spawn(move || block_on(async { tokio::time::timeout(Duration::from_secs(30), listening.closed()).await }));
+        let heard = std::thread::spawn(move || {
+            block_on(async {
+                tokio::time::timeout(Duration::from_secs(30), listening.closed()).await
+            })
+        });
         std::thread::sleep(Duration::from_millis(50));
         gate.set(false).unwrap_err();
-        assert!(heard.join().unwrap().is_ok(), "turning the gate off was not heard");
+        assert!(
+            heard.join().unwrap().is_ok(),
+            "turning the gate off was not heard"
+        );
         // Already off: nothing to wait for.
-        block_on(async { tokio::time::timeout(Duration::from_secs(5), Gate::at(false).closed()).await }).unwrap();
+        block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), Gate::at(false).closed()).await
+        })
+        .unwrap();
     }
 
     #[test]
@@ -224,7 +276,10 @@ mod tests {
             let text = fs::read_to_string(&file).unwrap();
             // The tests below a file's code build their own stand-ins.
             let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
-            if code.contains("Client::builder()") || code.contains("Client::new()") || code.contains("reqwest::get(") {
+            if code.contains("Client::builder()")
+                || code.contains("Client::new()")
+                || code.contains("reqwest::get(")
+            {
                 builders.push(file.file_name().unwrap().to_string_lossy().into_owned());
             }
         }
@@ -232,6 +287,9 @@ mod tests {
         // The engine's client speaks to the engine on this computer only.
         assert_eq!(builders, ["engine.rs", "gate.rs"]);
         let engine = fs::read_to_string(folder.join("engine.rs")).unwrap();
-        assert!(engine.contains("ip.is_loopback()"), "the engine's address is not held to this computer");
+        assert!(
+            engine.contains("ip.is_loopback()"),
+            "the engine's address is not held to this computer"
+        );
     }
 }

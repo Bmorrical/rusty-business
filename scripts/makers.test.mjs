@@ -70,8 +70,9 @@ test('Rust keeps the tests that keep the makers', () => {
   for (const [file, name] of RUST_TESTS) {
     assert.match(read(file), new RegExp(`#\\[test\\]\\s+fn ${name}\\(\\)`), `${file} has lost ${name}`);
   }
-  assert.ok(
-    read(ENGINE).includes('assert_eq!(names(&shown.set_aside), ["Phi-4"]'),
+  assert.match(
+    read(ENGINE),
+    /assert_eq!\(\s*names\(&shown\.set_aside\),\s+\["Phi-4"\],/,
     `${ENGINE} no longer checks that a removed maker's models are set aside`,
   );
 });
