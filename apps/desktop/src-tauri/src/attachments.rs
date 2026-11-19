@@ -53,10 +53,12 @@ fn office_text(
 ) -> Result<String, String> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
         .map_err(|_| "The file could not be opened.".to_string())?;
+    // A name that can't be read can't be one of the parts, so it is passed over.
     let mut names: Vec<String> = archive
         .file_names()
+        .filter_map(Result::ok)
         .filter(|name| parts(name))
-        .map(str::to_string)
+        .map(|name| name.into_owned())
         .collect();
     // Slides in order: slide2 before slide10.
     names.sort_by_key(|name| {
@@ -360,6 +362,37 @@ mod tests {
             "--- Slide 1 ---\nTwo\n\n--- Slide 2 ---\nTen"
         );
         assert!(read_bytes("broken.docx", b"not a zip".to_vec()).is_err());
+    }
+
+    // Spreadsheets are read by calamine, so moving it to a new version is
+    // checked here: each sheet comes back as CSV under its name.
+    #[test]
+    fn a_spreadsheet_gives_each_sheet_as_csv() {
+        let book = office(&[
+            (
+                "_rels/.rels",
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>",
+            ),
+            (
+                "xl/workbook.xml",
+                "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Sales\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>",
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Region</t></is></c><c r=\"B1\" t=\"inlineStr\"><is><t>Note</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>West</t></is></c><c r=\"B2\" t=\"inlineStr\"><is><t>Fish, \"fresh\"</t></is></c></row><row r=\"3\"><c r=\"A3\"><v>10</v></c></row></sheetData></worksheet>",
+            ),
+        ]);
+        let read = read_bytes("sales.xlsx", book).unwrap();
+        assert_eq!(
+            read.text,
+            "## Sales\nRegion,Note\nWest,\"Fish, \"\"fresh\"\"\"\n10,"
+        );
+        assert_eq!(read.kind, "Spreadsheet");
+        assert!(read_bytes("broken.xlsx", b"not a zip".to_vec()).is_err());
     }
 
     #[test]
