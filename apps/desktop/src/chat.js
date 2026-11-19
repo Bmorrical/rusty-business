@@ -234,8 +234,8 @@ export function startLine(start, engine) {
 /**
  * True when the footer should show the command that starts the engine by
  * hand. Not while the app starts one, and not where there is no such
- * command: Windows and Linux have no engine yet, so the app sends no
- * command for them.
+ * command: on Windows and Linux the app starts `llama-server` itself, with
+ * the app's own models folder, so no one command fits and the app sends none.
  */
 export function showsStartHint(engine, starting) {
   return !starting && Boolean((engine?.startHint ?? "").trim());
