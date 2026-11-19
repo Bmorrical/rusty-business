@@ -38,7 +38,7 @@ libc = "0.2"
 # computer. zip is the version calamine already uses, so it is built once.
 calamine = "0.30"
 pdf-extract = "0.12.1"
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 # Uninstall: a model's files go to the system's Trash, or the Recycle Bin on
 # Windows, where the person can take them back. Nothing is deleted.
 trash = "5.4"
