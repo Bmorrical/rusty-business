@@ -148,3 +148,8 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 - **Formatted replies.** Replies show their Markdown, tables, code, and math.
 - **Attached files.** PDF, Word, PowerPoint, spreadsheets, CSV, and text or
   code files are read into text on this computer and go with the message.
+- **Switching a model off, and uninstalling one.** In Settings, under
+  Models, each model has a switch, the outside engines' too. A model
+  switched off is left out of questions, grading, and comparisons, and its
+  files stay. Uninstall asks first, then moves a model on this computer to
+  the Trash, or the Recycle Bin on Windows. Nothing is deleted.

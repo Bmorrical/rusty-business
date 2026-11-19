@@ -13,6 +13,9 @@
 // stops leaving a model switched off out of the questions, grading, and
 // comparisons.
 //
+// The roadmap lists the switch and Uninstall as done, and the Settings
+// picture shows them.
+//
 // The checks read the files as text, so nothing has to be installed to run
 // them.
 
@@ -21,6 +24,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { SCENES } from './screenshots.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const APP = 'apps/desktop/src/App.vue';
@@ -153,4 +158,23 @@ test('Settings, Models has the switch, and Uninstall asks first', () => {
   const uninstall = functionOf(app, 'uninstall');
   assert.ok(uninstall.includes('await invoke("uninstall_model", { id })'), 'Uninstall no longer asks Rust');
   assert.ok(uninstall.includes('await checkEngine();'), 'the models on hand are not read again after Uninstall');
+});
+
+test('the roadmap and the Settings picture show the switch and Uninstall', () => {
+  const roadmap = read('ROADMAP.md');
+  const done = roadmap.slice(roadmap.indexOf('\n## Done\n'));
+  const start = done.indexOf('\n- **Switching a model off, and uninstalling one.**');
+  assert.ok(start >= 0, 'the roadmap does not list the switch and Uninstall as done');
+  const next = done.indexOf('\n- ', start + 1);
+  const row = done.slice(start, next < 0 ? undefined : next);
+  for (const words of ['a switch', 'the outside engines', 'left out of questions, grading, and comparisons', 'the Trash', 'Nothing is deleted.']) {
+    assert.ok(row.replace(/\s+/g, ' ').includes(words), `the roadmap's row no longer says "${words}"`);
+  }
+  // The picture opens Settings on its Models tab, where the switches are.
+  const scene = SCENES.find((each) => each.file === 'settings.png');
+  assert.deepEqual([scene?.page, scene?.tab], ['settings', 'Models'], 'settings.png no longer shows Settings, Models');
+  for (const file of ['README.md', 'docs/screenshots/README.md']) {
+    const alt = read(file).match(/\[!\[([^\]]+)\]\((?:docs\/screenshots\/)?settings\.png\)/)?.[1] ?? '';
+    assert.match(alt, /switch on and an Uninstall button/, `${file} no longer says the Settings picture shows the switch and Uninstall`);
+  }
 });

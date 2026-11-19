@@ -67,9 +67,9 @@ Select a picture to open it full size.
 | ---------------------------------------- | ------------------------------------------- |
 | [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and the outside engines, are on the Installers page](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![The Installers page in the dark theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate, and Outside engines below](docs/screenshots/installers.png)](docs/screenshots/installers.png?raw=true) |
 
-| Settings: add or remove a maker |
-| ------------------------------- |
-| [![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
+| Settings: switch a model off, or uninstall it |
+| --------------------------------------------- |
+| [![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).

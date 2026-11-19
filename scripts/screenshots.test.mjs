@@ -50,6 +50,7 @@ import {
   makersOf,
   makersStatus,
   pickedAtFirst,
+  scenesNamed,
   sessionsFrom,
   standIn,
 } from './screenshots.mjs';
@@ -282,6 +283,14 @@ test('each scene is a picture the script can make', () => {
       assert.ok(scene.page in PAGE_BUTTONS, `${scene.file} opens a page the side bar has a button for`);
       assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
     }
+    if (scene.tab) {
+      assert.equal(scene.page, 'settings', `${scene.file} opens a tab, and only Settings has tabs`);
+      assert.match(
+        read('apps/desktop/src/App.vue'),
+        new RegExp(`@click="settingsTab = '[a-z]+'">${scene.tab}</button>`),
+        `${scene.file} opens a tab Settings has`,
+      );
+    }
     if (scene.thinking) {
       const chat = chats.find((entry) => entry.id === scene.open);
       assert.ok(
@@ -290,6 +299,15 @@ test('each scene is a picture the script can make', () => {
       );
     }
   }
+});
+
+test('named pictures are made on their own, and a name that is not a picture is refused', () => {
+  assert.deepEqual(scenesNamed([]), SCENES);
+  assert.deepEqual(
+    scenesNamed(['settings.png']).map((scene) => scene.file),
+    ['settings.png'],
+  );
+  assert.throws(() => scenesNamed(['settings.png', 'nope.png']), /No picture is called nope\.png\./);
 });
 
 test('the recorded engine offers only models on the app\'s list', () => {
