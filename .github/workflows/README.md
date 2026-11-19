@@ -65,10 +65,11 @@ download links find.
 | Job       | Machine                  | What it does                                                   |
 | --------- | ------------------------ | -------------------------------------------------------------- |
 | `gate`    | as above                 | The whole gate. Nothing below starts until it is green         |
-| `mac`     | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the next job |
+| `mac`     | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the sign job. It is handed no secret |
+| `sign`    | macOS, Apple silicon, a Mac of its own | Runs `scripts/mac-sign.sh` on the `.dmg` from `mac`. With the switch off, it leaves the `.dmg` as it is. With it on, it signs and notarizes the app and the `.dmg`. Either way it keeps them for the next job and says which it did |
 | `windows` | Windows, Intel or AMD    | Runs `scripts/windows-app.sh` in Git Bash, the command a person runs, and keeps the `.exe` and its checksum for the next job |
 | `linux`   | Linux, Intel or AMD      | Works in Ubuntu 22.04's image, pinned by digest, so the packages start on Ubuntu 22.04 and Debian 12 too (a program built against a newer C library does not start on an older one). Installs WebKitGTK, OpenSSL, and a C compiler with `apt-get`, runs `scripts/linux-app.sh`, the command a person runs, and keeps the `.deb`, the `.rpm`, the `.tar.gz`, and their checksums for the next job |
-| `publish` | Linux                    | Checks all five checksums and that the app's three version numbers agree, then makes the release and its tag at this commit |
+| `publish` | Linux                    | Checks all five checksums and that the app's three version numbers agree, then makes the release and its tag at this commit, with the steps to open the Mac app as it went out, signed or not |
 
 A release that is out is never changed. When the version's tag is already
 on GitHub, the run stops, so publishing again means raising the version in
@@ -76,6 +77,32 @@ on GitHub, the run stops, so publishing again means raising the version in
 `apps/desktop/src-tauri/Cargo.toml`.
 
 To run it: the Actions tab, then Release, then Run workflow, on `main`.
+
+### Signing the Mac app
+
+Signing is a switch, off to start: the `MAC_SIGNING` variable of the
+repository's `release` environment, `on` or `off`. Unset counts as off, and
+any other value stops the run. While it is off, the `.dmg` goes out as
+`make dmg` makes it, signed for itself alone, and the release notes say how
+to open it the first time.
+
+To turn it on, the `release` environment, limited to `main`, holds five
+secrets: `MAC_CERTIFICATE`, the Developer ID Application certificate with its
+key, as a `.p12` in base64; `MAC_CERTIFICATE_PASSWORD`, its password;
+`MAC_NOTARY_KEY`, the text of an App Store Connect API key, the `.p8`;
+`MAC_NOTARY_KEY_ID`, that key's ID; and `MAC_NOTARY_ISSUER`, its issuer ID.
+Then `MAC_SIGNING` is set to `on`. With it on, a missing or malformed secret
+stops the run before anything is signed, so a release never goes out
+unsigned by mistake.
+
+`scripts/mac-sign.sh` takes the app out of the `.dmg`, signs every program
+file in it, the engine's included, with the hardened runtime and a secure
+timestamp, signs the app, and has Apple notarize it. Then it packs the
+`.dmg` again the way `make dmg` does, and signs and notarizes that too. The
+certificate goes into a keychain made for the run, which is removed when
+it ends. The script refuses to sign anywhere but in a GitHub run.
+`scripts/mac-sign.test.mjs` checks it, with made-up secrets, so nothing is
+signed by a test.
 
 `scripts/release.sh` makes the release, and `scripts/release.test.mjs`
 checks what it asks GitHub to do, with a stand-in `gh`, so nothing is
@@ -112,14 +139,18 @@ The gate then judges what actually landed on `main`.
   command through `env:`, so it is never read as shell.
 - The registry token reaches Docker only on its standard input, never on a
   command line. In Release, the token reaches `gh` only through the release
-  step's own `env:`. No other secret is used.
+  step's own `env:`.
+- The Mac signing secrets and the switch live in the `release` environment,
+  and only the `sign` job names it. That job runs on a Mac of its own and
+  runs no package the build fetched. No other secret is used.
 
 `scripts/workflows.test.mjs` checks these rules, that every job in
 `deploy.yml` and `release.yml` waits for the gate, that Deploy builds each
 kind of image on its own kind of computer before it joins them, and that
 Release builds the Mac app on a Mac with `make dmg`, the Windows
 installer on Windows with `scripts/windows-app.sh`, and the Linux packages
-on Linux with `scripts/linux-app.sh`. It runs with
+on Linux with `scripts/linux-app.sh`, and signs the Mac app only in its
+`sign` job, behind the switch. It runs with
 `make test-repo`, so the gate checks its own rules.
 
 There is no README directly in `.github`: GitHub would show it as the
