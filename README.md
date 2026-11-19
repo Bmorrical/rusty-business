@@ -5,8 +5,8 @@
 | Download | For | First time |
 | -------- | --- | ---------- |
 | [**Mac**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-mac-arm64.dmg) (`.dmg`) | Apple silicon, macOS 14 or later | [How to open it](#run-the-chat-window-macos) |
-| [**Windows**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-windows-x64-setup.exe) (`.exe`) | 64-bit Windows 10 or 11, no model engine yet | [How to open it](#run-the-chat-window-windows) |
-| **Linux:** [**.deb**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb), [**.rpm**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm), or [**.tar.gz**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz) | 64-bit, on Intel or AMD, no model engine yet | [Which one, and how](#run-the-chat-window-linux) |
+| [**Windows**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-windows-x64-setup.exe) (`.exe`) | 64-bit Windows 10 or 11, with llama.cpp installed | [How to open it](#run-the-chat-window-windows) |
+| **Linux:** [**.deb**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb), [**.rpm**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm), or [**.tar.gz**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz) | 64-bit, on Intel or AMD, with llama.cpp installed | [Which one, and how](#run-the-chat-window-linux) |
 
 **On this page:** [Screenshots](#screenshots) ·
 [Rusty Business™ or Ollama?](#rusty-business-or-ollama) ·
@@ -23,8 +23,9 @@
 **Three ways to install it:**
 
 1. [**Download the built app**](#download-the-built-app). Pick your system
-   in the table above. There is nothing to build, and the Mac app carries
-   its model engine. The Windows and Linux apps have none yet.
+   in the table above. There is nothing to build. The Mac app carries its
+   model engine, and the Windows and Linux apps start llama.cpp's
+   `llama-server` once it is installed.
 2. [**Build it from source**](#build-it-from-source). One line clones it
    and builds the same app. It needs Apple's command line tools on a Mac,
    Git Bash and Microsoft's C++ build tools on Windows, or WebKitGTK,
@@ -41,11 +42,12 @@ until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
 OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
 with your own key.
 
-**Status:** version 0.6.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.6.1, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
-has a model engine yet. What it cannot do yet is under [Limits](#limits).
+carries a model engine yet, but each starts llama.cpp's `llama-server` once
+it is installed. What it cannot do yet is under [Limits](#limits).
 
 ## Screenshots
 
@@ -126,8 +128,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 
 - **Install and go, anywhere.** Ollama installs on macOS, Windows, and Linux
   with one download or one command. Rusty Business™ has downloads for a Mac
-  with Apple silicon, for Windows, and for Linux, and only the Mac's runs a
-  model. None is signed yet, so a Mac or a Windows computer warns once before
+  with Apple silicon, for Windows, and for Linux, and only the Mac's carries
+  its model engine: on Windows and Linux, you install llama.cpp first. None
+  is signed yet, so a Mac or a Windows computer warns once before
   it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads only the five on its list: one on a first
@@ -160,9 +163,9 @@ run models on your own computer. Here are the three side by side.
 | | Rusty Business™ | Ollama | Colibri |
 | --- | --- | --- | --- |
 | License | MIT | MIT | Apache 2.0 |
-| Runs a model on | A Mac with Apple silicon; Windows and Linux get the window, with no engine yet | macOS, Windows, and Linux | macOS, Windows, and Linux |
+| Runs a model on | A Mac with Apple silicon, or Windows and Linux with llama.cpp installed | macOS, Windows, and Linux | macOS, Windows, and Linux |
 | How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
-| What does the work | Apple silicon's GPU, through MLX | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
+| What does the work | Apple silicon's GPU, through MLX, or llama.cpp on Windows and Linux | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
 | Models | Five, on a fixed list, from the makers you pick; any other is refused. Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and Gemini, by Google, each with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
 | A model too big for memory | Not run here; Grok, GPT, Claude, or Gemini, with your own key, answers from its maker's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
@@ -283,9 +286,13 @@ It installs for your account alone, with no prompt for an administrator.
 The window draws with Microsoft's WebView2, which Windows 10 and 11 usually
 have; where it is missing, the installer downloads it from Microsoft.
 
-The app has no model engine for Windows yet, so the window opens and says
-so. (On the roadmap: An engine for Windows and Linux.) The `.exe`'s checksum
-is beside it on the
+The installer carries no model engine yet. The app starts llama.cpp's
+`llama-server.exe` when it finds it in a folder on `PATH`, and otherwise the
+window opens and says so. llama.cpp's
+[install page](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)
+gives the ways to get it, and `RUSTY_ENGINE_PROGRAM` names one kept
+somewhere else, by its full path. (On the roadmap: An engine for Windows and
+Linux.) The `.exe`'s checksum is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
 To build the same installer yourself, see
 [Build it from source](#on-windows).
@@ -308,9 +315,14 @@ On 64-bit Linux, on an Intel or AMD processor:
 The window draws with WebKitGTK, and the program uses OpenSSL. The `.deb`
 and the `.rpm` bring both in when the system does not have them.
 
-The app has no model engine for Linux yet, so the window opens and says so.
-(On the roadmap: An engine for Windows and Linux.) Each file's checksum is
-beside it on the
+The three files carry no model engine yet. The app starts llama.cpp's
+`llama-server` when it finds it: in a folder on `PATH`, then in
+`~/.local/bin`, Homebrew's folder, `/usr/local/bin`, and `/usr/bin`. Without
+it, the window opens and says so. llama.cpp's
+[install page](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)
+gives the ways to get it, and `RUSTY_ENGINE_PROGRAM` names one kept
+somewhere else, by its full path. (On the roadmap: An engine for Windows and
+Linux.) Each file's checksum is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
 To build the same three files yourself, see
 [Build it from source](#on-linux).
@@ -463,9 +475,10 @@ pull requests, so run `make test` and `make e2e` before you push. More in
 What Rusty Business™ cannot do yet. The [roadmap](ROADMAP.md) says what comes
 next.
 
-- **Chats need a Mac.** Only the Mac app has a model engine. The Windows and
-  Linux apps open and say they have none yet. (On the roadmap: An engine for
-  Windows and Linux.)
+- **Windows and Linux need llama.cpp.** Only the Mac app carries its model
+  engine. On Windows and Linux, the app starts llama.cpp's `llama-server`
+  once you install it, and until then the window says it found none. (On
+  the roadmap: An engine for Windows and Linux.)
 - **Not signed yet.** macOS stops the downloaded app the first time it
   opens, until you choose Open Anyway in System Settings. Windows may stop
   the installer until you choose More info, then Run anyway. (On the

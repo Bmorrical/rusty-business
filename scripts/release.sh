@@ -84,12 +84,12 @@ On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:
 1. Download ${DMG}, open it, and drag Rusty Business™ to Applications.
 ${mac_open}
 
-On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the window opens and says so.
+On 64-bit Windows 10 or 11. The installer carries no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.
 
 1. Download ${EXE} and open it.
 2. It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.
 
-On 64-bit Linux on an Intel or AMD processor. The app has no model engine for Linux yet, so the window opens and says so.
+On 64-bit Linux on an Intel or AMD processor. The files carry no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.
 
 - On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}
 - On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}
