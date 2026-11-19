@@ -1,4 +1,5 @@
 <script setup>
+import { renderMarkdown } from "./markdown.js";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
@@ -9,6 +10,15 @@ import {
   downloaded,
   downloadLine,
   firstRunOffers,
+  modelShelf,
+  changeLines,
+  findToolCall,
+  shownReply,
+  TOOL_STEPS,
+  toolLabel,
+  toolResult,
+  WRITE_TOOLS,
+  workspacePrompt,
   formatCount,
   formatSize,
   formatWindow,
@@ -112,6 +122,11 @@ let clockTimer = 0;
 let learning = Promise.resolve();
 
 let chatId = "";
+/** True once Stop is pressed, so the steps in a project's folder end too. */
+let halted = false;
+const TOOL_STATUS = { running: "Running", asked: "Waiting for you", done: "Done", failed: "Failed", skipped: "Skipped" };
+/** Settles the change waiting for Apply or Skip. */
+let approve = null;
 let checkAgain = false;
 let stickToBottom = true;
 
@@ -126,6 +141,7 @@ const full = computed(() => fullness(used.value, model.value?.context));
 const canSend = computed(() => Boolean(draft.value.trim()) && !busy.value && Boolean(model.value));
 const offers = computed(() => firstRunOffers(engine.value));
 const quick = computed(() => quickest(offers.value));
+const shelf = computed(() => modelShelf(engine.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
 const side = computed(() => arrangeSessions(sessions.value, projects.value, now.value));
@@ -384,6 +400,10 @@ async function openSession(id) {
   askTrash.value = "";
   try {
     current.value = await invoke("load_session", { id });
+    // A step left waiting or running when the app closed never ran.
+    for (const turn of current.value.messages) {
+      if (turn.tool && ["asked", "running"].includes(turn.tool.status)) turn.tool.status = "skipped";
+    }
     pickModel(current.value.model);
     stickToBottom = true;
     scrollDown();
@@ -462,8 +482,17 @@ function editProject(project) {
   askTrashProject.value = false;
   editing.value = project
     ? { ...project }
-    : { id: "", name: "", instructions: "", memory: "", createdAt: 0, updatedAt: 0 };
+    : { id: "", name: "", instructions: "", memory: "", folder: "", createdAt: 0, updatedAt: 0 };
   nextTick(() => projectDialog.value?.showModal());
+}
+
+async function chooseFolder() {
+  try {
+    const folder = await invoke("pick_folder");
+    if (folder && editing.value) editing.value.folder = folder;
+  } catch (error) {
+    problem.value = String(error);
+  }
 }
 
 function closeProject() {
@@ -553,18 +582,62 @@ async function send() {
   session.messages.push({ role: "user", content: text });
   draft.value = "";
   busy.value = true;
+  halted = false;
   stickToBottom = true;
   resizeComposer();
   scrollDown();
   // Saved before the model answers, so the question survives a crash.
   await persist();
-
-  const messages = requestMessages(session.messages, systemPrompt(memory.value, project));
-  session.messages.push({ role: "assistant", content: "", thinking: "", model: chosen.id, pending: true });
-  const reply = session.messages[session.messages.length - 1];
   // The engine answers one at a time, so a look for memories still under way
   // finishes first.
   await learning;
+
+  let system = systemPrompt(memory.value, project);
+  let tools = false;
+  if (project?.folder) {
+    try {
+      const overview = await invoke("workspace_overview", { project: project.id });
+      system = [system, workspacePrompt(project, overview)].filter(Boolean).join("\n\n");
+      tools = true;
+    } catch (error) {
+      problem.value = String(error);
+    }
+  }
+
+  // In a project with a folder, the model may take steps there: each reply
+  // that ends in a tool block runs that tool, and what it found goes back to
+  // the model, until it answers without one.
+  let answered = false;
+  for (let step = 0; ; step += 1) {
+    const reply = await ask(session, chosen, system);
+    if (!reply || reply.stopped || halted) break;
+    const call = tools ? findToolCall(reply.content, reply.thinking) : null;
+    if (call?.block) reply.content = call.block;
+    if (!call) {
+      answered = true;
+      break;
+    }
+    if (step >= TOOL_STEPS) {
+      problem.value = `The model took ${TOOL_STEPS} steps without answering, so the app stopped it. Ask it to carry on if you like.`;
+      break;
+    }
+    const result = await useTool(project, call, reply);
+    await persist();
+    if (result === null) break;
+    session.messages.push({ role: "user", content: result, toolResult: true });
+    await persist();
+    scrollDown();
+  }
+  busy.value = false;
+  focusComposer();
+  if (answered) learning = learn(text, chosen.id, project);
+}
+
+/** One reply from the model, streamed into the chat. Null when it failed. */
+async function ask(session, chosen, system) {
+  const messages = requestMessages(session.messages, system);
+  session.messages.push({ role: "assistant", content: "", thinking: "", model: chosen.id, pending: true });
+  const reply = session.messages[session.messages.length - 1];
   let finished = false;
   const channel = new Channel();
   channel.onmessage = (event) => {
@@ -578,7 +651,7 @@ async function send() {
     scrollDown();
   };
   chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  let answered = false;
+  let ok = false;
   try {
     const done = await invoke("chat_stream", {
       chatId,
@@ -593,7 +666,7 @@ async function send() {
     reply.seconds = done.seconds || undefined;
     reply.stopped = done.stopped;
     reply.cutShort = done.finishReason === "length";
-    answered = !done.stopped;
+    ok = true;
   } catch (error) {
     finished = true;
     problem.value = String(error);
@@ -602,16 +675,61 @@ async function send() {
     reply.pending = false;
     if (!reply.content && !reply.thinking) session.messages.pop();
     chatId = "";
-    busy.value = false;
     await persist();
     scrollDown();
-    focusComposer();
   }
-  if (answered) learning = learn(text, chosen.id, project);
+  return ok && session.messages.includes(reply) ? reply : null;
+}
+
+/**
+ * Runs the step a reply asked for in the project's folder, and answers with
+ * what goes back to the model. A change waits for Apply or Skip. Null when
+ * the person pressed Stop.
+ */
+async function useTool(project, call, reply) {
+  reply.tool = { tool: call.tool, args: call.args, status: "running" };
+  if (call.error) {
+    Object.assign(reply.tool, { status: "failed", output: call.error });
+    return toolResult(call, call.error, true);
+  }
+  if (WRITE_TOOLS.includes(call.tool)) {
+    reply.tool.status = "asked";
+    scrollDown();
+    const yes = await new Promise((resolve) => (approve = resolve));
+    approve = null;
+    if (halted) {
+      reply.tool.status = "skipped";
+      return null;
+    }
+    if (!yes) {
+      reply.tool.status = "skipped";
+      return toolResult(call, "The user declined this change. Ask what they would like instead, or try another way.", true);
+    }
+  }
+  try {
+    const output = await invoke("workspace_tool", { project: project.id, call: { ...call.args, tool: call.tool } });
+    Object.assign(reply.tool, { status: "done", output: output.slice(0, 6000) });
+    return toolResult(call, output);
+  } catch (error) {
+    Object.assign(reply.tool, { status: "failed", output: String(error) });
+    return toolResult(call, String(error), true);
+  }
+}
+
+/** Links in a reply stay put: the window never leaves the chat. */
+function keepLinks(event) {
+  if (event.target.closest("a")) event.preventDefault();
+}
+
+function decide(yes) {
+  approve?.(yes);
 }
 
 function stop() {
-  if (busy.value && chatId) invoke("stop_chat", { chatId });
+  if (!busy.value) return;
+  halted = true;
+  if (chatId) invoke("stop_chat", { chatId });
+  approve?.(false);
 }
 
 function suggest(entry) {
@@ -942,11 +1060,12 @@ onBeforeUnmount(() => {
         <section class="settings">
           <div class="settings-head">
             <h2 class="display">Settings</h2>
-            <p class="quiet">What the assistant remembers, and how the window looks.</p>
+            <p class="quiet">What the assistant remembers, which models are on hand, and how the window looks.</p>
           </div>
           <div class="settings-body">
             <nav class="settings-tabs" aria-label="Settings">
               <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
+              <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
               <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
             </nav>
             <div v-if="settingsTab === 'memory'" class="settings-pane">
@@ -967,6 +1086,37 @@ onBeforeUnmount(() => {
                   <span class="quiet small block">After each reply, the same model looks for lasting facts in your message and adds them here. It runs on this computer, like everything else.</span>
                 </span>
               </label>
+            </div>
+            <div v-else-if="settingsTab === 'models'" class="settings-pane">
+              <h3>Models</h3>
+              <p class="quiet">
+                The models this app can run. Each one is a single download from Hugging Face, checked file by file, and runs only on
+                this computer.
+              </p>
+              <ul v-if="shelf.length" class="offers" aria-label="Models">
+                <li v-for="offer in shelf" :key="offer.id" class="offer">
+                  <span class="offer-text">
+                    <span class="offer-name">{{ offer.name }}</span>
+                    <span class="quiet small">by {{ offer.maker }} · {{ formatSize(offer.bytes) }}</span>
+                  </span>
+                  <span v-if="offer.here" class="have">On this computer</span>
+                  <template v-else-if="downloading === offer.id">
+                    <span class="offer-progress">
+                      <progress
+                        :value="downloaded(progress)"
+                        max="1"
+                        :aria-label="`How much of ${offer.name} has downloaded`"
+                      ></progress>
+                      <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                    </span>
+                    <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                  </template>
+                  <button v-else type="button" :disabled="Boolean(downloading)" @click="download(offer)">Download</button>
+                </li>
+              </ul>
+              <p v-else class="quiet small">This app downloads models only on a Mac with Apple silicon.</p>
+              <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+              <p v-if="problem" class="quiet small">{{ problem }}</p>
             </div>
             <div v-else class="settings-pane">
               <h3>Appearance</h3>
@@ -1063,7 +1213,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <article v-for="(turn, index) in current.messages" :key="index" class="turn" :class="turn.role">
+          <article
+            v-for="(turn, index) in current.messages"
+            v-show="!turn.toolResult"
+            :key="index"
+            class="turn"
+            :class="turn.role"
+          >
             <template v-if="turn.role === 'user'">
               <p class="bubble">{{ turn.content }}</p>
             </template>
@@ -1072,8 +1228,35 @@ onBeforeUnmount(() => {
                 <summary>{{ turn.pending && !turn.content ? "Thinking..." : "Thinking" }}</summary>
                 <p>{{ turn.thinking }}</p>
               </details>
-              <p v-if="turn.content" class="answer">{{ turn.content }}</p>
+              <!-- eslint-disable-next-line vue/no-v-html -- markdown-it escapes raw HTML in the reply -->
+              <div v-if="shownReply(turn.content)" class="answer prose" @click="keepLinks" v-html="renderMarkdown(shownReply(turn.content))"></div>
               <p v-else-if="turn.pending && !turn.thinking" class="quiet waiting">Waiting for the model...</p>
+              <div v-if="turn.tool" class="tool" :class="turn.tool.status">
+                <div class="tool-head">
+                  <span class="tool-label">{{ toolLabel(turn.tool) }}</span>
+                  <span class="tool-status">{{ TOOL_STATUS[turn.tool.status] }}</span>
+                </div>
+                <pre v-if="turn.tool.status === 'asked'" class="change"><span
+                  v-for="(line, at) in changeLines(turn.tool)"
+                  :key="at"
+                  :class="line.kind"
+                >{{ line.kind === "gone" ? "- " : "+ " }}{{ line.text }}
+</span></pre>
+                <div v-if="turn.tool.status === 'asked'" class="tool-actions">
+                  <button class="solid" type="button" @click="decide(true)">Apply</button>
+                  <button type="button" @click="decide(false)">Skip</button>
+                </div>
+                <details v-else-if="turn.tool.output || changeLines(turn.tool).length" class="tool-more">
+                  <summary>Details</summary>
+                  <pre v-if="changeLines(turn.tool).length" class="change"><span
+                    v-for="(line, at) in changeLines(turn.tool)"
+                    :key="at"
+                    :class="line.kind"
+                  >{{ line.kind === "gone" ? "- " : "+ " }}{{ line.text }}
+</span></pre>
+                  <pre v-if="turn.tool.output">{{ turn.tool.output }}</pre>
+                </details>
+              </div>
               <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn) }}</p>
             </template>
           </article>
@@ -1133,6 +1316,14 @@ onBeforeUnmount(() => {
           <span class="quiet small">Given to the model in every chat in this project.</span>
           <textarea v-model="editing.instructions" rows="4" placeholder="Answer as a product marketer. Keep it short."></textarea>
         </label>
+        <div class="field">
+          <span>Folder</span>
+          <span class="quiet small">A folder on this computer the model can read for coding work. It changes files only when you press Apply.</span>
+          <div class="folder-row">
+            <input v-model="editing.folder" type="text" placeholder="/Users/you/code/site" aria-label="Folder" spellcheck="false" />
+            <button type="button" @click="chooseFolder">Choose...</button>
+          </div>
+        </div>
         <label class="field">
           <span>Memory</span>
           <span class="quiet small">What the assistant knows about this project. It adds to it as you talk.</span>
@@ -1982,6 +2173,14 @@ option {
   font-weight: 600;
 }
 
+.have {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
 .offer-progress {
   display: grid;
   gap: 0.2rem;
@@ -2002,9 +2201,12 @@ option {
 }
 
 .bubble,
-.answer,
 .thinking p {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.answer {
   overflow-wrap: anywhere;
 }
 
@@ -2371,5 +2573,225 @@ textarea.memory:focus,
   .settings-tabs {
     display: flex;
   }
+}
+
+.tool {
+  margin: 0.6rem 0 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raised);
+  padding: 0.55rem 0.75rem;
+}
+
+.tool.asked {
+  border-color: var(--accent);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.tool-label {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-status {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--faint);
+  flex: none;
+}
+
+.tool.asked .tool-status {
+  color: var(--accent);
+}
+
+.tool.failed .tool-status {
+  color: var(--danger, #c0392b);
+}
+
+.tool pre {
+  margin: 0.5rem 0 0;
+  max-height: 18rem;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.change .gone {
+  color: #b4391f;
+  background: color-mix(in srgb, #b4391f 10%, transparent);
+}
+
+.change .new {
+  color: #2f7d4a;
+  background: color-mix(in srgb, #2f7d4a 10%, transparent);
+}
+
+.tool-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.tool-more summary {
+  margin-top: 0.35rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--quiet);
+}
+
+.folder-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.folder-row input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose pre,
+.prose blockquote,
+.prose table,
+.prose .math {
+  margin: 0 0 0.9em;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  font-family: var(--sans);
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.4em 0 0.5em;
+}
+
+.prose h1 {
+  font-size: 1.35rem;
+}
+
+.prose h2 {
+  font-size: 1.2rem;
+}
+
+.prose h3,
+.prose h4 {
+  font-size: 1.05rem;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.4em;
+}
+
+.prose li {
+  margin: 0.3em 0;
+}
+
+.prose li > p {
+  margin: 0.3em 0;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: default;
+}
+
+.prose code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--bubble);
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+}
+
+.prose pre {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.82rem;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 0.9em;
+  color: var(--quiet);
+}
+
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.5em 0;
+}
+
+.prose table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.94rem;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--line);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+
+.prose th {
+  font-weight: 600;
+  background: var(--raised);
+}
+
+.prose .math {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.prose .katex-display {
+  margin: 0;
 }
 </style>

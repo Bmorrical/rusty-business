@@ -374,11 +374,9 @@ test('the page downloads a model only when its Download button is pressed', () =
   const asks = [...page.matchAll(/invoke\("download_model"/g)];
   assert.equal(asks.length, 1, 'the page asks Rust for a download in one place');
   const calls = [...page.matchAll(/\bdownload\(/g)].map((match) => page.slice(match.index - 30, match.index));
-  assert.deepEqual(
-    calls.map((before) => /async function $|@click="$/.test(before)),
-    [true, true],
-    'download() is defined once and called only from a button',
-  );
+  // The first run and the Models settings each have Download buttons.
+  assert.equal(calls.filter((before) => /async function $/.test(before)).length, 1, 'download() is defined once');
+  assert.ok(calls.length > 1 && calls.every((before) => /async function $|@click="$/.test(before)), 'download() is called only from a button');
   assert.match(page, /\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer shows its size');
   assert.match(page, />\s*Download\s*</, 'each offer has a Download button');
   assert.match(page, /invoke\("stop_download"\)/, 'a download can be stopped');

@@ -143,7 +143,7 @@ export function dayLabel(milliseconds, now = Date.now()) {
 /** A turn as it is saved: no window-only fields, no empty ones. */
 export function savedTurn(turn) {
   const saved = { role: turn.role, content: turn.content ?? "" };
-  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort"]) {
+  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult"]) {
     const value = turn[key];
     if (value !== undefined && value !== null && value !== "" && value !== false) saved[key] = value;
   }
@@ -163,6 +163,15 @@ export function formatSize(bytes) {
 export function firstRunOffers(engine) {
   if (!engine || engine.onDisk?.length || engine.models?.length) return [];
   return engine.offers ?? [];
+}
+
+/**
+ * Every model the app can download, each marked `here` when it is already on
+ * this computer (on the disk, or held by the engine), for the Models settings.
+ */
+export function modelShelf(engine) {
+  const here = new Set([...(engine?.onDisk ?? []), ...(engine?.models ?? [])].map((model) => model.id));
+  return (engine?.offers ?? []).map((offer) => ({ ...offer, here: here.has(offer.id) }));
 }
 
 /** The offer that gets talking soonest: the smallest download. */
@@ -328,4 +337,135 @@ export function greeting(hour) {
   if (hour >= 5 && hour < 12) return "Good morning";
   if (hour >= 12 && hour < 17) return "Good afternoon";
   return "Good evening";
+}
+
+// ---------------------------------------------------------------------------
+// A project's folder: the tools the model can use in it
+// ---------------------------------------------------------------------------
+
+/** Tools that change files, which run only after the person says yes. */
+export const WRITE_TOOLS = ["write", "edit"];
+const TOOLS = ["list", "read", "search", ...WRITE_TOOLS];
+/** Steps the model may take for one message before it has to answer. */
+export const TOOL_STEPS = 16;
+
+/** What the model is told about the folder and how to work in it. */
+export function workspacePrompt(project, overview) {
+  const name = String(project?.folder ?? "").split("/").filter(Boolean).pop() ?? "the folder";
+  return [
+    `This project has a folder of files, "${name}", that you can work in. Its top levels:`,
+    `<folder>\n${String(overview ?? "").trim()}\n</folder>`,
+    "To use a tool, end your message with exactly one tool block and nothing after it, then stop and wait for the result:",
+    '```tool\n{"tool": "read", "path": "src/app.js"}\n```',
+    "The tools, with paths relative to the folder:",
+    '- {"tool": "list", "path": "src"}: the files and folders in a folder.',
+    '- {"tool": "read", "path": "src/app.js", "from": 1, "to": 300}: a file\'s lines, numbered. from and to are optional.',
+    '- {"tool": "search", "text": "createUser", "path": "src"}: lines that contain the text. path is optional.',
+    '- {"tool": "edit", "path": "src/app.js", "find": "exact old text", "replace": "new text"}: changes text that appears exactly once in the file. Read the file first and copy the old text exactly, without line numbers.',
+    '- {"tool": "write", "path": "src/new.js", "content": "the whole file"}: makes a file, or replaces all of one.',
+    "The user approves each edit and write before it happens, and may decline. Look before you change: read the files that matter instead of guessing. Use one tool per message. When you have what you need, answer normally with no tool block.",
+  ].join("\n\n");
+}
+
+/** The tool block at the end of a reply, if any, with the text before it. */
+export function parseToolCall(text) {
+  const source = String(text ?? "");
+  const match = /```tool[^\n]*\n([\s\S]*?)```/.exec(source);
+  if (!match) return null;
+  let call;
+  try {
+    call = JSON.parse(match[1].trim());
+  } catch {
+    return { tool: "", args: {}, before: source.slice(0, match.index).trim(), error: "The tool block was not valid JSON." };
+  }
+  if (!call || typeof call !== "object" || !TOOLS.includes(call.tool)) {
+    return { tool: "", args: {}, before: source.slice(0, match.index).trim(), error: `There is no tool called ${call?.tool ?? "that"}.` };
+  }
+  const { tool, ...args } = call;
+  return { tool, args, before: source.slice(0, match.index).trim() };
+}
+
+/** The tool a bare set of arguments points to, from the keys it has. */
+function toolFor(args) {
+  if (typeof args.tool === "string") return args.tool;
+  if ("find" in args && "replace" in args) return "edit";
+  if ("content" in args) return "write";
+  if ("text" in args) return "search";
+  if ("path" in args) return "from" in args || "to" in args || /\.[\w]+$/.test(args.path) ? "read" : "list";
+  return "";
+}
+
+/**
+ * The tool call in a reply. A model trained on its own tool format, such as
+ * gpt-oss, may answer with nothing and leave the call's arguments at the end
+ * of its thinking instead of in a tool block; that call is read from there,
+ * and given back as a tool block so the chat's history shows it.
+ */
+export function findToolCall(answer, thinking) {
+  const found = parseToolCall(answer);
+  if (found || shownReply(answer)) return found ? { ...found, block: "" } : null;
+  const inThinking = parseToolCall(thinking);
+  if (inThinking && !inThinking.error) return { ...inThinking, before: "", block: toolBlock(inThinking) };
+  const tail = /(\{[^{}]*\})\s*$/.exec(String(thinking ?? ""));
+  if (!tail) return null;
+  let args;
+  try {
+    args = JSON.parse(tail[1]);
+  } catch {
+    return null;
+  }
+  const tool = toolFor(args);
+  if (!TOOLS.includes(tool)) return null;
+  const { tool: _named, ...rest } = args;
+  const call = { tool, args: rest, before: "" };
+  return { ...call, block: toolBlock(call) };
+}
+
+/** A call written out as the tool block the model is asked for. */
+export function toolBlock(call) {
+  return "```tool\n" + JSON.stringify({ tool: call.tool, ...call.args }) + "\n```";
+}
+
+/** A reply's words without its tool block, including one still streaming in. */
+export function shownReply(text) {
+  const source = String(text ?? "");
+  const at = source.indexOf("```tool");
+  return (at === -1 ? source : source.slice(0, at)).trim();
+}
+
+/** "Read src/app.js": a step, in a few words. */
+export function toolLabel(call) {
+  const args = call?.args ?? {};
+  const path = args.path || ".";
+  switch (call?.tool) {
+    case "list":
+      return `Listed ${path}`;
+    case "read":
+      return args.from ? `Read ${path}:${args.from}-${args.to ?? ""}`.replace(/-$/, "") : `Read ${path}`;
+    case "search":
+      return `Searched for "${args.text ?? ""}"${args.path ? ` in ${args.path}` : ""}`;
+    case "edit":
+      return `Edit ${path}`;
+    case "write":
+      return `Write ${path}`;
+    default:
+      return "A tool the app does not have";
+  }
+}
+
+/** What a step found, as the message that goes back to the model. */
+export function toolResult(call, output, failed = false) {
+  const tag = failed ? "tool_error" : "tool_result";
+  return `<${tag} tool="${call?.tool ?? ""}">\n${String(output ?? "").trim()}\n</${tag}>`;
+}
+
+/** A change the model asks to make, as lines marked "-" (gone) and "+" (new). */
+export function changeLines(call) {
+  const args = call?.args ?? {};
+  const split = (text) => String(text ?? "").replace(/\n$/, "").split("\n");
+  if (call?.tool === "edit") {
+    return [...split(args.find).map((text) => ({ kind: "gone", text })), ...split(args.replace).map((text) => ({ kind: "new", text }))];
+  }
+  if (call?.tool === "write") return split(args.content).map((text) => ({ kind: "new", text }));
+  return [];
 }

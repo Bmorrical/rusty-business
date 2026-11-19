@@ -3,6 +3,7 @@ import { createApp } from "vue";
 import "@fontsource-variable/instrument-sans";
 import "@fontsource/instrument-serif";
 import "@fontsource-variable/jetbrains-mono";
+import "katex/dist/katex.min.css";
 import App from "./App.vue";
 
 createApp(App).mount("#app");

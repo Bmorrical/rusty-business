@@ -32,6 +32,12 @@ pub struct Turn {
     /// True when the reply ran into the length limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cut_short: Option<bool>,
+    /// A step the model took in the project's folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<serde_json::Value>,
+    /// True on what a step found, which goes back to the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_result: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

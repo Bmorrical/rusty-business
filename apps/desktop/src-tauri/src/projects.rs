@@ -34,6 +34,9 @@ pub struct Project {
     pub instructions: String,
     #[serde(default)]
     pub memory: String,
+    /// A folder on this computer the model may read and, with a yes, change.
+    #[serde(default)]
+    pub folder: String,
     #[serde(default)]
     pub created_at: u64,
     #[serde(default)]
@@ -152,6 +155,10 @@ impl Projects {
         let name = cut(project.name.trim(), NAME_LIMIT);
         project.name = if name.is_empty() { "New project".to_string() } else { name };
         project.memory = cut(&project.memory, MEMORY_LIMIT);
+        project.folder = project.folder.trim().trim_end_matches('/').to_string();
+        if !project.folder.is_empty() && !std::path::Path::new(&project.folder).is_dir() {
+            return Err("That folder is not on this computer.".to_string());
+        }
         let now = now_ms();
         if project.created_at == 0 {
             project.created_at = now;

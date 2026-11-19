@@ -7,6 +7,15 @@ import {
   downloaded,
   downloadLine,
   firstRunOffers,
+  modelShelf,
+  changeLines,
+  parseToolCall,
+  findToolCall,
+  shownReply,
+  toolLabel,
+  toolResult,
+  WRITE_TOOLS,
+  workspacePrompt,
   formatCount,
   formatSize,
   formatWindow,
@@ -225,6 +234,13 @@ test("the picker shows only on a first run, with none of the app's models anywhe
   assert.deepEqual(firstRunOffers({ reachable: false, onDisk: [] }), []);
 });
 
+test("the Models settings list every download, marking the ones already here", () => {
+  const shelf = modelShelf({ onDisk: [OFFERS[0]], models: [{ id: OFFERS[1].id }], offers: OFFERS });
+  assert.deepEqual(shelf.map((offer) => offer.here), [true, true, false]);
+  assert.equal(shelf[2].name, "Nemotron 3.5 Lightning");
+  assert.deepEqual(modelShelf(null), []);
+});
+
 test("the quickest to start is the smallest download", () => {
   assert.equal(quickest(OFFERS), "mlx-community/phi-4-4bit");
   assert.equal(quickest([OFFERS[2], OFFERS[1]]), "mlx-community/gpt-oss-20b-MXFP4-Q8");
@@ -389,4 +405,46 @@ test("the greeting follows the hour", () => {
   assert.equal(greeting(13), "Good afternoon");
   assert.equal(greeting(20), "Good evening");
   assert.equal(greeting(2), "Good evening");
+});
+
+test("a reply's tool block is read, and shown without the block", () => {
+  const reply = 'Let me look.\n\n```tool\n{"tool": "read", "path": "src/app.js", "from": 2}\n```';
+  assert.deepEqual(parseToolCall(reply), { tool: "read", args: { path: "src/app.js", from: 2 }, before: "Let me look." });
+  assert.equal(shownReply(reply), "Let me look.");
+  assert.equal(shownReply("Half way ```to"), "Half way ```to");
+  assert.equal(parseToolCall("No tools here."), null);
+  assert.match(parseToolCall("```tool\n{nope}\n```").error, /not valid JSON/);
+  assert.match(parseToolCall('```tool\n{"tool": "delete"}\n```').error, /no tool called delete/);
+  assert.equal(toolLabel({ tool: "read", args: { path: "a.js", from: 2, to: 9 } }), "Read a.js:2-9");
+  assert.equal(toolLabel({ tool: "search", args: { text: "x" } }), 'Searched for "x"');
+  assert.equal(toolResult({ tool: "list" }, "src/\n"), '<tool_result tool="list">\nsrc/\n</tool_result>');
+  assert.ok(WRITE_TOOLS.includes("edit") && !WRITE_TOOLS.includes("read"));
+  assert.match(workspacePrompt({ folder: "/Users/me/code/site" }, "src/"), /"site"[\s\S]*<folder>\nsrc\/\n<\/folder>/);
+});
+
+test("a change reads as lines gone and lines new", () => {
+  assert.deepEqual(changeLines({ tool: "edit", args: { find: "a\nb", replace: "c\n" } }), [
+    { kind: "gone", text: "a" },
+    { kind: "gone", text: "b" },
+    { kind: "new", text: "c" },
+  ]);
+  assert.deepEqual(changeLines({ tool: "write", args: { content: "x" } }), [{ kind: "new", text: "x" }]);
+  assert.deepEqual(changeLines({ tool: "read", args: {} }), []);
+});
+
+test("a call left in the thinking, as gpt-oss does, is still found", () => {
+  const thinking = 'Let\'s list src folder.\n\n{"path":"src"}';
+  assert.deepEqual(findToolCall("", thinking), {
+    tool: "list",
+    args: { path: "src" },
+    before: "",
+    block: '```tool\n{"tool":"list","path":"src"}\n```',
+  });
+  assert.equal(findToolCall("", '{"path":"src/app.js"}').tool, "read");
+  assert.equal(findToolCall("", '{"text":"main("}').tool, "search");
+  assert.equal(findToolCall("", '{"path":"a.js","find":"x","replace":"y"}').tool, "edit");
+  // A real answer wins, and thinking with no call finds nothing.
+  assert.equal(findToolCall("The entry point is main.js.", '{"path":"src"}'), null);
+  assert.equal(findToolCall("", "Just thinking."), null);
+  assert.equal(findToolCall('Look.\n```tool\n{"tool":"list","path":"."}\n```', "").block, "");
 });

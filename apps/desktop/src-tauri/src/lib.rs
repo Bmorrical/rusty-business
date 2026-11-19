@@ -6,6 +6,7 @@ mod sessions;
 mod stack;
 mod starter;
 mod update;
+mod workspace;
 
 use tauri::Manager;
 
@@ -52,6 +53,9 @@ pub fn run() {
             projects::load_memory,
             projects::save_memory,
             projects::remember,
+            workspace::workspace_overview,
+            workspace::workspace_tool,
+            workspace::pick_folder,
             update::check_update,
             update::open_update,
         ])
