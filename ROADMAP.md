@@ -10,17 +10,19 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 1. **Signed installers.** The installers ship unsigned at first, so macOS
    and Windows both warn before they open one. Signing and notarizing
    the macOS app with an Apple Developer ID, then signing the Windows
-   installer, takes the warnings away. Each system's signing is being built
-   behind a switch of its own, off to start. Until its switch is on, a
-   download ships as it does today, unsigned.
+   installer, takes the warnings away. Each system's signing goes behind a
+   switch of its own, off to start: the Mac's is being built first, and
+   Windows's follows. Until its switch is on, a download ships as it does
+   today, unsigned.
 
 ## Next
 
-- **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
-  the Windows installer and the Linux packages get an engine of their own:
-  llama.cpp's `llama-server`, the Vulkan build, inside the download. It
-  starts by itself, the way the Mac's engine does, and its models come as
-  GGUF files, from the maker's own copy first, then ggml-org's.
+- **An engine for Windows and Linux.** The Windows installer and the Linux
+  packages carry llama.cpp's `llama-server` inside the download, so nothing
+  else has to be installed first: the Vulkan build from llama.cpp's own
+  releases, pinned to one release and checked by its SHA-256. The Linux
+  packages ask for the Vulkan loader. Until then, the app starts
+  `llama-server` when it is installed on the computer.
 
 ## Later
 
@@ -120,3 +122,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   with the outbound gate on, then adds its maker, so it shows at the top of
   the window. A model already here whose maker is not added has a Show
   button instead. Grok, GPT, Claude, and Gemini are added there too.
+- **The app starts llama.cpp on Windows and Linux.** MLX runs on Apple
+  silicon only, so on Windows and Linux the app starts llama.cpp's
+  `llama-server` by itself when it is installed, the way the Mac's engine
+  starts: on 127.0.0.1, offline, one model at a time. The five models come
+  as GGUF files, from the maker's own copy first, then ggml-org's, each file
+  checked against its pinned size and checksum.
