@@ -9,7 +9,7 @@ The desktop app's Rust code.
 | `gate.rs`     | The outbound gate: the switch, off until the person turns it on, and every client that reaches past this computer |
 | `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, streams a chat, and separates thinking from the answer |
 | `models.rs`   | The models already on this computer: reads the folder the engine reads, the Hugging Face cache on a Mac or the app's own models folder on Windows and Linux, and reports the app's models that are whole there |
-| `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
+| `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it, `mlx_lm.server` on a Mac and llama.cpp's `llama-server` on Windows and Linux |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
 | `outside.rs`  | The engines outside this computer, Grok, GPT, Claude, and Gemini: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, Anthropic's, or Google's API through the gate |
@@ -42,16 +42,20 @@ Three more live in `models.rs`, each with tests:
   stopped part way, or a GGUF model missing one of its parts, is not counted.
   A projector or a draft model alone is not a model.
 
-Four more live in `starter.rs`, each with tests:
+Five more live in `starter.rs`, each with tests:
 
 - The whole plan is checked before anything starts: the program, a model for
   it to serve, the port, and a place for its log.
 - Only what is missing is started. An engine that answers is left alone, and
   so is anything else that holds the engine's port.
 - Asking twice changes nothing. There is one engine at most.
-- The app stops only an engine it started, and only when the app quits.
+- The app stops only an engine it started, and only when the app quits. It
+  asks the engine to stop first, and stops whatever the engine started with it.
+- `llama-server` is started on 127.0.0.1, offline, one model at a time, with
+  the app's models folder, no chat page of its own, and none of its settings
+  taken from the app's own.
 
-Five more live in `downloads.rs`, each with tests:
+Six more live in `downloads.rs`, each with tests:
 
 - Only a model on the list is downloaded, at the revision pinned in
   `../pinned-models.json` on a Mac, or in `../pinned-gguf-models.json` on
@@ -63,6 +67,8 @@ Five more live in `downloads.rs`, each with tests:
 - The models folder is only added to: a finished model moves in whole, and
   only where there is no folder for it yet.
 - One download at a time, and Cancel stops it and leaves nothing behind.
+- Once a model is whole on Windows or Linux, `llama-server` is asked to read
+  its models folder again, so the new model is listed without a restart.
 
 Four more live in `stack.rs`, each with tests:
 

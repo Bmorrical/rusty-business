@@ -743,7 +743,22 @@ pub async fn download_model(
     let report = move |progress: Progress| {
         let _ = on_progress.send(progress);
     };
-    download_through(&downloads, &gate, &id, pins_here(), models::Layout::here(), hub, open, report).await
+    let layout = models::Layout::here();
+    let done = download_through(&downloads, &gate, &id, pins_here(), layout, hub, open, report).await?;
+    if reloads_after(layout, &done)
+        && let Ok(base) = engine::base_url()
+    {
+        engine::reload_models(&base).await;
+    }
+    Ok(done)
+}
+
+/// True when the engine is asked to read its models folder again: once a
+/// model has moved in whole, on Windows and Linux. `llama-server` reads the
+/// folder when it starts, so a model downloaded while it runs is not listed
+/// until then. On a Mac, `mlx_lm.server` looks in the cache each time.
+fn reloads_after(layout: models::Layout, done: &DownloadReport) -> bool {
+    layout == models::Layout::Gguf && done.whole
 }
 
 #[tauri::command]
@@ -1191,6 +1206,24 @@ mod tests {
         for setting in [".no_proxy()", ".https_only(true)", ".redirect(redirect_policy())", ".referer(false)"] {
             assert!(built.contains(setting), "{setting} is missing from: {built}");
         }
+    }
+
+    #[test]
+    fn llama_server_is_asked_to_read_its_folder_once_a_model_is_whole() {
+        // Brad, 2026-11-19: "add an engine to linux and windows distro's".
+        // `llama-server` reads its models folder when it starts, so a model
+        // downloaded while it runs would not be listed until then.
+        let whole = DownloadReport { whole: true, stopped: false };
+        let stopped = DownloadReport { whole: false, stopped: true };
+        assert!(reloads_after(models::Layout::Gguf, &whole));
+        assert!(!reloads_after(models::Layout::Gguf, &stopped));
+        assert!(!reloads_after(models::Layout::Hub, &whole), "mlx_lm.server looks in the cache each time");
+        let command = include_str!("downloads.rs")
+            .split_once("pub async fn download_model(")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .expect("the download command")
+            .0;
+        assert!(command.contains("reloads_after(layout, &done)") && command.contains("engine::reload_models(&base).await"), "{command}");
     }
 
     #[test]

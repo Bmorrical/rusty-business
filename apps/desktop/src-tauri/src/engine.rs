@@ -3,8 +3,8 @@
 //! The app speaks one contract: an OpenAI-style server on this computer
 //! (`GET /models`, `POST /chat/completions` with a streamed reply). Which
 //! program serves it is the only thing that changes per system: on a Mac it
-//! is `mlx_lm.server`; on Windows it will be another local server behind the
-//! same two calls. Nothing above this file knows the difference.
+//! is `mlx_lm.server`; on Windows and Linux it is llama.cpp's `llama-server`,
+//! behind the same two calls. Nothing above this file knows the difference.
 //!
 //! Three rules live here:
 //! - a prompt to the engine never leaves the computer (loopback addresses
@@ -64,15 +64,17 @@ pub fn engine_name() -> &'static str {
 /// "windows", "linux"). Taking the system lets the Mac's tests check the
 /// words every other system gets.
 fn engine_name_on(os: &str) -> &'static str {
-    if os == "macos" {
-        "MLX"
-    } else {
-        "Local engine"
+    match os {
+        "macos" => "MLX",
+        "windows" | "linux" => "llama.cpp",
+        _ => "Local engine",
     }
 }
 
-/// How to start the engine by hand on `os`. Windows and Linux have no
-/// engine chosen yet, so they get no hint, and the window shows none.
+/// How to start the engine by hand on `os`. Windows and Linux get no hint,
+/// and the window shows none: the app starts `llama-server` itself, and no
+/// one command would fit every computer, since it needs the app's own models
+/// folder.
 fn start_hint_on(os: &str) -> &'static str {
     match os {
         "macos" => "mlx_lm.server --port 8080",
@@ -200,9 +202,24 @@ struct ModelRow {
     id: String,
 }
 
+/// Where the engine lists its models. With `reload`, `llama-server` reads its
+/// models folder again first, so a model just downloaded is listed.
+fn models_url(base: &str, reload: bool) -> String {
+    if reload { format!("{base}/models?reload=1") } else { format!("{base}/models") }
+}
+
+/// Asks `llama-server` to read its models folder again, after a download.
+/// Nothing is lost when no engine answers: one started later reads the folder
+/// when it starts.
+pub(crate) async fn reload_models(base: &str) {
+    if let Ok(client) = client() {
+        let _ = client.get(models_url(base, true)).timeout(Duration::from_secs(30)).send().await;
+    }
+}
+
 pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
     let response = client()?
-        .get(format!("{base}/models"))
+        .get(models_url(base, false))
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -870,23 +887,33 @@ mod tests {
     }
 
     #[test]
-    fn windows_and_linux_get_no_command_to_start_an_engine_they_do_not_have() {
+    fn windows_and_linux_name_llama_cpp_and_get_no_command_to_type() {
         // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
         // from read me and install and go, one click ready." The roadmap, of
         // the .exe: "Until Windows has an engine, the window opens and says
         // so." Brad, 2026-11-17, to a request for Linux downloads: "I got
-        // you in coming build". Windows and Linux get no command to run; the
-        // Mac keeps its own.
+        // you in coming build". Then, 2026-11-19: "add an engine to linux
+        // and windows distro's". The app starts llama-server there itself,
+        // so Windows and Linux still get no command to type; the Mac keeps
+        // its own.
         assert_eq!(start_hint_on("windows"), "");
         assert_eq!(start_hint_on("linux"), "");
         assert_eq!(start_hint_on("macos"), "mlx_lm.server --port 8080");
         assert_eq!(start_hint_on("freebsd"), "Start an OpenAI-style server on port 8080 of this computer.");
         assert_eq!(engine_name_on("macos"), "MLX");
-        assert_eq!(engine_name_on("windows"), "Local engine");
-        assert_eq!(engine_name_on("linux"), "Local engine");
+        assert_eq!(engine_name_on("windows"), "llama.cpp");
+        assert_eq!(engine_name_on("linux"), "llama.cpp");
+        assert_eq!(engine_name_on("freebsd"), "Local engine");
         let first = first_status();
         assert_eq!(first.start_hint, start_hint_on(std::env::consts::OS));
         assert_eq!(first.name, engine_name_on(std::env::consts::OS));
+    }
+
+    #[test]
+    fn llama_server_is_asked_to_read_its_folder_again_only_when_told_to() {
+        let base = "http://127.0.0.1:8080/v1";
+        assert_eq!(models_url(base, false), "http://127.0.0.1:8080/v1/models");
+        assert_eq!(models_url(base, true), "http://127.0.0.1:8080/v1/models?reload=1");
     }
 
     #[test]

@@ -317,8 +317,10 @@ test("the stack's line says it is starting, where it answers, or why it is not r
 test("the footer shows a command to start the engine only where there is one", () => {
   // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe from
   // read me and install and go, one click ready." The roadmap, of the .exe:
-  // "Until Windows has an engine, the window opens and says so." So Windows
-  // gets no command to run, and the footer shows none.
+  // "Until Windows has an engine, the window opens and says so." Then, on
+  // 2026-11-19: "add an engine to linux and windows distro's." There the app
+  // starts llama-server itself, with its own models folder, so no one command
+  // fits: Windows and Linux get none, and the footer shows none.
   const mac = { startHint: "mlx_lm.server --port 8080" };
   assert.equal(showsStartHint(mac, false), true);
   assert.equal(showsStartHint(mac, true), false, "not while the app starts the engine");
