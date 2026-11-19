@@ -10,19 +10,23 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 1. **Signed installers.** The installers ship unsigned at first, so macOS
    and Windows both warn before they open one. Signing and notarizing
    the macOS app with an Apple Developer ID, then signing the Windows
-   installer, takes the warnings away.
+   installer, takes the warnings away. Each system's signing is being built
+   behind a switch of its own, off to start. Until its switch is on, a
+   download ships as it does today, unsigned.
 
 ## Next
 
-Nothing yet. The next item comes from Later.
+- **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
+  the Windows installer and the Linux packages get an engine of their own:
+  llama.cpp's `llama-server`, the Vulkan build, inside the download. It
+  starts by itself, the way the Mac's engine does, and its models come as
+  GGUF files, from the maker's own copy first, then ggml-org's.
 
 ## Later
 
 - **Grok through xAI's newer API.** The app asks Grok through the chat API
   that xAI now calls legacy. Its Responses API is the one to move to, with
   the same key and the same rules.
-- **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
-  Windows and Linux need an engine of their own. It is not chosen yet.
 - **Pictures.** Add an image to a question and ask about it.
 - **A look at the desktop.** Select text, or point at the screen, and ask
   about what is there.
