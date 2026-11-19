@@ -8,7 +8,7 @@ The desktop app's Rust code.
 | `lib.rs`      | Builds the Tauri app and lists every command the page may call       |
 | `gate.rs`     | The outbound gate: the switch, off until the person turns it on, and every client that reaches past this computer |
 | `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, streams a chat, and separates thinking from the answer |
-| `models.rs`   | The models already on this computer: reads the Hugging Face cache folder and reports the app's models that are whole there |
+| `models.rs`   | The models already on this computer: reads the folder the engine reads, the Hugging Face cache on a Mac or the app's own models folder on Windows and Linux, and reports the app's models that are whole there |
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
@@ -36,10 +36,11 @@ Three more live in `engine.rs`, each with tests:
 
 Three more live in `models.rs`, each with tests:
 
-- It only reads. Nothing in the cache folder is written, moved, or removed.
+- It only reads. Nothing in the models folder is written, moved, or removed.
 - The app keeps no list of its own. The disk is asked every time.
 - Only models on the list are reported, and only when whole: a download that
-  stopped part way is not counted.
+  stopped part way, or a GGUF model missing one of its parts, is not counted.
+  A projector or a draft model alone is not a model.
 
 Four more live in `starter.rs`, each with tests:
 
@@ -53,7 +54,8 @@ Four more live in `starter.rs`, each with tests:
 Five more live in `downloads.rs`, each with tests:
 
 - Only a model on the list is downloaded, at the revision pinned in
-  `../pinned-models.json`, and only the files listed there.
+  `../pinned-models.json` on a Mac, or in `../pinned-gguf-models.json` on
+  Windows and Linux, and only the files listed there.
 - Only from Hugging Face, over https. A redirect anywhere else is refused,
   and no proxy, account, token, or cookie is used.
 - Every file's size and SHA-256 are checked as it arrives, and a mismatch

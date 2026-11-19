@@ -1,0 +1,57 @@
+[
+  {
+    "id": "microsoft/phi-4-gguf",
+    "revision": "6edc2ef6664b739a8e11e62f2672ff6afe0c15ac",
+    "files": [
+      {
+        "name": "phi-4-Q4_K.gguf",
+        "bytes": 9053114560,
+        "sha256": "5652b9be0ea4ae2842130d04fe31bc869fcb99a2b7106c53b4e754a343fd688f"
+      }
+    ]
+  },
+  {
+    "id": "ggml-org/gpt-oss-20b-GGUF",
+    "revision": "41e8a94d15d62070b36cf4553a0250717ecf46b8",
+    "files": [
+      {
+        "name": "gpt-oss-20b-MXFP4.gguf",
+        "bytes": 12109566624,
+        "sha256": "27cd6c432c7672cb812a92f611cf3ba7bbc35928262bb1e1253ff4ee6ae35901"
+      }
+    ]
+  },
+  {
+    "id": "ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF",
+    "revision": "ba87e1d2152af029eb0e392b155c72c0dd92aa5b",
+    "files": [
+      {
+        "name": "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf",
+        "bytes": 18898091584,
+        "sha256": "61f87e75974e4b535dcdf9aad056541a9514f1dfa4538b463b081d19b7a00e3c"
+      }
+    ]
+  },
+  {
+    "id": "google/gemma-4-26B-A4B-it-qat-q4_0-gguf",
+    "revision": "d1c082be9cf3c8a514acf63b8761f4b41935842e",
+    "files": [
+      {
+        "name": "gemma-4-26B_q4_0-it.gguf",
+        "bytes": 14439363584,
+        "sha256": "3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d"
+      }
+    ]
+  },
+  {
+    "id": "ggml-org/Meta-Llama-3.1-8B-Instruct-Q4_0-GGUF",
+    "revision": "0aba27dd2f1c7f4941a94a5c59d80e0a256f9ff8",
+    "files": [
+      {
+        "name": "meta-llama-3.1-8b-instruct-q4_0.gguf",
+        "bytes": 6036116480,
+        "sha256": "b4778681efbd6898fe1965e74f810b3b7dfdf6afab01df9c88c1b0e6e9ca122d"
+      }
+    ]
+  }
+]
