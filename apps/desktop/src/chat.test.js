@@ -26,6 +26,8 @@ import {
   toolResult,
   WRITE_TOOLS,
   workspacePrompt,
+  describesWork,
+  withoutToolFences,
   formatCount,
   formatSize,
   formatWindow,
@@ -464,6 +466,13 @@ test("a reply's tool block is read, and shown without the block", () => {
   assert.deepEqual(parseToolCall(reply), { tool: "read", args: { path: "src/app.js", from: 2 }, before: "Let me look." });
   assert.equal(shownReply(reply), "Let me look.");
   assert.equal(shownReply("Half way ```to"), "Half way ```to");
+  // An example of the format, with words after it, is not a call to hide.
+  const example = 'Like this:\n```tool\n{"tool": "list", "path": "."}\n```\nThen wait.';
+  assert.equal(shownReply(example), example);
+  assert.equal(shownReply('Looking.\n```tool\n{"tool": "li'), "Looking.");
+  // A fence inside the JSON is not the block's end.
+  const readme = '```tool\n{"tool": "write", "path": "README.md", "content": "Run:\\n```\\nmake\\n```"}\n```';
+  assert.deepEqual(parseToolCall(readme).args, { path: "README.md", content: "Run:\n```\nmake\n```" });
   assert.equal(parseToolCall("No tools here."), null);
   assert.match(parseToolCall("```tool\n{nope}\n```").error, /not valid JSON/);
   assert.match(parseToolCall('```tool\n{"tool": "delete"}\n```').error, /no tool called delete/);
@@ -937,4 +946,23 @@ test("the first outside engine grades until another model is picked, and none wh
   assert.equal(graderFor(GROK.id, [phi]), null);
   assert.equal(graderFor(null, undefined), null);
   assert.equal(gradesLine(GROK), "Grok 4 grades the answers once all are in.");
+});
+
+test("a reply that shows code instead of using the tools is caught", () => {
+  assert.ok(describesWork("Here is the file:\n\n```yaml\nname: Dog Trainer\n```"));
+  assert.ok(!describesWork("Done. The game is stubbed in games/dog-trainer."));
+  assert.ok(!describesWork('Looking.\n```tool\n{"tool": "list", "path": "."}\n```'));
+});
+
+test("a tool call in a plain fence is read too", () => {
+  const reply = 'I will list the files.\n\n```\n{"tool": "list", "path": "."}\n```\n\nThen make the game.\n\n```js\nfunction go() {}\n```';
+  assert.deepEqual(parseToolCall(reply), { tool: "list", args: { path: "." }, before: "I will list the files." });
+  assert.equal(parseToolCall("```\n{\"name\": \"x\"}\n```"), null);
+});
+
+test("a tool call in a plain fence is not shown as code", () => {
+  assert.equal(
+    withoutToolFences('Listing.\n\n```\n{"tool": "list", "path": "."}\n```\n\n```js\ngo();\n```').replace(/\n+/g, "|"),
+    "Listing.|```js|go();|```",
+  );
 });

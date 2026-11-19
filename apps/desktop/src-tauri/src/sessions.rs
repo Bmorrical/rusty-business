@@ -180,14 +180,16 @@ impl Store {
     /// Every saved session, newest first. A file that cannot be read is
     /// skipped, never removed.
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
-        let mut summaries: Vec<SessionSummary> = self.read_all()?.into_iter().map(summary).collect();
+        let mut summaries = Vec::new();
+        self.each(|session| summaries.push(summary(session)))?;
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         Ok(summaries)
     }
 
-    fn read_all(&self) -> Result<Vec<Session>, String> {
+    /// Hands each saved session to `visit`, one file at a time, so only what
+    /// `visit` keeps of them is held at once.
+    fn each(&self, mut visit: impl FnMut(Session)) -> Result<(), String> {
         self.ready()?;
-        let mut sessions = Vec::new();
         for entry in fs::read_dir(&self.dir).map_err(failed("Could not read the sessions folder"))?.flatten() {
             let path = entry.path();
             if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
@@ -202,9 +204,9 @@ impl Store {
             if !valid_id(&session.id) {
                 continue;
             }
-            sessions.push(session);
+            visit(session);
         }
-        Ok(sessions)
+        Ok(())
     }
 
     /// Chats whose title or words hold `query`, ignoring case, newest first.
@@ -214,14 +216,14 @@ impl Store {
             return Ok(Vec::new());
         }
         let mut found = Vec::new();
-        for session in self.read_all()? {
+        self.each(|session| {
             let hit = snippet(&session.title, &needle)
                 .map(|_| String::new())
                 .or_else(|| session.messages.iter().find_map(|turn| snippet(&turn.content, &needle)));
             if let Some(snippet) = hit {
                 found.push(Found { session: summary(session), snippet });
             }
-        }
+        })?;
         found.sort_by(|a, b| b.session.updated_at.cmp(&a.session.updated_at));
         found.truncate(FOUND_LIMIT);
         Ok(found)

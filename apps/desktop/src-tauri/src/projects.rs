@@ -68,10 +68,27 @@ fn cut(text: &str, limit: usize) -> String {
 }
 
 /// Writes beside the final place, then moves over it, so a write cut short
-/// never leaves half a file.
+/// never leaves half a file. The file is the owner's alone (0600 on unix),
+/// even when one left over from before was not.
 fn write_whole(path: &PathBuf, text: &str) -> Result<(), String> {
+    use std::io::Write;
     let partial = path.with_extension("partial");
-    fs::write(&partial, text).map_err(failed("Could not save"))?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&partial).map_err(failed("Could not save"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(failed("Could not save"))?;
+    }
+    file.write_all(text.as_bytes()).map_err(failed("Could not save"))?;
+    file.sync_all().map_err(failed("Could not save"))?;
+    drop(file);
     fs::rename(&partial, path).map_err(failed("Could not save"))
 }
 
@@ -332,5 +349,21 @@ mod tests {
         assert_eq!(store.memory().unwrap(), full, "a save is cut to the limit");
         store.remember(&facts(&["One more"]), None).unwrap();
         assert_eq!(store.memory().unwrap(), full);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_memory_file_is_the_owners_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let store = scratch();
+        // A partial file left behind with open permissions is tightened too.
+        fs::create_dir_all(store.memory.parent().unwrap()).unwrap();
+        let partial = store.memory.with_extension("partial");
+        fs::write(&partial, "old").unwrap();
+        fs::set_permissions(&partial, fs::Permissions::from_mode(0o644)).unwrap();
+        store.save_memory("Lives in Jacksonville.").unwrap();
+        let mode = fs::metadata(&store.memory).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(store.memory().unwrap(), "Lives in Jacksonville.");
     }
 }

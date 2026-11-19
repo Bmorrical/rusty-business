@@ -21,6 +21,10 @@ import {
   attachmentLine,
   attachmentTokens,
   shownReply,
+  withAttachments,
+  describesWork,
+  withoutToolFences,
+  WORK_NUDGE,
   TOOL_STEPS,
   toolLabel,
   toolResult,
@@ -88,6 +92,8 @@ const ICONS = {
   up: "M12 19V5M5 12l7-7 7 7",
   chevron: "m6 9 6 6 6-6",
   back: "m15 18-6-6 6-6",
+  copy: "M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
+  check: "M20 6 9 17l-5-5",
 };
 
 const SUGGESTIONS = [
@@ -128,6 +134,8 @@ const gateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
+const freeing = ref(false);
+const freeNote = ref("");
 // The outside engines, as Rust keeps them, in the Installers page's order.
 const outside = ref([]);
 // The change under way, as its command and the engine's id, or "".
@@ -154,6 +162,7 @@ const memorySaved = ref("");
 const learnOn = ref(stored("learn", "on") !== "off");
 // Off to start: learning from an outside engine sends your message and memory to its maker once more.
 const learnOutside = ref(stored("learnOutside", "off") === "on");
+const autoApply = ref(stored("autoApply", "off") === "on");
 const learnedNote = ref("");
 const theme = ref(stored("theme", "system"));
 const sideOpen = ref(stored("side", "open") !== "closed");
@@ -165,6 +174,7 @@ const menuFor = ref("");
 const settingsTab = ref("memory");
 const projectDialog = ref(null);
 const editing = ref(null);
+let editingFrom = {};
 const askTrashProject = ref(false);
 const now = ref(Date.now());
 let searchTimer = 0;
@@ -173,6 +183,7 @@ let clockTimer = 0;
 let learning = Promise.resolve();
 
 let chatId = "";
+let learnId = "";
 /** True once Stop is pressed: the models still waiting, and the steps in a project's folder, end too. */
 let stopAll = false;
 const TOOL_STATUS = { running: "Running", asked: "Waiting for you", done: "Done", failed: "Failed", skipped: "Skipped" };
@@ -320,6 +331,7 @@ watch(theme, (value) => {
 
 watch(learnOn, (on) => store("learn", on ? "on" : "off"));
 watch(learnOutside, (on) => store("learnOutside", on ? "on" : "off"));
+watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
 
 /**
@@ -608,6 +620,27 @@ async function openUpdate(part) {
 }
 
 /**
+ * Lets go of the memory a loaded model takes. Rust restarts the engine the
+ * app started, with nothing loaded; one the app did not start is left alone.
+ */
+async function freeMemory() {
+  if (freeing.value || busy.value) return;
+  freeing.value = true;
+  freeNote.value = "";
+  try {
+    const report = await invoke("free_memory");
+    if (report.freed) freeNote.value = "Memory freed. The next message loads its model again.";
+    else if (!engine.value?.reachable) freeNote.value = "No engine is running, so no model is in memory.";
+    else freeNote.value = "The app did not start this engine, so it cannot free its memory. Quit that engine to free it.";
+    await checkEngine();
+  } catch (error) {
+    freeNote.value = String(error);
+  } finally {
+    freeing.value = false;
+  }
+}
+
+/**
  * Downloads one model from the app's list, then starts the engine with it.
  * Rust checks every file as it arrives and moves the model into place only
  * when all of it is there. Gives back whether the whole model is in place.
@@ -678,12 +711,14 @@ async function refreshProjects() {
 }
 
 async function loadMemory() {
+  const before = memory.value;
   try {
     memory.value = await invoke("load_memory");
   } catch {
     memory.value = "";
   }
-  memoryDraft.value = memory.value;
+  // An edit under way in Settings is not written over.
+  if (memoryDraft.value === before) memoryDraft.value = memory.value;
 }
 
 /** Saves the open chat. Only the fields Rust sets come back into it. */
@@ -737,6 +772,8 @@ async function openSession(id) {
 }
 
 async function trashSession(id) {
+  // A chat answering now is saved as it goes, so it stays until it is done.
+  if (busy.value) return;
   askTrash.value = "";
   menuFor.value = "";
   try {
@@ -806,6 +843,7 @@ function editProject(project) {
   editing.value = project
     ? { ...project }
     : { id: "", name: "", instructions: "", memory: "", folder: "", createdAt: 0, updatedAt: 0 };
+  editingFrom = { ...editing.value };
   nextTick(() => projectDialog.value?.showModal());
 }
 
@@ -826,7 +864,15 @@ function closeProject() {
 async function saveProject() {
   if (!editing.value) return;
   try {
-    const saved = await invoke("save_project", { project: editing.value });
+    // Memories learned while the dialog was open are kept: only the fields
+    // changed here go over the project as it is now.
+    await refreshProjects();
+    const latest = projects.value.find((project) => project.id === editing.value.id);
+    const project = { ...(latest ?? editing.value) };
+    for (const [key, value] of Object.entries(editing.value)) {
+      if (value !== editingFrom[key]) project[key] = value;
+    }
+    const saved = await invoke("save_project", { project });
     await refreshProjects();
     closedProjects.value = { ...closedProjects.value, [saved.id]: false };
     closeProject();
@@ -865,9 +911,11 @@ async function saveMemory() {
  */
 async function learn(message, chosenId, project) {
   if (!learnOn.value || !chosenId) return;
+  const id = `memory-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  learnId = id;
   try {
     const done = await invoke("chat_stream", {
-      chatId: `memory-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      chatId: id,
       request: { model: chosenId, messages: memoryRequest(message, memory.value, project), maxTokens: 1024 },
       onEvent: new Channel(),
     });
@@ -882,6 +930,8 @@ async function learn(message, chosenId, project) {
     learnedTimer = window.setTimeout(() => (learnedNote.value = ""), 8000);
   } catch {
     // Memory is a nicety; a failed look saves nothing and says nothing.
+  } finally {
+    if (learnId === id) learnId = "";
   }
 }
 
@@ -993,23 +1043,41 @@ function withSystem(turns, system) {
  */
 async function work(session, entry, project, system, first) {
   let reply = first;
+  let nudged = false;
   for (let step = 0; ; step += 1) {
     if (reply.stopped || stopAll) return false;
     const call = findToolCall(reply.content, reply.thinking);
     if (call?.block) reply.content = call.block;
-    if (!call) return true;
-    if (step >= TOOL_STEPS) {
-      problem.value = `The model took ${TOOL_STEPS} steps without answering, so the app stopped it. Ask it to carry on if you like.`;
+    let result;
+    if (!call) {
+      // A model that shows code instead of working in the folder is told
+      // once to use its tools.
+      if (nudged || !describesWork(reply.content)) return true;
+      nudged = true;
+      result = WORK_NUDGE;
+    } else {
+      if (step >= TOOL_STEPS) {
+        problem.value = `The model took ${TOOL_STEPS} steps without answering, so the app stopped it. Ask it to carry on if you like.`;
+        return false;
+      }
+      result = await useTool(project, call, reply);
+      await persist();
+      if (result === null) return false;
+    }
+    session.messages.push({ role: "user", content: result, toolResult: true });
+    // Stop pressed while the tool ran asks the model nothing more.
+    if (stopAll) {
+      await persist();
       return false;
     }
-    const result = await useTool(project, call, reply);
-    await persist();
-    if (result === null) return false;
-    session.messages.push({ role: "user", content: result, toolResult: true });
     const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id);
     session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true });
     reply = session.messages.at(-1);
     await persist();
+    if (stopAll) {
+      session.messages = session.messages.filter((turn) => turn !== reply);
+      return false;
+    }
     scrollDown();
     const error = await ask(reply, entry, messages);
     if (error || (!reply.content && !reply.thinking)) {
@@ -1112,7 +1180,7 @@ async function ask(reply, entry, messages) {
  */
 async function grade(session, round, judge) {
   const answers = gradedAnswers(round).map((turn) => turn.content);
-  const messages = gradeMessages(round.question?.content, answers, judge.context);
+  const messages = gradeMessages(withAttachments(round.question), answers, judge.context);
   const at = session.messages.indexOf(round.answers.at(-1)) + 1;
   session.messages.splice(at, 0, { role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true });
   const reply = session.messages[at];
@@ -1152,7 +1220,7 @@ async function useTool(project, call, reply) {
     Object.assign(reply.tool, { status: "failed", output: call.error });
     return toolResult(call, call.error, true);
   }
-  if (WRITE_TOOLS.includes(call.tool)) {
+  if (WRITE_TOOLS.includes(call.tool) && !autoApply.value) {
     reply.tool.status = "asked";
     scrollDown();
     const yes = await new Promise((resolve) => (approve = resolve));
@@ -1177,6 +1245,32 @@ async function useTool(project, call, reply) {
 }
 
 /** Links in a reply stay put: the window never leaves the chat. */
+/** An answer's words. A tool block it ends with is shown as its step instead. */
+function replyText(turn) {
+  if (turn.tool) return shownReply(withoutToolFences(turn.content));
+  return turn.pending ? shownReply(turn.content) : String(turn.content ?? "").trim();
+}
+
+const copied = ref(null);
+let copiedTimer;
+
+/** Puts a message's text on the clipboard, and marks its button for a moment. */
+async function copyText(turn, text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const box = document.createElement("textarea");
+    box.value = text;
+    document.body.append(box);
+    box.select();
+    document.execCommand("copy");
+    box.remove();
+  }
+  copied.value = turn;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => (copied.value = null), 1500);
+}
+
 function keepLinks(event) {
   if (event.target.closest("a")) event.preventDefault();
 }
@@ -1189,6 +1283,8 @@ function stop() {
   if (!busy.value) return;
   stopAll = true;
   if (chatId) invoke("stop_chat", { chatId });
+  // A look for memories the new question waits on stops too.
+  if (learnId) invoke("stop_chat", { chatId: learnId });
   approve?.(false);
 }
 
@@ -1414,7 +1510,7 @@ onBeforeUnmount(() => {
               >
                 <template v-if="askTrash === entry.id">
                   <span class="ask">Move to the trash?</span>
-                  <button class="link" type="button" @click="trashSession(entry.id)">Yes</button>
+                  <button class="link" type="button" :disabled="busy" @click="trashSession(entry.id)">Yes</button>
                   <button class="link" type="button" @click="askTrash = ''">No</button>
                 </template>
                 <template v-else>
@@ -1438,7 +1534,7 @@ onBeforeUnmount(() => {
                     >
                       Move to {{ other.name }}
                     </button>
-                    <button type="button" role="menuitem" class="danger" @click="(askTrash = entry.id), (menuFor = '')">Move to the trash</button>
+                    <button type="button" role="menuitem" class="danger" :disabled="busy" @click="(askTrash = entry.id), (menuFor = '')">Move to the trash</button>
                   </div>
                 </template>
               </li>
@@ -1451,7 +1547,7 @@ onBeforeUnmount(() => {
               <li v-for="entry in group.items" :key="entry.id" :class="{ open: entry.id === current.id }">
                 <template v-if="askTrash === entry.id">
                   <span class="ask">Move to the trash?</span>
-                  <button class="link" type="button" @click="trashSession(entry.id)">Yes</button>
+                  <button class="link" type="button" :disabled="busy" @click="trashSession(entry.id)">Yes</button>
                   <button class="link" type="button" @click="askTrash = ''">No</button>
                 </template>
                 <template v-else>
@@ -1474,7 +1570,7 @@ onBeforeUnmount(() => {
                     >
                       Move to {{ other.name }}
                     </button>
-                    <button type="button" role="menuitem" class="danger" @click="(askTrash = entry.id), (menuFor = '')">Move to the trash</button>
+                    <button type="button" role="menuitem" class="danger" :disabled="busy" @click="(askTrash = entry.id), (menuFor = '')">Move to the trash</button>
                   </div>
                 </template>
               </li>
@@ -1720,6 +1816,7 @@ onBeforeUnmount(() => {
           <nav class="settings-tabs" aria-label="Settings">
             <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
             <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
+            <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
             <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
           </nav>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
@@ -1745,6 +1842,17 @@ onBeforeUnmount(() => {
               <span>
                 Let outside engines learn too
                 <span class="quiet small block">When Grok, GPT, Claude, or Gemini answers, it also looks for facts. That sends your message and this memory to its maker a second time, and uses your API credits.</span>
+              </span>
+            </label>
+          </div>
+          <div v-else-if="settingsTab === 'folders'" class="settings-pane">
+            <h3>Folders</h3>
+            <p class="quiet">A project with a folder lets the model list, read, and search its files, and edit or write them.</p>
+            <label class="check">
+              <input v-model="autoApply" type="checkbox" />
+              <span>
+                Apply changes without asking
+                <span class="quiet small block">The model's edits and new files go straight into the folder, with no Apply or Skip. Stop still ends the work.</span>
               </span>
             </label>
           </div>
@@ -1793,6 +1901,18 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+
+            <h3 class="gap-above">Loaded models</h3>
+            <p class="quiet">
+              A model stays in this computer's memory after it answers, until the app quits. Free memory lets it go now.
+              The next message loads it again, which takes a moment.
+            </p>
+            <div class="settings-actions">
+              <button type="button" :disabled="freeing || busy || Boolean(downloading)" @click="freeMemory">
+                {{ freeing ? "Freeing..." : "Free memory" }}
+              </button>
+              <span v-if="freeNote" class="quiet small" role="status">{{ freeNote }}</span>
+            </div>
 
             <h3 class="gap-above">Grading</h3>
             <p class="quiet">
@@ -1961,6 +2081,11 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-if="round.question.content" class="bubble">{{ round.question.content }}</p>
+            <div v-if="round.question.content" class="turn-foot">
+              <button class="copy" type="button" :aria-label="copied === round.question ? 'Copied' : 'Copy'" :title="copied === round.question ? 'Copied' : 'Copy'" @click="copyText(round.question, round.question.content)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="copied === round.question ? ICONS.check : ICONS.copy" /></svg>
+              </button>
+            </div>
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
             <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
@@ -1974,7 +2099,7 @@ onBeforeUnmount(() => {
                 <p>{{ turn.thinking }}</p>
               </details>
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it escapes raw HTML in the reply -->
-              <div v-if="shownReply(turn.content)" class="answer prose" @click="keepLinks" v-html="renderMarkdown(shownReply(turn.content))"></div>
+              <div v-if="replyText(turn)" class="answer prose" @click="keepLinks" v-html="renderMarkdown(replyText(turn))"></div>
               <p v-else-if="turn.waiting" class="quiet waiting">Waits its turn.</p>
               <p v-else-if="turn.pending && !turn.thinking" class="quiet waiting">Waiting for the model...</p>
               <div v-if="turn.tool" class="tool" :class="turn.tool.status">
@@ -1991,6 +2116,7 @@ onBeforeUnmount(() => {
                 <div v-if="turn.tool.status === 'asked'" class="tool-actions">
                   <button class="solid" type="button" @click="decide(true)">Apply</button>
                   <button type="button" @click="decide(false)">Skip</button>
+                  <button class="link" type="button" @click="(autoApply = true), decide(true)">Apply all from now on</button>
                 </div>
                 <details v-else-if="turn.tool.output || changeLines(turn.tool).length" class="tool-more">
                   <summary>Details</summary>
@@ -2003,7 +2129,12 @@ onBeforeUnmount(() => {
                   <pre v-if="turn.tool.output">{{ turn.tool.output }}</pre>
                 </details>
               </div>
-              <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
+              <div v-if="!turn.pending" class="turn-foot">
+                <button v-if="replyText(turn)" class="copy" type="button" :aria-label="copied === turn ? 'Copied' : 'Copy'" :title="copied === turn ? 'Copied' : 'Copy'" @click="copyText(turn, replyText(turn))">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="copied === turn ? ICONS.check : ICONS.copy" /></svg>
+                </button>
+                <p class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
+              </div>
             </section>
           </div>
           <section v-if="round.grade" class="grade-card">
@@ -2606,16 +2737,19 @@ kbd {
   height: 0.9rem;
 }
 
+/* Faded rather than hidden, so the keyboard still reaches them. */
 .more,
 .row-action {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .sessions li:hover .more,
+.sessions li:focus-within .more,
 .more:focus-visible,
 .project-row:hover .row-action,
+.project-row:focus-within .row-action,
 .row-action:focus-visible {
-  visibility: visible;
+  opacity: 1;
 }
 
 .project-row {
@@ -3174,6 +3308,7 @@ button.switch {
   max-width: 46rem;
   margin: 0 auto 1.6rem;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.4rem;
   user-select: text;
   -webkit-user-select: text;
@@ -3184,6 +3319,7 @@ button.switch {
 }
 
 .answers {
+  min-width: 0;
   max-width: 46rem;
   margin: 0 auto 1.1rem;
 }
@@ -3287,6 +3423,45 @@ button.switch {
 .answer {
   font-size: 1.02rem;
   line-height: 1.65;
+}
+
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.turn-foot .note {
+  margin: 0;
+}
+
+.copy {
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.copy:hover,
+.copy:focus-visible {
+  background: var(--bubble);
+  color: inherit;
+}
+
+.copy svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .note {

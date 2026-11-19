@@ -52,6 +52,7 @@ pub fn run() {
             engine::chat_stream,
             engine::stop_chat,
             starter::start_engine,
+            starter::free_memory,
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,

@@ -500,14 +500,27 @@ export function workspacePrompt(project, overview) {
     '- {"tool": "search", "text": "createUser", "path": "src"}: lines that contain the text. path is optional.',
     '- {"tool": "edit", "path": "src/app.js", "find": "exact old text", "replace": "new text"}: changes text that appears exactly once in the file. Read the file first and copy the old text exactly, without line numbers.',
     '- {"tool": "write", "path": "src/new.js", "content": "the whole file"}: makes a file, or replaces all of one.',
+    "When the user asks you to make, add, or change something, do it in the folder with these tools; never just show the code for them to copy. Start by listing or reading the files that matter, then write or edit.",
     "The user approves each edit and write before it happens, and may decline. Look before you change: read the files that matter instead of guessing. Use one tool per message. When you have what you need, answer normally with no tool block.",
   ].join("\n\n");
+}
+
+/** Said to a model that showed code for the folder instead of using its tools. */
+export const WORK_NUDGE =
+  "You showed the code instead of making the change. Do the work in the folder with the tools: start with one tool block, such as a list or a read, and nothing after it.";
+
+/** A reply that shows code without a tool block: work described, not done. */
+export function describesWork(text) {
+  const source = String(text ?? "");
+  return /(^|\n)[ \t]*(```|~~~)/.test(source) && !/```tool/.test(source);
 }
 
 /** The tool block at the end of a reply, if any, with the text before it. */
 export function parseToolCall(text) {
   const source = String(text ?? "");
-  const match = /```tool[^\n]*\n([\s\S]*?)```/.exec(source);
+  // The closing fence stands on a line of its own, so a fence inside the
+  // JSON, such as in a README the model writes, stays part of the call.
+  const match = /```tool[^\n]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/.exec(source) ?? plainToolFence(source);
   if (!match) return null;
   let call;
   try {
@@ -520,6 +533,34 @@ export function parseToolCall(text) {
   }
   const { tool, ...args } = call;
   return { tool, args, before: source.slice(0, match.index).trim() };
+}
+
+/**
+ * A tool call some models put in a plain or json fence instead of a tool
+ * one: the first such fence that holds a call to a tool the app has.
+ */
+function plainToolFence(source) {
+  for (const found of source.matchAll(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/g)) {
+    try {
+      const call = JSON.parse(found[1].trim());
+      if (call && TOOLS.includes(call.tool)) return found;
+    } catch {
+      // Not a call; keep looking.
+    }
+  }
+  return null;
+}
+
+/** A reply's text without the plain or json fences that hold tool calls. */
+export function withoutToolFences(text) {
+  return String(text ?? "").replace(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```[ \t]*(?=\n|$)/g, (whole, body) => {
+    try {
+      const call = JSON.parse(body.trim());
+      return call && TOOLS.includes(call.tool) ? "" : whole;
+    } catch {
+      return whole;
+    }
+  });
 }
 
 /** The tool a bare set of arguments points to, from the keys it has. */
@@ -563,11 +604,19 @@ export function toolBlock(call) {
   return "```tool\n" + JSON.stringify({ tool: call.tool, ...call.args }) + "\n```";
 }
 
-/** A reply's words without its tool block, including one still streaming in. */
+/**
+ * A reply's words without the tool block it ends with, including one still
+ * streaming in. A tool block with words after it, such as an example in an
+ * answer about the format, stays.
+ */
 export function shownReply(text) {
   const source = String(text ?? "");
-  const at = source.indexOf("```tool");
-  return (at === -1 ? source : source.slice(0, at)).trim();
+  const last = [...source.matchAll(/(?:^|\n)[ \t]*```tool/g)].at(-1);
+  if (!last) return source.trim();
+  const rest = source.slice(last.index);
+  const closed = /```tool[^\n]*\n[\s\S]*?\n[ \t]*```[ \t]*(?=\n|$)/.exec(rest);
+  if (closed && rest.slice(closed.index + closed[0].length).trim()) return source.trim();
+  return source.slice(0, last.index).trim();
 }
 
 /** "Read src/app.js": a step, in a few words. */

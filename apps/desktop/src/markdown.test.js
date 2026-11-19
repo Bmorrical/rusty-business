@@ -18,3 +18,10 @@ test("math is typeset, but money and code are left alone", () => {
   assert.match(html, /costs \$0\.05 and the bat \$1\.05/);
   assert.match(html, /<code>\\\[ not math \\\]\n<\/code>/);
 });
+
+test("math in tilde fences and indented code is left as written", () => {
+  const html = renderMarkdown("~~~\n\\(x\\)\n~~~\n\n    \\[ y \\]\n\nAnd `\\(z\\)` too.");
+  assert.ok(!html.includes("katex"));
+  assert.match(html, /<code>\\\(x\\\)\n<\/code>/);
+  assert.match(html, /<code>\\\[ y \\\]\n<\/code>/);
+});

@@ -12,6 +12,9 @@ use serde::Serialize;
 /// The most of one file's text a message carries: about 15,000 tokens.
 pub const TEXT_LIMIT: usize = 60_000;
 const FILE_LIMIT: u64 = 50_000_000;
+/// The most an Office file's parts may unpack to, all together, so a small
+/// zip bomb cannot fill the memory.
+const UNPACKED_LIMIT: u64 = 200_000_000;
 const SHEET_ROWS: usize = 2_000;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -48,14 +51,29 @@ fn office_text(bytes: &[u8], parts: impl Fn(&str) -> bool, paragraph: &str, text
         let digits: String = name.chars().filter(char::is_ascii_digit).collect();
         (digits.parse::<u64>().unwrap_or(0), name.clone())
     });
+    office_parts(&mut archive, &names, UNPACKED_LIMIT, paragraph, text_tag)
+}
+
+/// The named parts' text, stopping when what they unpack to passes `budget`.
+fn office_parts<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    names: &[String],
+    mut budget: u64,
+    paragraph: &str,
+    text_tag: &str,
+) -> Result<String, String> {
+    let too_big = || "The file unpacks to more than the app can read.".to_string();
     let mut out = String::new();
     for (index, name) in names.iter().enumerate() {
-        let mut xml = String::new();
-        archive
-            .by_name(name)
-            .map_err(|_| "The file could not be read.".to_string())?
-            .read_to_string(&mut xml)
-            .map_err(|_| "The file could not be read.".to_string())?;
+        let part = archive.by_name(name).map_err(|_| "The file could not be read.".to_string())?;
+        let mut bytes = Vec::new();
+        // One byte past the budget shows a part that would go over it.
+        part.take(budget + 1).read_to_end(&mut bytes).map_err(|_| "The file could not be read.".to_string())?;
+        if bytes.len() as u64 > budget {
+            return Err(too_big());
+        }
+        budget -= bytes.len() as u64;
+        let xml = String::from_utf8(bytes).map_err(|_| "The file could not be read.".to_string())?;
         if names.len() > 1 {
             out.push_str(&format!("--- Slide {} ---\n", index + 1));
         }
@@ -268,6 +286,17 @@ mod tests {
         ]);
         assert_eq!(read_bytes("deck.pptx", deck).unwrap().text, "--- Slide 1 ---\nTwo\n\n--- Slide 2 ---\nTen");
         assert!(read_bytes("broken.docx", b"not a zip".to_vec()).is_err());
+    }
+
+    #[test]
+    fn an_office_file_that_unpacks_too_far_is_turned_away() {
+        let body = format!("<w:p><w:t>{}</w:t></w:p>", "a".repeat(1_000));
+        let doc = office(&[("ppt/slides/slide1.xml", body.as_str()), ("ppt/slides/slide2.xml", body.as_str())]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(doc)).unwrap();
+        let names = vec!["ppt/slides/slide1.xml".to_string(), "ppt/slides/slide2.xml".to_string()];
+        assert!(office_parts(&mut archive, &names, 4_000, "w:p", "w:t").is_ok());
+        let error = office_parts(&mut archive, &names, 1_500, "w:p", "w:t").unwrap_err();
+        assert!(error.contains("unpacks to more"), "{error}");
     }
 
     #[test]
