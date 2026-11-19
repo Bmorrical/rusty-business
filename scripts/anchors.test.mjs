@@ -135,3 +135,75 @@ test('under the downloads, the index links every section, in the order of the pa
   const sections = headings.filter((each) => each.level === 2).map((each) => each.address);
   assert.deepEqual(linked, sections, 'the index and the sections differ');
 });
+
+// Brad, 2026-11-19: "user can install 3 ways, it spells it out clearly at the
+// top:
+//
+// compiled binary
+// recompile from source -> needs
+// run from localhost"
+//
+// Then: "those options are a hyperlink to the section that describes it".
+// So, right under the index, a numbered list gives the three ways, each a link
+// to its own section, and the second says what building from source needs.
+const WAYS = [
+  { text: 'Download the built app', address: 'download-the-built-app' },
+  { text: 'Build it from source', address: 'build-it-from-source' },
+  { text: 'Run it from localhost', address: 'run-it-from-localhost' },
+];
+const BUILD_NEEDS = ["Apple's command line tools", "Microsoft's C++ build tools", 'WebKitGTK', 'OpenSSL', 'a C compiler'];
+
+/** The text of a "## " section, from its heading to the next "## " heading. */
+function sectionOf(address) {
+  const level2 = headings.filter((each) => each.level === 2);
+  const at = level2.findIndex((each) => each.address === address);
+  const start = lines.indexOf(`## ${level2[at].text}`);
+  const next = level2[at + 1] ? lines.indexOf(`## ${level2[at + 1].text}`, start + 1) : lines.length;
+  return lines.slice(start, next).join('\n');
+}
+
+test('at the top, three ways to install it, each a link to the section that describes it', () => {
+  const index = lines.findIndex((line) => line.startsWith('**On this page:** '));
+  let afterIndex = index;
+  while (lines[afterIndex + 1]) afterIndex += 1;
+  assert.equal(lines[afterIndex + 1], '', 'nothing separates the index from what follows it');
+  const at = afterIndex + 2;
+  assert.equal(lines[at], '**Three ways to install it:**', 'the three ways do not come right after the index');
+  assert.ok(at < firstSection, 'the three ways are not above the first section');
+
+  let end = at + 2;
+  while (lines[end + 1]) end += 1;
+  const list = lines.slice(at + 2, end + 1).join('\n');
+  const items = list.split(/\n(?=\d+\. )/).map((item) => item.replace(/\n +/g, ' '));
+  assert.equal(items.length, 3, `the list has ${items.length} ways, not three`);
+
+  const level2 = headings.filter((each) => each.level === 2);
+  let last = -1;
+  WAYS.forEach((way, n) => {
+    assert.ok(items[n].startsWith(`${n + 1}. [**${way.text}**](#${way.address}). `), `way ${n + 1} does not start with a link to #${way.address}: ${items[n]}`);
+    const found = level2.findIndex((each) => each.address === way.address);
+    assert.ok(found >= 0, `no "## ${way.text}" section for way ${n + 1} to land on`);
+    assert.equal(level2[found].text, way.text, `#${way.address} is the heading "${level2[found].text}"`);
+    assert.ok(found > last, `"${way.text}" comes before the way above it on the page`);
+    last = found;
+  });
+
+  for (const need of BUILD_NEEDS) {
+    assert.ok(items[1].includes(need), `building from source does not say it needs ${need}`);
+    assert.ok(sectionOf('build-it-from-source').includes(need), `the Build it from source section does not say it needs ${need}`);
+  }
+  for (const need of ['Rust', 'Node 20 or later']) {
+    assert.ok(items[2].includes(need), `running it from localhost does not say it needs ${need}`);
+    assert.ok(sectionOf('run-it-from-localhost').includes(need), `the Run it from localhost section does not say it needs ${need}`);
+  }
+
+  const build = sectionOf('build-it-from-source');
+  for (const line of ['make app', 'scripts/windows-app.sh', 'scripts/linux-app.sh']) {
+    assert.ok(build.includes(line), `the Build it from source section does not give ${line}`);
+  }
+  for (const system of ['On a Mac', 'On Windows', 'On Linux']) {
+    assert.ok(build.includes(`\n### ${system}\n`), `the Build it from source section has no "### ${system}"`);
+  }
+  assert.ok(sectionOf('run-it-from-localhost').includes('npm run tauri dev'), 'the Run it from localhost section does not give npm run tauri dev');
+  assert.ok(sectionOf('run-it-from-localhost').includes('127.0.0.1:1420'), 'the Run it from localhost section does not say where the page is served');
+});
