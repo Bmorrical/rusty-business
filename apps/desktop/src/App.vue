@@ -152,6 +152,8 @@ const memory = ref("");
 const memoryDraft = ref("");
 const memorySaved = ref("");
 const learnOn = ref(stored("learn", "on") !== "off");
+// Off to start: learning from an outside engine sends your message and memory to its maker once more.
+const learnOutside = ref(stored("learnOutside", "off") === "on");
 const learnedNote = ref("");
 const theme = ref(stored("theme", "system"));
 const sideOpen = ref(stored("side", "open") !== "closed");
@@ -317,6 +319,7 @@ watch(theme, (value) => {
 });
 
 watch(learnOn, (on) => store("learn", on ? "on" : "off"));
+watch(learnOutside, (on) => store("learnOutside", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
 
 /**
@@ -974,8 +977,8 @@ async function send() {
   await persist();
   scrollDown();
   focusComposer();
-  // Memories are looked for on this computer only.
-  if (answered && text && !isOutside(asked[0].id)) learning = learn(text, asked[0].id, project);
+  // An outside engine looks for memories only when Settings allows it.
+  if (answered && text && (learnOutside.value || !isOutside(asked[0].id))) learning = learn(text, asked[0].id, project);
 }
 
 /** The chat with what the model is told first, when there is anything to tell. */
@@ -1734,7 +1737,14 @@ onBeforeUnmount(() => {
               <input v-model="learnOn" type="checkbox" />
               <span>
                 Learn from my chats
-                <span class="quiet small block">After each reply from a model on this computer, the same model looks for lasting facts in your message and adds them here.</span>
+                <span class="quiet small block">After each reply, the same model looks for lasting facts in your message and adds them here.</span>
+              </span>
+            </label>
+            <label class="check">
+              <input v-model="learnOutside" type="checkbox" :disabled="!learnOn" />
+              <span>
+                Let outside engines learn too
+                <span class="quiet small block">When Grok, GPT, Claude, or Gemini answers, it also looks for facts. That sends your message and this memory to its maker a second time, and uses your API credits.</span>
               </span>
             </label>
           </div>
