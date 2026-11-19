@@ -68,14 +68,16 @@ Select the picture to open it full size. The rest of the set is in
   grader wrote "Answer 2", the page adds the name of the model that wrote it.
   No grading turns it off.
 - **The models on this computer**, named when the engine is not answering.
-  The app looks in the Hugging Face cache folder, where the engine keeps the
-  models it has downloaded. It only reads there, it keeps no list of its own,
+  On a Mac, the app looks in the Hugging Face cache folder, where the engine
+  keeps the models it has downloaded. On Windows and Linux, it looks in the
+  app's own models folder. It only reads there, it keeps no list of its own,
   and a download that stopped part way is not counted.
 - **The engine, started by the app.** When no engine is answering, the app
-  starts one and waits for it. It starts only what is missing: an engine that
-  is already running is used as it is, and asking twice changes nothing. When
-  the app quits, it stops the engine it started and no other. When it cannot
-  start one, it says why in one sentence.
+  starts one and waits for it: `mlx_lm.server` on a Mac, and llama.cpp's
+  `llama-server` on Windows and Linux. It starts only what is missing: an
+  engine that is already running is used as it is, and asking twice changes
+  nothing. When the app quits, it stops the engine it started and no other.
+  When it cannot start one, it says why in one sentence.
 - **The stack, started by the app.** When the stack's front door is not
   answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a

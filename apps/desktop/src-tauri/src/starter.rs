@@ -4,6 +4,8 @@
 //! a terminal first. On a Mac the engine's program is `mlx_lm.server`. The Mac
 //! app that `make app` and `make dmg` build carries one inside it; otherwise
 //! the app starts one that is already on this computer. It installs none.
+//! On Windows and Linux the engine's program is llama.cpp's `llama-server`,
+//! serving the GGUF models in the app's own models folder.
 //!
 //! Four rules live here:
 //! - the whole plan is checked before anything starts: the program, a model
@@ -14,11 +16,15 @@
 //!   the page asks;
 //! - the app stops only an engine it started itself, and only when the app
 //!   quits. One that was already running is never stopped or restarted.
+//!   Stopping one stops what it started in turn, as `llama-server` starts a
+//!   second program for each model it loads.
 //!
 //! An engine the app starts listens on this computer only, is told to stay
 //! offline (so it downloads nothing and serves the models already on the
-//! disk), and is never asked to log what is typed.
+//! disk), and is never asked to log what is typed. `llama-server` is also
+//! told to load one model at a time, and to keep its own chat page off.
 
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -39,15 +45,68 @@ const PATIENCE: Duration = Duration::from_secs(60);
 /// How long it waits between one look and the next.
 const PAUSE: Duration = Duration::from_millis(250);
 
+/// How long an engine the app started is given to stop by itself when the app
+/// quits, before it is made to.
+const GRACE: Duration = Duration::from_secs(5);
+
+// ---------------------------------------------------------------------------
+// Which engine
+// ---------------------------------------------------------------------------
+
+/// The engine the app starts on this system.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Engine {
+    /// `mlx_lm.server`, on a Mac. It finds its models in the Hugging Face
+    /// cache.
+    Mlx,
+    /// llama.cpp's `llama-server`, on Windows and Linux, serving the GGUF
+    /// models in the app's own models folder, `models`.
+    Llama { models: PathBuf },
+}
+
+impl Engine {
+    /// The engine for `os`, one of Rust's names for a system, where `models`
+    /// is the app's own models folder. Taking the system lets the Mac's tests
+    /// check what Windows and Linux get. There is none on any other system,
+    /// or on Windows and Linux without a models folder.
+    pub fn on(os: &str, models: Option<PathBuf>) -> Option<Engine> {
+        match os {
+            "macos" => Some(Engine::Mlx),
+            "windows" | "linux" => models.map(|models| Engine::Llama { models }),
+            _ => None,
+        }
+    }
+
+    /// The engine for this system.
+    pub fn here() -> Option<Engine> {
+        Engine::on(std::env::consts::OS, crate::models::models_folder())
+    }
+
+    /// The engine's program, by its file name on this system.
+    pub fn program(&self) -> &'static str {
+        self.program_on(std::env::consts::OS)
+    }
+
+    fn program_on(&self, os: &str) -> &'static str {
+        match self {
+            Engine::Mlx => "mlx_lm.server",
+            Engine::Llama { .. } if os == "windows" => "llama-server.exe",
+            Engine::Llama { .. } => "llama-server",
+        }
+    }
+
+    /// How this engine's program is started.
+    fn command(&self, program: &Path, address: &Address) -> Command {
+        match self {
+            Engine::Mlx => command(program, address),
+            Engine::Llama { models } => llama_command(program, address, models, std::env::vars_os().map(|(name, _)| name)),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Where the engine's program is
 // ---------------------------------------------------------------------------
-
-/// The program that serves the engine on this system, by name. There is none
-/// where no engine has been chosen yet.
-pub fn program_name() -> Option<&'static str> {
-    cfg!(target_os = "macos").then_some("mlx_lm.server")
-}
 
 /// The engine's program on this computer, or none.
 ///
@@ -82,23 +141,38 @@ pub fn carried_folder(exe: &Path) -> Option<PathBuf> {
     (programs.file_name()? == "MacOS" && contents.file_name()? == "Contents").then(|| contents.join("Resources").join("engine").join("bin"))
 }
 
-/// The folders the program is looked for in, in order: each folder on `PATH`
-/// that is a full path, then `.local/bin` in the home folder, then Homebrew's
-/// two folders, then the folders `pip install --user` fills, newest Python
-/// first. An app opened from the Finder gets a short `PATH`, so the usual
-/// folders are looked in as well.
+/// The folders the program is looked for in on this system, in order.
 pub fn places(path: Option<&str>, home: Option<&Path>) -> Vec<PathBuf> {
+    places_on(std::env::consts::OS, path, home)
+}
+
+/// The folders the program is looked for in on `os`, in order. First, each
+/// folder on `PATH` that is a full path. Then, on a Mac, `.local/bin` in the
+/// home folder, Homebrew's two folders, and the folders `pip install --user`
+/// fills, newest Python first: an app opened from the Finder gets a short
+/// `PATH`. On Linux, `.local/bin`, Homebrew's folder, `/usr/local/bin`, and
+/// `/usr/bin`. On Windows, `PATH` alone.
+fn places_on(os: &str, path: Option<&str>, home: Option<&Path>) -> Vec<PathBuf> {
     let mut folders: Vec<PathBuf> = match path {
         Some(path) => std::env::split_paths(path).filter(|folder| folder.is_absolute()).collect(),
         None => Vec::new(),
     };
-    if let Some(home) = home {
-        folders.push(home.join(".local").join("bin"));
-    }
-    folders.push(PathBuf::from("/opt/homebrew/bin"));
-    folders.push(PathBuf::from("/usr/local/bin"));
-    if let Some(home) = home {
-        folders.extend(pip_folders(&home.join("Library").join("Python")));
+    match os {
+        "macos" => {
+            folders.extend(home.map(|home| home.join(".local").join("bin")));
+            folders.push(PathBuf::from("/opt/homebrew/bin"));
+            folders.push(PathBuf::from("/usr/local/bin"));
+            if let Some(home) = home {
+                folders.extend(pip_folders(&home.join("Library").join("Python")));
+            }
+        }
+        "linux" => {
+            folders.extend(home.map(|home| home.join(".local").join("bin")));
+            folders.push(PathBuf::from("/home/linuxbrew/.linuxbrew/bin"));
+            folders.push(PathBuf::from("/usr/local/bin"));
+            folders.push(PathBuf::from("/usr/bin"));
+        }
+        _ => {}
     }
     folders
 }
@@ -173,6 +247,65 @@ pub fn command(program: &Path, address: &Address) -> Command {
     command
 }
 
+/// How `llama-server` is started: at the engine's own address, serving the
+/// models in `models`, with no model named, so nothing is loaded until a chat
+/// asks for a model. `environment` is the names of the app's own environment
+/// variables.
+///
+/// It is not told how much a model may take in at once: each model's own
+/// setting is used, fitted to the memory there is. Nor is it told to log
+/// more than it does by itself, which is each request's line, not the words.
+pub fn llama_command(program: &Path, address: &Address, models: &Path, environment: impl IntoIterator<Item = OsString>) -> Command {
+    let mut command = Command::new(program);
+    command.arg("--host").arg(&address.host);
+    command.arg("--port").arg(address.port.to_string());
+    command.arg("--models-dir").arg(models);
+    // One model loaded at a time, so two never fill the memory together.
+    command.arg("--models-max").arg("1");
+    // Offline, it serves the models on the disk and downloads none.
+    command.arg("--offline");
+    // The app's window is where a chat happens. The engine's own page stays off.
+    command.arg("--no-webui");
+    // `llama-server` reads settings from variables named `LLAMA_ARG_HOST` and
+    // the like, and each model it loads gets the same variables. None of them
+    // is passed on, so none can move the engine off this computer, or have it
+    // keep what is typed.
+    for name in llama_settings(environment) {
+        command.env_remove(name);
+    }
+    command
+}
+
+/// The names in `names` that are settings for llama.cpp: each name that
+/// starts `LLAMA_`, in any case, as Windows reads it.
+fn llama_settings(names: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    names.into_iter().filter(|name| name.to_string_lossy().to_ascii_uppercase().starts_with("LLAMA_")).collect()
+}
+
+/// Sets the engine apart from the app. On Mac and Linux it runs in a process
+/// group of its own, so `end` can reach everything it starts in turn. On
+/// Windows it runs with no console window: the app's window is the only one.
+fn apart(command: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    quiet(command)
+}
+
+/// On Windows, a program run with no console window of its own. Elsewhere,
+/// the command as it is.
+fn quiet(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW.
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
+
 /// True when something accepts a connection at the engine's host and port.
 fn someone_answers(address: &Address) -> bool {
     let Ok(places) = (address.host.as_str(), address.port).to_socket_addrs() else {
@@ -188,10 +321,9 @@ fn someone_answers(address: &Address) -> bool {
 /// What this computer has for starting an engine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Found {
-    /// The name of the engine's program on this system, or none where no
-    /// engine is chosen yet.
-    pub name: Option<&'static str>,
-    /// The program itself, when it is on this computer.
+    /// The engine for this system, or none where there is none.
+    pub engine: Option<Engine>,
+    /// The engine's program, when it is on this computer.
     pub program: Option<PathBuf>,
     /// How many of the app's models are whole on the disk.
     pub models: usize,
@@ -199,11 +331,11 @@ pub struct Found {
 
 /// Looks, fresh each time: the app keeps no note of what it found before.
 pub fn look() -> Found {
-    let name = program_name();
+    let engine = Engine::here();
     let home = std::env::home_dir();
     let carried = std::env::current_exe().ok().and_then(|exe| carried_folder(&exe));
-    let program = name.and_then(|name| find_program(name, |key| std::env::var(key).ok(), home.as_deref(), carried.as_deref()));
-    Found { name, program, models: crate::models::on_disk().len() }
+    let program = engine.as_ref().and_then(|engine| find_program(engine.program(), |key| std::env::var(key).ok(), home.as_deref(), carried.as_deref()));
+    Found { engine, program, models: crate::models::on_disk().len() }
 }
 
 /// Everything the plan is made from.
@@ -233,8 +365,8 @@ pub enum Step {
     Nothing,
     /// An engine this app started is on its way up. Wait for it.
     Wait,
-    /// Start this program.
-    Start(PathBuf),
+    /// Start this engine, with this program.
+    Start(Engine, PathBuf),
     /// Start nothing, and say why.
     Cannot(Why),
 }
@@ -247,9 +379,9 @@ pub fn plan(facts: &Facts) -> Step {
     if facts.ours {
         return Step::Wait;
     }
-    if facts.found.name.is_none() {
+    let Some(engine) = &facts.found.engine else {
         return Step::Cannot(Why::NoEngineForThisSystem);
-    }
+    };
     if facts.port_taken {
         return Step::Cannot(Why::PortTaken);
     }
@@ -259,28 +391,20 @@ pub fn plan(facts: &Facts) -> Step {
     if facts.found.models == 0 {
         return Step::Cannot(Why::NoModel);
     }
-    Step::Start(program.clone())
+    Step::Start(engine.clone(), program.clone())
 }
 
 /// Why nothing was started, as one sentence for the window.
 pub fn sentence(why: Why, name: &str, port: u16) -> String {
     match why {
-        Why::NoEngineForThisSystem => no_engine_on(std::env::consts::OS).to_string(),
+        Why::NoEngineForThisSystem => NO_ENGINE.to_string(),
         Why::PortTaken => format!("Something that is not the engine is using port {port} on this computer, so the app did not start one."),
         Why::NoProgram => format!("The app looked for {name} on this computer and did not find it."),
         Why::NoModel => "With no model to serve, the app did not start the engine.".to_string(),
     }
 }
 
-/// Why no engine starts on `os`, one of Rust's names for a system. Taking
-/// the system lets the Mac's tests check what Windows and Linux say.
-fn no_engine_on(os: &str) -> &'static str {
-    match os {
-        "windows" => "The app has no engine for Windows yet, so it cannot start one.",
-        "linux" => "The app has no engine for Linux yet, so it cannot start one.",
-        _ => "The app cannot start an engine on this system yet.",
-    }
-}
+const NO_ENGINE: &str = "The app cannot start an engine on this system yet.";
 
 const NOT_YET: &str = "The app started the engine, and it is not answering yet.";
 
@@ -376,8 +500,8 @@ impl Starter {
         match plan(&Facts { answering, ours, port_taken, found: found.clone() }) {
             Step::Nothing => Begun::Answering,
             Step::Wait => Begun::Waiting,
-            Step::Cannot(why) => Begun::Cannot(sentence(why, found.name.unwrap_or("the engine"), address.port)),
-            Step::Start(program) => match self.launch(&program, address) {
+            Step::Cannot(why) => Begun::Cannot(sentence(why, found.engine.as_ref().map_or("the engine", Engine::program), address.port)),
+            Step::Start(engine, program) => match self.launch(&engine, &program, address) {
                 Ok(child) => {
                     *slot = Some(child);
                     Begun::Started
@@ -387,13 +511,14 @@ impl Starter {
         }
     }
 
-    /// Starts the program, with everything it says going to the log.
-    fn launch(&self, program: &Path, address: &Address) -> Result<Child, String> {
+    /// Starts the engine's program, set apart from the app, with everything
+    /// it says going to the log.
+    fn launch(&self, engine: &Engine, program: &Path, address: &Address) -> Result<Child, String> {
         let name = program.file_name().and_then(|name| name.to_str()).unwrap_or("the engine");
         let no_log = |error: std::io::Error| format!("The app could not write the engine's log, so it did not start the engine: {error}.");
         let log = self.fresh_log().map_err(no_log)?;
         let errors = log.try_clone().map_err(no_log)?;
-        command(program, address)
+        apart(&mut engine.command(program, address))
             .stdin(Stdio::null())
             .stdout(log)
             .stderr(errors)
@@ -417,15 +542,73 @@ impl Starter {
         options.open(&self.log)
     }
 
-    /// Stops the engine this app started, when it started one. Nothing else
-    /// is touched: an engine that was already running is not the app's to
-    /// stop.
+    /// Stops the engine this app started, when it started one, and what it
+    /// started in turn. Nothing else is touched: an engine that was already
+    /// running is not the app's to stop.
     pub fn stop(&self) {
-        if let Some(mut child) = self.slot().take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        self.stop_within(GRACE);
+    }
+
+    /// Stops the engine the app started, giving it `grace` to stop by itself.
+    /// The slot stays locked until it has stopped, so nothing starts another
+    /// engine at the same address meanwhile.
+    fn stop_within(&self, grace: Duration) {
+        let mut slot = self.slot();
+        if let Some(mut child) = slot.take() {
+            end(&mut child, grace);
         }
     }
+}
+
+/// Stops the engine and everything it started. On Mac and Linux the engine's
+/// whole group is asked to stop, then, after `grace`, made to. On Windows,
+/// which has no way to ask a program with no window, the engine and what it
+/// started are made to stop at once.
+fn end(child: &mut Child, grace: Duration) {
+    #[cfg(unix)]
+    if signal_group(child, libc::SIGTERM) {
+        let until = Instant::now() + grace;
+        loop {
+            match child.try_wait() {
+                Ok(None) if Instant::now() < until => std::thread::sleep(Duration::from_millis(50)),
+                Ok(None) => break,
+                _ => return,
+            }
+        }
+        signal_group(child, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    end_tree(child);
+    #[cfg(not(unix))]
+    let _ = grace;
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Sends `signal` to the engine's process group, the group it was started in
+/// by `apart`. True when it was sent.
+#[cfg(unix)]
+fn signal_group(child: &Child, signal: libc::c_int) -> bool {
+    let Ok(group) = libc::pid_t::try_from(child.id()) else {
+        return false;
+    };
+    // SAFETY: kill takes no pointers. The group is the engine's own, since it
+    // was started in a group of its own, and the engine has not been waited
+    // for yet, so its number cannot have been handed to anything else.
+    group > 1 && unsafe { libc::kill(-group, signal) } == 0
+}
+
+/// Ends the engine and every program it started, with Windows' own
+/// `taskkill`, from the Windows folder.
+#[cfg(windows)]
+fn end_tree(child: &Child) {
+    let windows = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let taskkill = windows.join("System32").join("taskkill.exe");
+    let _ = quiet(Command::new(taskkill).arg("/PID").arg(child.id().to_string()).arg("/T").arg("/F"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 impl Drop for Starter {
@@ -468,6 +651,7 @@ mod tests {
     use super::*;
 
     const NAME: &str = "mlx_lm.server";
+    const MLX: Option<Engine> = Some(Engine::Mlx);
     #[cfg(unix)]
     const SHORT: Duration = Duration::from_millis(300);
 
@@ -481,8 +665,17 @@ mod tests {
         folder
     }
 
-    fn facts(answering: bool, ours: bool, port_taken: bool, name: Option<&'static str>, program: Option<&str>, models: usize) -> Facts {
-        Facts { answering, ours, port_taken, found: Found { name, program: program.map(PathBuf::from), models } }
+    fn facts(answering: bool, ours: bool, port_taken: bool, engine: Option<Engine>, program: Option<&str>, models: usize) -> Facts {
+        Facts { answering, ours, port_taken, found: Found { engine, program: program.map(PathBuf::from), models } }
+    }
+
+    /// The source of everything but the tests.
+    fn code() -> &'static str {
+        include_str!("starter.rs").split("#[cfg(test)]").next().unwrap()
+    }
+
+    fn told(command: &Command) -> Vec<&str> {
+        command.get_args().map(|part| part.to_str().unwrap()).collect()
     }
 
     #[test]
@@ -490,38 +683,107 @@ mod tests {
         let program = "/opt/homebrew/bin/mlx_lm.server";
 
         // Everything is in place and nothing answers: start it.
-        assert_eq!(plan(&facts(false, false, false, Some(NAME), Some(program), 1)), Step::Start(PathBuf::from(program)));
+        assert_eq!(plan(&facts(false, false, false, MLX, Some(program), 1)), Step::Start(Engine::Mlx, PathBuf::from(program)));
+        // On Windows and Linux, the same plan starts llama-server.
+        let llama = Engine::Llama { models: PathBuf::from("/home/someone/.local/share/rusty-business/models") };
+        assert_eq!(
+            plan(&facts(false, false, false, Some(llama.clone()), Some("/usr/bin/llama-server"), 1)),
+            Step::Start(llama.clone(), PathBuf::from("/usr/bin/llama-server"))
+        );
+        assert_eq!(plan(&facts(false, false, false, Some(llama), Some("/usr/bin/llama-server"), 0)), Step::Cannot(Why::NoModel));
 
         // An engine that answers is left alone, whatever else is true.
-        assert_eq!(plan(&facts(true, false, true, Some(NAME), Some(program), 3)), Step::Nothing);
+        assert_eq!(plan(&facts(true, false, true, MLX, Some(program), 3)), Step::Nothing);
         assert_eq!(plan(&facts(true, false, true, None, None, 0)), Step::Nothing);
-        assert_eq!(plan(&facts(true, true, true, Some(NAME), Some(program), 3)), Step::Nothing);
+        assert_eq!(plan(&facts(true, true, true, MLX, Some(program), 3)), Step::Nothing);
 
         // One this app started is waited for, not started again.
-        assert_eq!(plan(&facts(false, true, false, Some(NAME), Some(program), 1)), Step::Wait);
-        assert_eq!(plan(&facts(false, true, true, Some(NAME), Some(program), 1)), Step::Wait);
+        assert_eq!(plan(&facts(false, true, false, MLX, Some(program), 1)), Step::Wait);
+        assert_eq!(plan(&facts(false, true, true, MLX, Some(program), 1)), Step::Wait);
 
         // Each thing that is missing stops the plan before anything starts.
         assert_eq!(plan(&facts(false, false, false, None, Some(program), 1)), Step::Cannot(Why::NoEngineForThisSystem));
-        assert_eq!(plan(&facts(false, false, true, Some(NAME), Some(program), 1)), Step::Cannot(Why::PortTaken));
-        assert_eq!(plan(&facts(false, false, false, Some(NAME), None, 1)), Step::Cannot(Why::NoProgram));
-        assert_eq!(plan(&facts(false, false, false, Some(NAME), Some(program), 0)), Step::Cannot(Why::NoModel));
+        assert_eq!(plan(&facts(false, false, true, MLX, Some(program), 1)), Step::Cannot(Why::PortTaken));
+        assert_eq!(plan(&facts(false, false, false, MLX, None, 1)), Step::Cannot(Why::NoProgram));
+        assert_eq!(plan(&facts(false, false, false, MLX, Some(program), 0)), Step::Cannot(Why::NoModel));
     }
 
     #[test]
-    fn windows_and_linux_say_they_have_no_engine_yet() {
+    fn windows_and_linux_start_llama_server() {
         // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
         // from read me and install and go, one click ready." The roadmap, of
         // the .exe: "Until Windows has an engine, the window opens and says
         // so." Brad, 2026-11-17, to a request for Linux downloads: "I got
-        // you in coming build". Linux says the same. The Mac's tests check
-        // the words both get.
-        assert_eq!(no_engine_on("windows"), "The app has no engine for Windows yet, so it cannot start one.");
-        assert_eq!(no_engine_on("linux"), "The app has no engine for Linux yet, so it cannot start one.");
-        assert_eq!(no_engine_on("freebsd"), "The app cannot start an engine on this system yet.");
-        if !cfg!(target_os = "macos") {
-            assert_eq!(program_name(), None, "nothing is looked for, so the plan says why");
+        // you in coming build". Then, 2026-11-19: "add an engine to linux
+        // and windows distro's". Both now get llama-server, serving the
+        // app's own models folder. The Mac's tests check what each gets.
+        let models = PathBuf::from("/somewhere/rusty-business/models");
+        assert_eq!(Engine::on("macos", Some(models.clone())), Some(Engine::Mlx));
+        assert_eq!(Engine::on("macos", None), Some(Engine::Mlx), "a Mac's models are in the Hugging Face cache");
+        assert_eq!(Engine::on("windows", Some(models.clone())), Some(Engine::Llama { models: models.clone() }));
+        assert_eq!(Engine::on("linux", Some(models.clone())), Some(Engine::Llama { models: models.clone() }));
+        // With no models folder, there is nothing to serve, and the window says why.
+        assert_eq!(Engine::on("windows", None), None);
+        assert_eq!(Engine::on("linux", None), None);
+        assert_eq!(Engine::on("freebsd", Some(models.clone())), None);
+        assert_eq!(sentence(Why::NoEngineForThisSystem, NAME, 8081), "The app cannot start an engine on this system yet.");
+
+        let llama = Engine::Llama { models };
+        assert_eq!(Engine::Mlx.program_on("macos"), "mlx_lm.server");
+        assert_eq!(llama.program_on("windows"), "llama-server.exe");
+        assert_eq!(llama.program_on("linux"), "llama-server");
+        assert!(code().contains("fn here() -> Option<Engine> {\n        Engine::on(std::env::consts::OS, crate::models::models_folder())"));
+    }
+
+    #[test]
+    fn llama_server_is_started_at_its_own_address_with_the_apps_models_folder() {
+        // Brad, 2026-11-19: "add an engine to linux and windows distro's".
+        // The engine's own chat page stays off, it downloads nothing, and it
+        // loads one model at a time, with no model named, so nothing is
+        // loaded until a chat asks for one.
+        let models = Path::new("/home/someone/.local/share/rusty-business/models");
+        let program = Path::new("/usr/bin/llama-server");
+        let command = llama_command(program, &Address { host: "127.0.0.1".to_string(), port: 8081 }, models, Vec::new());
+        assert_eq!(command.get_program(), program);
+        let said = told(&command);
+        assert_eq!(
+            said,
+            ["--host", "127.0.0.1", "--port", "8081", "--models-dir", models.to_str().unwrap(), "--models-max", "1", "--offline", "--no-webui"]
+        );
+        // Never told to log what is typed, or more than it logs by itself,
+        // and never told how much a model takes in at once.
+        for never in ["-m", "--model", "-hf", "-v", "--verbose", "--log-verbose", "-lv", "--log-verbosity", "--log-prompts-dir", "-c", "--ctx-size", "--webui"] {
+            assert!(!said.contains(&never), "{never}");
         }
+        assert_eq!(command.get_envs().count(), 0, "nothing is set, with no settings of its own to take away");
+    }
+
+    #[test]
+    fn llama_server_takes_none_of_its_settings_from_the_apps_own() {
+        // A variable such as LLAMA_ARG_HOST would move it off this computer,
+        // and LLAMA_ARG_LOG_PROMPTS_DIR would have it keep what is typed.
+        // Each model it loads gets the same variables, so none is passed on.
+        let names = ["PATH", "LLAMA_ARG_HOST", "llama_arg_log_prompts_dir", "LLAMA_CACHE", "GGML_VK_VISIBLE_DEVICES", "HOME", "NOT_LLAMA_ARG"].map(OsString::from);
+        let command = llama_command(Path::new("/usr/bin/llama-server"), &Address { host: "::1".to_string(), port: 9000 }, Path::new("/models"), names);
+        let mut set: Vec<(&str, Option<&std::ffi::OsStr>)> = command.get_envs().map(|(name, value)| (name.to_str().unwrap(), value)).collect();
+        set.sort();
+        assert_eq!(set, [("LLAMA_ARG_HOST", None), ("LLAMA_CACHE", None), ("llama_arg_log_prompts_dir", None)]);
+        // The names are the app's own, as it runs.
+        assert!(code().contains("llama_command(program, address, models, std::env::vars_os().map(|(name, _)| name))"));
+    }
+
+    #[test]
+    fn on_windows_the_engine_has_no_window_and_stops_with_what_it_started() {
+        // These run on Windows only, so the Mac's tests read them. The
+        // engine's console window would open beside the app's; and stopping
+        // llama-server alone would leave the program it starts for a model.
+        let code = code();
+        assert!(code.contains("command.creation_flags(0x0800_0000);"), "CREATE_NO_WINDOW");
+        assert!(code.contains("fn apart(command: &mut Command) -> &mut Command {"));
+        assert!(code.contains("apart(&mut engine.command(program, address))"));
+        assert!(code.contains(".join(\"System32\").join(\"taskkill.exe\")"));
+        assert!(code.contains(".arg(\"/PID\").arg(child.id().to_string()).arg(\"/T\").arg(\"/F\")"));
+        assert!(code.contains("#[cfg(windows)]\n    end_tree(child);"));
     }
 
     #[test]
@@ -535,7 +797,8 @@ mod tests {
         assert_eq!(sentence(Why::NoProgram, NAME, 8081), "The app looked for mlx_lm.server on this computer and did not find it.");
         assert!(sentence(Why::PortTaken, NAME, 8081).contains("port 8081"));
         assert!(NOT_YET.ends_with('.'));
-        assert_eq!(sentence(Why::NoEngineForThisSystem, NAME, 8081), no_engine_on(std::env::consts::OS));
+        assert_eq!(sentence(Why::NoEngineForThisSystem, NAME, 8081), NO_ENGINE);
+        assert_eq!(sentence(Why::NoProgram, "llama-server.exe", 8081), "The app looked for llama-server.exe on this computer and did not find it.");
     }
 
     #[test]
@@ -601,7 +864,7 @@ mod tests {
         // A folder on PATH that is not a full path is passed over: the app
         // does not start where a terminal starts.
         assert_eq!(
-            places(Some("/usr/bin:tools/bin::/opt/tools/bin:."), Some(&home)),
+            places_on("macos", Some("/usr/bin:tools/bin::/opt/tools/bin:."), Some(&home)),
             [
                 PathBuf::from("/usr/bin"),
                 PathBuf::from("/opt/tools/bin"),
@@ -613,7 +876,30 @@ mod tests {
                 pip("3.9"),
             ]
         );
-        assert_eq!(places(None, None), [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
+        assert_eq!(places_on("macos", None, None), [PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")]);
+        assert_eq!(places(None, None), places_on(std::env::consts::OS, None, None));
+    }
+
+    #[test]
+    fn llama_server_is_looked_for_where_each_system_keeps_programs() {
+        let home = scratch().join("home");
+        let on_path = std::env::temp_dir().join("llama").join("bin");
+        let path = std::env::join_paths([on_path.clone(), PathBuf::from("relative")]).unwrap();
+        let path = path.to_str();
+        // Linux: PATH, then the user's own folder, Homebrew's, and the system's.
+        assert_eq!(
+            places_on("linux", path, Some(&home)),
+            [
+                on_path.clone(),
+                home.join(".local").join("bin"),
+                PathBuf::from("/home/linuxbrew/.linuxbrew/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/usr/bin"),
+            ]
+        );
+        // Windows: PATH alone, and none of the Mac's or Linux's folders.
+        assert_eq!(places_on("windows", path, Some(&home)), [on_path]);
+        assert_eq!(places_on("windows", None, Some(&home)), Vec::<PathBuf>::new());
     }
 
     #[test]
@@ -654,8 +940,12 @@ mod tests {
         /// told), notes whether it was told to stay offline, and then does
         /// `then`.
         fn program_in(folder: &Path, then: &str) -> PathBuf {
+            program_named(folder, NAME, then)
+        }
+
+        fn program_named(folder: &Path, name: &str, then: &str) -> PathBuf {
             fs::create_dir_all(folder).unwrap();
-            let file = folder.join(NAME);
+            let file = folder.join(name);
             let script = format!("#!/bin/sh\necho \"$$ $*\" >> \"$0.runs\"\necho \"$HF_HUB_OFFLINE\" > \"$0.offline\"\n{then}\n");
             fs::write(&file, script).unwrap();
             fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
@@ -669,7 +959,7 @@ mod tests {
         }
 
         fn have(program: &Path, models: usize) -> Found {
-            Found { name: Some(NAME), program: Some(program.to_path_buf()), models }
+            Found { engine: MLX, program: Some(program.to_path_buf()), models }
         }
 
         /// Something a test started that is not the app's, standing for
@@ -697,6 +987,42 @@ mod tests {
 
         fn alive(process: &str) -> bool {
             Command::new("ps").args(["-p", process]).stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap().success()
+        }
+
+        /// True once `process` has gone, within a few seconds. A program
+        /// whose parent has stopped is cleared away by the system, a moment
+        /// later.
+        fn gone_soon(process: &str) -> bool {
+            let until = Instant::now() + Duration::from_secs(5);
+            while alive(process) {
+                if Instant::now() >= until {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            true
+        }
+
+        /// What the stand-in wrote to the file beside it named `.{what}`,
+        /// once it has.
+        fn noted(program: &Path, what: &str) -> String {
+            let file = PathBuf::from(format!("{}.{what}", program.display()));
+            let until = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Ok(said) = fs::read_to_string(&file)
+                    && said.ends_with('\n')
+                {
+                    return said.trim().to_string();
+                }
+                assert!(Instant::now() < until, "nothing in {}", file.display());
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        /// A stand-in for an engine that starts a second program, the way
+        /// llama-server starts one for each model, then does `then`.
+        fn parent_in(folder: &Path, then: &str) -> PathBuf {
+            program_in(folder, &format!("{then}\nsleep 600 &\necho $! > \"$0.kid\"\nwait"))
         }
 
         /// A port on this computer that nothing is using.
@@ -739,7 +1065,7 @@ mod tests {
             let program = program_in(&folder, "exec sleep 600");
             let free = free_port();
             let cases: [(&str, u16, Found, String); 4] = [
-                ("no engine is chosen for this system", free, Found { name: None, ..have(&program, 1) }, sentence(Why::NoEngineForThisSystem, NAME, free)),
+                ("no engine is chosen for this system", free, Found { engine: None, ..have(&program, 1) }, sentence(Why::NoEngineForThisSystem, NAME, free)),
                 ("the port is taken", taken_port, have(&program, 1), sentence(Why::PortTaken, NAME, taken_port)),
                 ("the program is not on this computer", free, Found { program: None, ..have(&program, 1) }, sentence(Why::NoProgram, NAME, free)),
                 ("no model is on the disk", free, have(&program, 0), sentence(Why::NoModel, NAME, free)),
@@ -840,7 +1166,7 @@ mod tests {
             let up = StartReport { answering: true, started: false, reason: None };
             assert_eq!(block_on(starter.bring_up(&base(port), &have(&program, 1), SHORT)), up);
             // With nothing to start one with, an engine that answers is still an engine that answers.
-            assert_eq!(block_on(starter.bring_up(&base(port), &Found { name: None, program: None, models: 0 }, SHORT)), up);
+            assert_eq!(block_on(starter.bring_up(&base(port), &Found { engine: None, program: None, models: 0 }, SHORT)), up);
             assert_eq!(runs(&program), Vec::<String>::new());
             assert!(!folder.join("engine.log").exists());
 
@@ -888,6 +1214,75 @@ mod tests {
             // Stopping again finds nothing to stop.
             starter.stop();
             assert!(bystander.running());
+        }
+
+        #[test]
+        fn llama_server_is_told_where_to_listen_and_which_folder_to_serve() {
+            // Brad, 2026-11-19: "add an engine to linux and windows distro's".
+            let _turn = my_turn();
+            let folder = scratch();
+            let models = folder.join("models");
+            let program = program_named(&folder, "llama-server", "exec sleep 600");
+            let starter = Starter::new(folder.join("engine.log"));
+            let port = free_port();
+            let found = Found { engine: Some(Engine::Llama { models: models.clone() }), program: Some(program.clone()), models: 1 };
+            assert!(block_on(starter.bring_up(&base(port), &found, SHORT)).started);
+
+            let run = runs(&program).remove(0);
+            let (_, told) = run.split_once(' ').unwrap();
+            assert_eq!(told, format!("--host 127.0.0.1 --port {port} --models-dir {} --models-max 1 --offline --no-webui", models.display()));
+        }
+
+        #[test]
+        fn what_the_engine_started_stops_with_it() {
+            // llama-server starts a second program for each model it loads.
+            // When the app quits, that one stops too.
+            let _turn = my_turn();
+            let mut bystander = Bystander::start();
+            let folder = scratch();
+            let program = parent_in(&folder, "");
+            let starter = Starter::new(folder.join("engine.log"));
+            assert!(block_on(starter.bring_up(&base(free_port()), &have(&program, 1), SHORT)).started);
+            let kid = noted(&program, "kid");
+            assert!(alive(&kid));
+
+            starter.stop();
+            assert!(gone_soon(&kid), "what the engine started is stopped");
+            assert!(bystander.running(), "nothing else is");
+        }
+
+        #[test]
+        fn the_engine_is_asked_to_stop_before_it_is_made_to() {
+            // Asked, llama-server stops each model's program itself, and
+            // mlx_lm.server finishes what it is doing.
+            let _turn = my_turn();
+            let folder = scratch();
+            let program = parent_in(&folder, "trap 'echo asked > \"$0.asked\"; exit 0' TERM");
+            let starter = Starter::new(folder.join("engine.log"));
+            assert!(block_on(starter.bring_up(&base(free_port()), &have(&program, 1), SHORT)).started);
+            let kid = noted(&program, "kid");
+
+            starter.stop();
+            assert_eq!(noted(&program, "asked"), "asked");
+            assert!(gone_soon(&kid));
+        }
+
+        #[test]
+        fn an_engine_that_will_not_stop_when_asked_is_made_to() {
+            let _turn = my_turn();
+            let folder = scratch();
+            let program = parent_in(&folder, "trap '' TERM");
+            let starter = Starter::new(folder.join("engine.log"));
+            assert!(block_on(starter.bring_up(&base(free_port()), &have(&program, 1), SHORT)).started);
+            let run = runs(&program).remove(0);
+            let (process, _) = run.split_once(' ').unwrap();
+            let kid = noted(&program, "kid");
+
+            let asked = Instant::now();
+            starter.stop_within(SHORT);
+            assert!(asked.elapsed() >= SHORT && asked.elapsed() < GRACE, "{:?}", asked.elapsed());
+            assert!(!alive(process) && gone_soon(&kid));
+            assert!(!starter.running());
         }
 
         #[test]
