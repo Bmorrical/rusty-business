@@ -1,4 +1,5 @@
 mod attachments;
+mod deactivated;
 mod downloads;
 mod engine;
 mod gate;
@@ -9,6 +10,7 @@ mod projects;
 mod sessions;
 mod stack;
 mod starter;
+mod uninstall;
 mod update;
 mod workspace;
 
@@ -53,6 +55,8 @@ pub fn run() {
             app.manage(makers::Makers::new(data.join("makers"), &models::on_disk()));
             // Engines outside this computer: the path to each key, never the key.
             app.manage(outside::Outside::new(data.join("outside.json")));
+            // The models switched off: on this computer, or outside it.
+            app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -91,6 +95,10 @@ pub fn run() {
             outside::add_outside,
             outside::refresh_outside,
             outside::remove_outside,
+            deactivated::deactivated_models,
+            deactivated::set_model_active,
+            uninstall::uninstall_model,
+            uninstall::uninstall_place,
         ])
         .build(context)
         .expect("error while building tauri application");

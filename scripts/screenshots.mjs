@@ -139,6 +139,7 @@ export function makersStatus(report, picked) {
         name: offer.name,
         license: offer.license,
         onDisk: report.onDisk.some((model) => model.name === offer.name),
+        ids: report.onDisk.filter((model) => model.name === offer.name).map((model) => model.id),
         offer,
       })),
   }));
@@ -199,14 +200,15 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the eight
+ * The script that stands in for Rust inside the page. It answers the ten
  * calls the pictures need and refuses the rest, a download and a change of
  * makers among them. Grok is not added. Asked to start the engine, it starts
  * nothing and gives the reason it was handed, by default that the engine's
  * program was not found. Asked to start the stack, it starts nothing and says
  * the stack is running. The outbound gate is off, as it is on a first run.
  * The makers are picked as the app picks them before the person does, and
- * the engine's report holds only their models.
+ * the engine's report holds only their models. No model is switched off, and
+ * Uninstall would move one to the Trash, as on a Mac.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
@@ -225,6 +227,8 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
+      deactivated_models: () => [],
+      uninstall_place: () => ({ trash: 'the Trash', sharedCache: true }),
       outside_status: () => outside,
       list_sessions: () =>
         sessions.map((entry) => ({

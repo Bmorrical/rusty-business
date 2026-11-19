@@ -111,6 +111,11 @@ impl Makers {
                         name: name.to_string(),
                         license: license.to_string(),
                         on_disk: on_disk.iter().any(|model| model.name == name),
+                        ids: on_disk
+                            .iter()
+                            .filter(|model| model.name == name)
+                            .map(|model| model.id.clone())
+                            .collect(),
                         offer: offers.iter().find(|offer| offer.name == name).cloned(),
                     })
                     .collect(),
@@ -128,7 +133,8 @@ pub struct Maker {
     pub models: Vec<Listed>,
 }
 
-/// One of a maker's models: its license, whether it is on this computer, and
+/// One of a maker's models: its license, whether it is on this computer, the
+/// ids it has there (the switch and Uninstall in Settings act on them), and
 /// its download, when the app can download it here.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +142,7 @@ pub struct Listed {
     pub name: String,
     pub license: String,
     pub on_disk: bool,
+    pub ids: Vec<String>,
     pub offer: Option<Offer>,
 }
 
@@ -306,7 +313,10 @@ mod tests {
         let place = folder("status");
         let makers = Makers::new(place.join("makers"), &[]);
         makers.set(&picked(&["Microsoft", "Google"])).unwrap();
-        let on_disk = [model("Phi-4", "Microsoft")];
+        // Two copies of one model: the row acts on both.
+        let mut eight_bit = model("Phi-4", "Microsoft");
+        eight_bit.id = "someone/Phi-4-8bit".to_string();
+        let on_disk = [model("Phi-4", "Microsoft"), eight_bit];
         let gemma = Offer {
             id: "someone/gemma".to_string(),
             name: "Gemma 4 26B".to_string(),
@@ -339,6 +349,7 @@ mod tests {
             ),
             ("Phi-4", "MIT", true, &None)
         );
+        assert_eq!(microsoft.ids, ["someone/Phi-4", "someone/Phi-4-8bit"]);
         let google = &status[3].models[0];
         assert_eq!(
             (
@@ -349,9 +360,10 @@ mod tests {
             ),
             ("Gemma 4 26B", "Apache 2.0", false, &Some(gemma))
         );
+        assert!(google.ids.is_empty());
         assert_eq!(
             serde_json::to_value(&status[4]).unwrap(),
-            serde_json::json!({ "name": "Meta", "picked": false, "models": [{ "name": "Llama 3.1 8B", "license": "Llama 3.1 Community License", "onDisk": false, "offer": null }] })
+            serde_json::json!({ "name": "Meta", "picked": false, "models": [{ "name": "Llama 3.1 8B", "license": "Llama 3.1 Community License", "onDisk": false, "ids": [], "offer": null }] })
         );
         fs::remove_dir_all(&place).unwrap();
     }

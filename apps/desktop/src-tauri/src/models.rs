@@ -7,7 +7,8 @@
 //! engine is running.
 //!
 //! Three rules live here:
-//! - it only reads: nothing in the folder is written, moved, or removed;
+//! - it only reads: nothing in the folder is written, moved, or removed
+//!   (Uninstall, in `uninstall.rs`, moves a model to the Trash);
 //! - the app keeps no list of its own: the disk is asked every time;
 //! - only models on the app's list are reported, and only when whole: on a
 //!   Mac, the files the engine asks for and every weights file the model
@@ -314,7 +315,7 @@ fn is_file(path: &Path) -> bool {
 
 /// One plain name, with nothing in it that steps out of the folder it is
 /// joined to.
-fn plain_name(name: &str) -> bool {
+pub(crate) fn plain_name(name: &str) -> bool {
     let mut parts = Path::new(name).components();
     matches!(
         (parts.next(), parts.next()),
