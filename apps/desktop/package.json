@@ -15,7 +15,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node --test src/chat.test.js"
+    "test": "node --test \"src/*.test.js\""
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",

@@ -42,14 +42,19 @@ pub fn base_url() -> Result<String, String> {
 
 /// Accepts only a plain-http address on this computer.
 pub fn checked_base_url(raw: &str) -> Result<String, String> {
-    let refusal = || format!("The engine address must be on this computer (for example {DEFAULT_BASE_URL}).");
+    let refusal =
+        || format!("The engine address must be on this computer (for example {DEFAULT_BASE_URL}).");
     let url = reqwest::Url::parse(raw.trim()).map_err(|_| refusal())?;
     if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
         return Err(refusal());
     }
     let host = url.host_str().unwrap_or_default();
     let bare = host.trim_start_matches('[').trim_end_matches(']');
-    let local = host == "localhost" || bare.parse::<IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false);
+    let local = host == "localhost"
+        || bare
+            .parse::<IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false);
     if !local {
         return Err(refusal());
     }
@@ -109,11 +114,41 @@ struct CatalogEntry {
 /// and never accepted. The first one the engine has is the default. The
 /// person picks which makers' models they see (`makers.rs`).
 const CATALOG: &[CatalogEntry] = &[
-    CatalogEntry { needle: "phi-4", name: "Phi-4", maker: "Microsoft", license: "MIT", context: 16_384 },
-    CatalogEntry { needle: "gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI", license: "Apache 2.0", context: 131_072 },
-    CatalogEntry { needle: "nemotron-3.5-lightning", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", license: "OpenMDW 1.1", context: 262_144 },
-    CatalogEntry { needle: "gemma-4-26b-a4b", name: "Gemma 4 26B", maker: "Google", license: "Apache 2.0", context: 262_144 },
-    CatalogEntry { needle: "llama-3.1-8b-instruct", name: "Llama 3.1 8B", maker: "Meta", license: "Llama 3.1 Community License", context: 131_072 },
+    CatalogEntry {
+        needle: "phi-4",
+        name: "Phi-4",
+        maker: "Microsoft",
+        license: "MIT",
+        context: 16_384,
+    },
+    CatalogEntry {
+        needle: "gpt-oss-20b",
+        name: "gpt-oss 20B",
+        maker: "OpenAI",
+        license: "Apache 2.0",
+        context: 131_072,
+    },
+    CatalogEntry {
+        needle: "nemotron-3.5-lightning",
+        name: "Nemotron 3.5 Lightning",
+        maker: "NVIDIA",
+        license: "OpenMDW 1.1",
+        context: 262_144,
+    },
+    CatalogEntry {
+        needle: "gemma-4-26b-a4b",
+        name: "Gemma 4 26B",
+        maker: "Google",
+        license: "Apache 2.0",
+        context: 262_144,
+    },
+    CatalogEntry {
+        needle: "llama-3.1-8b-instruct",
+        name: "Llama 3.1 8B",
+        maker: "Meta",
+        license: "Llama 3.1 Community License",
+        context: 131_072,
+    },
 ];
 
 /// The makers on the list, in the list's order, each once.
@@ -129,12 +164,19 @@ pub fn makers() -> Vec<&'static str> {
 
 /// A maker's models on the list, each with its license.
 pub fn models_by(maker: &str) -> Vec<(&'static str, &'static str)> {
-    CATALOG.iter().filter(|entry| entry.maker == maker).map(|entry| (entry.name, entry.license)).collect()
+    CATALOG
+        .iter()
+        .filter(|entry| entry.maker == maker)
+        .map(|entry| (entry.name, entry.license))
+        .collect()
 }
 
 /// The license of a model on the list, by its name.
 pub fn license_of(name: &str) -> Option<&'static str> {
-    CATALOG.iter().find(|entry| entry.name == name).map(|entry| entry.license)
+    CATALOG
+        .iter()
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.license)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -156,7 +198,9 @@ pub fn allowed_models(ids: &[String]) -> Vec<ModelInfo> {
     let mut found = Vec::new();
     for entry in CATALOG {
         for id in ids {
-            if id.to_lowercase().contains(entry.needle) && !found.iter().any(|model: &ModelInfo| &model.id == id) {
+            if id.to_lowercase().contains(entry.needle)
+                && !found.iter().any(|model: &ModelInfo| &model.id == id)
+            {
                 found.push(ModelInfo {
                     id: id.clone(),
                     name: entry.name.to_string(),
@@ -205,7 +249,11 @@ struct ModelRow {
 /// Where the engine lists its models. With `reload`, `llama-server` reads its
 /// models folder again first, so a model just downloaded is listed.
 fn models_url(base: &str, reload: bool) -> String {
-    if reload { format!("{base}/models?reload=1") } else { format!("{base}/models") }
+    if reload {
+        format!("{base}/models?reload=1")
+    } else {
+        format!("{base}/models")
+    }
 }
 
 /// Asks `llama-server` to read its models folder again, after a download.
@@ -213,7 +261,11 @@ fn models_url(base: &str, reload: bool) -> String {
 /// when it starts.
 pub(crate) async fn reload_models(base: &str) {
     if let Ok(client) = client() {
-        let _ = client.get(models_url(base, true)).timeout(Duration::from_secs(30)).send().await;
+        let _ = client
+            .get(models_url(base, true))
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await;
     }
 }
 
@@ -225,7 +277,10 @@ pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
         .await
         .map_err(|_| "The engine is not answering.".to_string())?;
     if !response.status().is_success() {
-        return Err(format!("The engine answered {}.", response.status().as_u16()));
+        return Err(format!(
+            "The engine answered {}.",
+            response.status().as_u16()
+        ));
     }
     let list: ModelList = response
         .json()
@@ -257,7 +312,10 @@ fn first_status() -> EngineStatus {
 fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
     let served = status.models.clone();
     makers.keep_picked(&mut status.models, |model| &model.maker);
-    status.set_aside = served.into_iter().filter(|model| !status.models.contains(model)).collect();
+    status.set_aside = served
+        .into_iter()
+        .filter(|model| !status.models.contains(model))
+        .collect();
     makers.keep_picked(&mut status.on_disk, |model| &model.maker);
     makers.keep_picked(&mut status.offers, |offer| &offer.maker);
     status
@@ -367,9 +425,15 @@ fn split_think_tags(raw: &str) -> Split {
     }
     let trimmed = raw.trim_start();
     if let Some(thinking) = trimmed.strip_prefix(THINK_OPEN) {
-        return Split { thinking: thinking.trim_start().to_string(), answer: String::new() };
+        return Split {
+            thinking: thinking.trim_start().to_string(),
+            answer: String::new(),
+        };
     }
-    Split { thinking: String::new(), answer: trimmed.to_string() }
+    Split {
+        thinking: String::new(),
+        answer: trimmed.to_string(),
+    }
 }
 
 /// Splits everything a model has written so far. `done` means no more is
@@ -433,16 +497,26 @@ impl ReplyStream {
             };
         }
         let mut events = Vec::new();
-        match (now.thinking.strip_prefix(self.sent.thinking.as_str()), now.answer.strip_prefix(self.sent.answer.as_str())) {
+        match (
+            now.thinking.strip_prefix(self.sent.thinking.as_str()),
+            now.answer.strip_prefix(self.sent.answer.as_str()),
+        ) {
             (Some(more_thinking), Some(more_answer)) => {
                 if !more_thinking.is_empty() {
-                    events.push(ChatEvent::Thinking { text: more_thinking.to_string() });
+                    events.push(ChatEvent::Thinking {
+                        text: more_thinking.to_string(),
+                    });
                 }
                 if !more_answer.is_empty() {
-                    events.push(ChatEvent::Answer { text: more_answer.to_string() });
+                    events.push(ChatEvent::Answer {
+                        text: more_answer.to_string(),
+                    });
                 }
             }
-            _ => events.push(ChatEvent::Reset { thinking: now.thinking.clone(), answer: now.answer.clone() }),
+            _ => events.push(ChatEvent::Reset {
+                thinking: now.thinking.clone(),
+                answer: now.answer.clone(),
+            }),
         }
         self.sent = now;
         events
@@ -592,17 +666,35 @@ pub async fn run_chat(
         "stream_options": { "include_usage": true },
         "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
     });
-    let sending = client()?.post(format!("{base}/chat/completions")).json(&body).send();
+    let sending = client()?
+        .post(format!("{base}/chat/completions"))
+        .json(&body)
+        .send();
     let response = tokio::select! {
         _ = cancel.changed() => return Ok(ChatDone { stopped: true, ..ChatDone::default() }),
         response = sending => response.map_err(|_| "The engine is not answering.".to_string())?,
     };
     if !response.status().is_success() {
         let status = response.status().as_u16();
-        let detail: String = response.text().await.unwrap_or_default().chars().take(300).collect();
-        return Err(format!("The engine answered {status}. {detail}").trim().to_string());
+        let detail: String = response
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect();
+        return Err(format!("The engine answered {status}. {detail}")
+            .trim()
+            .to_string());
     }
-    read_reply(response.bytes_stream(), cancel, std::future::pending(), emit, "The engine stopped answering part way through.").await
+    read_reply(
+        response.bytes_stream(),
+        cancel,
+        std::future::pending(),
+        emit,
+        "The engine stopped answering part way through.",
+    )
+    .await
 }
 
 /// Reads a streamed answer into thinking and answer pieces, for the engine on
@@ -700,7 +792,9 @@ pub(crate) async fn read_stream<B: AsRef<[u8]>, E>(
     let split = reply.split();
     done.thinking = split.thinking.trim().to_string();
     done.answer = split.answer.trim().to_string();
-    done.seconds = first_piece.map(|first| last_piece.duration_since(first).as_secs_f64()).unwrap_or(0.0);
+    done.seconds = first_piece
+        .map(|first| last_piece.duration_since(first).as_secs_f64())
+        .unwrap_or(0.0);
     Ok(done)
 }
 
@@ -714,7 +808,11 @@ pub async fn chat_stream(
     on_event: Channel<ChatEvent>,
 ) -> Result<ChatDone, String> {
     let (stop, mut stopped) = watch::channel(false);
-    chats.stops.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
+    chats
+        .stops
+        .lock()
+        .map_err(|_| "Could not start the chat.".to_string())?
+        .insert(chat_id.clone(), stop);
     let result = if outside::is_outside(&request.model) {
         // An engine outside this computer waits for no turn here.
         outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
@@ -724,7 +822,10 @@ pub async fn chat_stream(
     } else {
         // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
         match wait_for_turn(&chats.turn, &mut stopped).await {
-            None => Ok(ChatDone { stopped: true, ..ChatDone::default() }),
+            None => Ok(ChatDone {
+                stopped: true,
+                ..ChatDone::default()
+            }),
             Some(_turn) => {
                 run_chat(&request, &mut stopped, |event| {
                     let _ = on_event.send(event);
@@ -741,10 +842,10 @@ pub async fn chat_stream(
 
 #[tauri::command]
 pub fn stop_chat(chats: tauri::State<'_, Chats>, chat_id: String) {
-    if let Ok(map) = chats.stops.lock() {
-        if let Some(stop) = map.get(&chat_id) {
-            let _ = stop.send(true);
-        }
+    if let Ok(map) = chats.stops.lock()
+        && let Some(stop) = map.get(&chat_id)
+    {
+        let _ = stop.send(true);
     }
 }
 
@@ -784,7 +885,10 @@ mod tests {
     fn channel_markers_split_thinking_from_the_answer() {
         let split = split_reply(GPT_OSS_REPLY, true);
         assert_eq!(split.answer, "2\u{202f}+\u{202f}2 equals 4.");
-        assert_eq!(split.thinking, "The user asks: \"What is 2+2?\" So answer: \"2+2 equals 4.\"");
+        assert_eq!(
+            split.thinking,
+            "The user asks: \"What is 2+2?\" So answer: \"2+2 equals 4.\""
+        );
     }
 
     #[test]
@@ -795,7 +899,10 @@ mod tests {
                 ChatEvent::Thinking { text } | ChatEvent::Answer { text } => text.clone(),
                 ChatEvent::Reset { thinking, answer } => format!("{thinking}{answer}"),
             };
-            assert!(!shown.contains("<|") && !shown.contains("|>"), "a marker reached the window: {shown:?}");
+            assert!(
+                !shown.contains("<|") && !shown.contains("|>"),
+                "a marker reached the window: {shown:?}"
+            );
         }
         assert_eq!(rebuilt(&events), split);
         assert_eq!(split.answer, "2\u{202f}+\u{202f}2 equals 4.");
@@ -803,16 +910,36 @@ mod tests {
 
     #[test]
     fn think_tags_split_thinking_from_the_answer() {
-        let (events, split) = replay("<think>\nAdd them.\n</think>\n\n4.".chars().map(String::from));
-        assert_eq!(split, Split { thinking: "Add them.".to_string(), answer: "4.".to_string() });
+        let (events, split) = replay(
+            "<think>\nAdd them.\n</think>\n\n4."
+                .chars()
+                .map(String::from),
+        );
+        assert_eq!(
+            split,
+            Split {
+                thinking: "Add them.".to_string(),
+                answer: "4.".to_string()
+            }
+        );
         assert_eq!(rebuilt(&events), split);
     }
 
     #[test]
     fn a_closing_think_tag_alone_corrects_what_was_shown() {
         let (events, split) = replay(["Add them.".to_string(), "</think>4.".to_string()]);
-        assert!(events.iter().any(|event| matches!(event, ChatEvent::Reset { .. })));
-        assert_eq!(split, Split { thinking: "Add them.".to_string(), answer: "4.".to_string() });
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ChatEvent::Reset { .. }))
+        );
+        assert_eq!(
+            split,
+            Split {
+                thinking: "Add them.".to_string(),
+                answer: "4.".to_string()
+            }
+        );
         assert_eq!(rebuilt(&events), split);
     }
 
@@ -823,7 +950,13 @@ mod tests {
         events.extend(reply.push_reasoning("them."));
         events.extend(reply.push_content("4."));
         events.extend(reply.finish());
-        assert_eq!(reply.split(), &Split { thinking: "Add them.".to_string(), answer: "4.".to_string() });
+        assert_eq!(
+            reply.split(),
+            &Split {
+                thinking: "Add them.".to_string(),
+                answer: "4.".to_string()
+            }
+        );
         assert_eq!(rebuilt(&events), *reply.split());
     }
 
@@ -854,10 +987,23 @@ mod tests {
         let makers: Vec<&str> = models.iter().map(|model| model.maker.as_str()).collect();
         assert_eq!(makers, ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
         let names: Vec<&str> = models.iter().map(|model| model.name.as_str()).collect();
-        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+        assert_eq!(
+            names,
+            [
+                "Phi-4",
+                "gpt-oss 20B",
+                "Nemotron 3.5 Lightning",
+                "Gemma 4 26B",
+                "Llama 3.1 8B"
+            ]
+        );
         // Only the model named on the list: not an older Gemma, and no model
         // from a maker that is not on it.
-        assert!(models.iter().all(|model| !model.id.contains("gemma-3") && !model.id.contains("Qwen")));
+        assert!(
+            models
+                .iter()
+                .all(|model| !model.id.contains("gemma-3") && !model.id.contains("Qwen"))
+        );
     }
 
     // Brad, 2026-11-17: "user can pick google, gemini, meta from the app if
@@ -865,12 +1011,21 @@ mod tests {
     // hosted one comes with the outside engines.
     #[test]
     fn the_list_names_each_maker_once_with_each_models_license() {
-        assert_eq!(makers(), ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
+        assert_eq!(
+            makers(),
+            ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]
+        );
         assert_eq!(models_by("Microsoft"), [("Phi-4", "MIT")]);
         assert_eq!(models_by("OpenAI"), [("gpt-oss 20B", "Apache 2.0")]);
-        assert_eq!(models_by("NVIDIA"), [("Nemotron 3.5 Lightning", "OpenMDW 1.1")]);
+        assert_eq!(
+            models_by("NVIDIA"),
+            [("Nemotron 3.5 Lightning", "OpenMDW 1.1")]
+        );
         assert_eq!(models_by("Google"), [("Gemma 4 26B", "Apache 2.0")]);
-        assert_eq!(models_by("Meta"), [("Llama 3.1 8B", "Llama 3.1 Community License")]);
+        assert_eq!(
+            models_by("Meta"),
+            [("Llama 3.1 8B", "Llama 3.1 Community License")]
+        );
         assert_eq!(models_by("Acme"), []);
         assert_eq!(license_of("Gemma 4 26B"), Some("Apache 2.0"));
         assert_eq!(license_of("Gemma 3 27B"), None);
@@ -880,7 +1035,10 @@ mod tests {
     fn a_model_off_the_list_is_refused() {
         let request = ChatRequest {
             model: "mlx-community/gemma-3-27b-it-qat-4bit".to_string(),
-            messages: vec![ChatMessage { role: "user".to_string(), content: "hi".to_string() }],
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
             max_tokens: None,
         };
         assert!(checked_request(&request).is_err());
@@ -899,7 +1057,10 @@ mod tests {
         assert_eq!(start_hint_on("windows"), "");
         assert_eq!(start_hint_on("linux"), "");
         assert_eq!(start_hint_on("macos"), "mlx_lm.server --port 8080");
-        assert_eq!(start_hint_on("freebsd"), "Start an OpenAI-style server on port 8080 of this computer.");
+        assert_eq!(
+            start_hint_on("freebsd"),
+            "Start an OpenAI-style server on port 8080 of this computer."
+        );
         assert_eq!(engine_name_on("macos"), "MLX");
         assert_eq!(engine_name_on("windows"), "llama.cpp");
         assert_eq!(engine_name_on("linux"), "llama.cpp");
@@ -913,7 +1074,10 @@ mod tests {
     fn llama_server_is_asked_to_read_its_folder_again_only_when_told_to() {
         let base = "http://127.0.0.1:8080/v1";
         assert_eq!(models_url(base, false), "http://127.0.0.1:8080/v1/models");
-        assert_eq!(models_url(base, true), "http://127.0.0.1:8080/v1/models?reload=1");
+        assert_eq!(
+            models_url(base, true),
+            "http://127.0.0.1:8080/v1/models?reload=1"
+        );
     }
 
     #[test]
@@ -922,18 +1086,35 @@ mod tests {
         assert_eq!(offered, crate::downloads::offers());
         // Every system, now that Windows and Linux have GGUF models.
         let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
-        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+        assert_eq!(
+            names,
+            [
+                "Phi-4",
+                "gpt-oss 20B",
+                "Nemotron 3.5 Lightning",
+                "Gemma 4 26B",
+                "Llama 3.1 8B"
+            ]
+        );
     }
 
     #[test]
     fn only_the_picked_makers_models_are_reported() {
         // Brad, 2026-11-17: "user can pick google, gemini, meta from the app
         // if they want those instead."
-        let folder = std::env::temp_dir().join(format!("rusty-engine-makers-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("rusty-engine-makers-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         let makers = Makers::new(folder.join("makers"), &[]);
-        makers.set(&["Google".to_string(), "Meta".to_string()]).unwrap();
-        let model = |name: &str, maker: &str| ModelInfo { id: format!("someone/{name}"), name: name.to_string(), maker: maker.to_string(), context: 8 };
+        makers
+            .set(&["Google".to_string(), "Meta".to_string()])
+            .unwrap();
+        let model = |name: &str, maker: &str| ModelInfo {
+            id: format!("someone/{name}"),
+            name: name.to_string(),
+            maker: maker.to_string(),
+            context: 8,
+        };
         let offer = |name: &str, maker: &str| crate::downloads::Offer {
             id: format!("someone/{name}"),
             name: name.to_string(),
@@ -945,21 +1126,45 @@ mod tests {
         status.models = vec![model("Phi-4", "Microsoft"), model("Gemma 4 26B", "Google")];
         status.hidden = 2;
         status.on_disk = vec![model("Phi-4", "Microsoft"), model("Llama 3.1 8B", "Meta")];
-        status.offers = vec![offer("Gemma 4 26B", "Google"), offer("gpt-oss 20B", "OpenAI"), offer("Llama 3.1 8B", "Meta")];
+        status.offers = vec![
+            offer("Gemma 4 26B", "Google"),
+            offer("gpt-oss 20B", "OpenAI"),
+            offer("Llama 3.1 8B", "Meta"),
+        ];
         let shown = for_makers(status, &makers);
-        let names = |models: &[ModelInfo]| models.iter().map(|model| model.name.clone()).collect::<Vec<_>>();
+        let names = |models: &[ModelInfo]| {
+            models
+                .iter()
+                .map(|model| model.name.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(&shown.models), ["Gemma 4 26B"]);
-        assert_eq!(names(&shown.set_aside), ["Phi-4"], "a saved chat still names the model that wrote it");
+        assert_eq!(
+            names(&shown.set_aside),
+            ["Phi-4"],
+            "a saved chat still names the model that wrote it"
+        );
         assert_eq!(names(&shown.on_disk), ["Llama 3.1 8B"]);
-        let offered: Vec<&str> = shown.offers.iter().map(|offer| offer.name.as_str()).collect();
+        let offered: Vec<&str> = shown
+            .offers
+            .iter()
+            .map(|offer| offer.name.as_str())
+            .collect();
         assert_eq!(offered, ["Gemma 4 26B", "Llama 3.1 8B"]);
-        assert_eq!(shown.hidden, 2, "a model of a maker not picked is on the list, so it is not hidden");
+        assert_eq!(
+            shown.hidden, 2,
+            "a model of a maker not picked is on the list, so it is not hidden"
+        );
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
     fn the_engine_address_stays_on_this_computer() {
-        for good in ["http://127.0.0.1:8080/v1", "http://localhost:8080/v1/", "http://[::1]:9000/v1"] {
+        for good in [
+            "http://127.0.0.1:8080/v1",
+            "http://localhost:8080/v1/",
+            "http://[::1]:9000/v1",
+        ] {
             assert!(checked_base_url(good).is_ok(), "{good} should be accepted");
         }
         for bad in [
@@ -973,23 +1178,35 @@ mod tests {
         ] {
             assert!(checked_base_url(bad).is_err(), "{bad} should be refused");
         }
-        assert_eq!(checked_base_url("http://localhost:8080/v1/").unwrap(), "http://localhost:8080/v1");
+        assert_eq!(
+            checked_base_url("http://localhost:8080/v1/").unwrap(),
+            "http://localhost:8080/v1"
+        );
     }
 
     #[test]
     fn stream_lines_survive_being_cut_anywhere() {
-        let stream = ": keepalive 1/1\n\ndata: {\"text\": \"2\u{202f}+\u{202f}2\"}\n\ndata: [DONE]\n\n".as_bytes();
+        let stream =
+            ": keepalive 1/1\n\ndata: {\"text\": \"2\u{202f}+\u{202f}2\"}\n\ndata: [DONE]\n\n"
+                .as_bytes();
         for cut in 1..stream.len() {
             let mut lines = SseLines::default();
             let mut payloads = lines.push(&stream[..cut]);
             payloads.extend(lines.push(&stream[cut..]));
-            assert_eq!(payloads, ["{\"text\": \"2\u{202f}+\u{202f}2\"}", "[DONE]"], "cut at {cut}");
+            assert_eq!(
+                payloads,
+                ["{\"text\": \"2\u{202f}+\u{202f}2\"}", "[DONE]"],
+                "cut at {cut}"
+            );
         }
     }
 
     #[test]
     fn events_carry_their_kind() {
-        let json = serde_json::to_value(ChatEvent::Answer { text: "4".to_string() }).unwrap();
+        let json = serde_json::to_value(ChatEvent::Answer {
+            text: "4".to_string(),
+        })
+        .unwrap();
         assert_eq!(json, serde_json::json!({ "kind": "answer", "text": "4" }));
     }
 
@@ -1001,22 +1218,39 @@ mod tests {
         tauri::async_runtime::block_on(async {
             let turn = tokio::sync::Mutex::new(());
             let (_first_stop, mut first) = watch::channel(false);
-            let answering = wait_for_turn(&turn, &mut first).await.expect("the first model gets its turn");
+            let answering = wait_for_turn(&turn, &mut first)
+                .await
+                .expect("the first model gets its turn");
 
             let (second_stop, mut second) = watch::channel(false);
-            let waited = tokio::time::timeout(Duration::from_millis(50), wait_for_turn(&turn, &mut second)).await;
-            assert!(waited.is_err(), "a second model answered while the first still was");
+            let waited =
+                tokio::time::timeout(Duration::from_millis(50), wait_for_turn(&turn, &mut second))
+                    .await;
+            assert!(
+                waited.is_err(),
+                "a second model answered while the first still was"
+            );
 
             drop(answering);
-            let next = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut second)).await;
-            assert!(matches!(next, Ok(Some(_))), "the next model gets its turn once the first is done");
+            let next =
+                tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut second))
+                    .await;
+            assert!(
+                matches!(next, Ok(Some(_))),
+                "the next model gets its turn once the first is done"
+            );
             drop(next);
 
             let _held = turn.lock().await;
             let (third_stop, mut third) = watch::channel(false);
             third_stop.send(true).unwrap();
-            let stopped = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut third)).await;
-            assert!(matches!(stopped, Ok(None)), "a model stopped while it waits never takes its turn");
+            let stopped =
+                tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut third))
+                    .await;
+            assert!(
+                matches!(stopped, Ok(None)),
+                "a model stopped while it waits never takes its turn"
+            );
             drop(second_stop);
         });
     }
@@ -1025,16 +1259,26 @@ mod tests {
     #[test]
     #[ignore]
     fn live_two_plus_two() {
-        let ids = tauri::async_runtime::block_on(fetch_model_ids(&base_url().unwrap())).expect("the engine is not answering");
-        let model = allowed_models(&ids).into_iter().next().expect("no listed model on the engine");
+        let ids = tauri::async_runtime::block_on(fetch_model_ids(&base_url().unwrap()))
+            .expect("the engine is not answering");
+        let model = allowed_models(&ids)
+            .into_iter()
+            .next()
+            .expect("no listed model on the engine");
         let request = ChatRequest {
             model: model.id,
-            messages: vec![ChatMessage { role: "user".to_string(), content: "What is 2+2? One short sentence.".to_string() }],
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "What is 2+2? One short sentence.".to_string(),
+            }],
             max_tokens: Some(200),
         };
         let (_stop, mut stopped) = watch::channel(false);
         let mut events = Vec::new();
-        let done = tauri::async_runtime::block_on(run_chat(&request, &mut stopped, |event| events.push(event))).unwrap();
+        let done = tauri::async_runtime::block_on(run_chat(&request, &mut stopped, |event| {
+            events.push(event)
+        }))
+        .unwrap();
         assert!(done.answer.contains('4'), "answer was {:?}", done.answer);
         assert!(!done.answer.contains("<|"));
         assert_eq!(rebuilt(&events).answer.trim(), done.answer);

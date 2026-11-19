@@ -19,7 +19,7 @@ around it and no "just this once".
 | Job        | Machine | What it runs                                                              |
 | ---------- | ------- | ------------------------------------------------------------------------- |
 | `services` | Linux   | `make test-services` (format, lint, unit tests) and `make test-repo`      |
-| `desktop`  | macOS   | `make test-desktop` (page tests, page build, the app's Rust tests)        |
+| `desktop`  | macOS   | `make test-desktop` (page tests, page build, and format, lint, and tests for the app's Rust) |
 | `e2e`      | Linux   | `scripts/bootstrap.sh`, then `make test-live` and `make e2e` against the whole stack in Docker |
 | `gate`     | Linux   | Green only when the three above are green. This is the one result to read |
 

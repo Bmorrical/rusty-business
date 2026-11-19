@@ -255,23 +255,41 @@ npm run build
 ```
 
 ```bash
-cd src-tauri && cargo test
+cd src-tauri && cargo fmt --check
 ```
-
-The page is built before the Rust tests because Tauri reads the built page
-(`dist`) when it compiles.
-
-Five more tests are run by hand. One asks the running engine for 2+2, one
-looks for the app's models on this computer, one starts a second engine on
-a free port and stops it again, one starts a stack of its own on a free port
-and removes it again (it needs Docker running), and one checks the small
-pinned files against Hugging Face:
 
 ```bash
-cd src-tauri && cargo test -- --ignored --skip a_whole_model_downloads_from_hugging_face
+cd src-tauri && cargo clippy --all-targets --locked -- -D warnings
 ```
 
-A sixth downloads Phi-4 whole, 8.3 GB, into an empty folder you name:
+```bash
+cd src-tauri && cargo test --locked
+```
+
+`npm test` runs every `src/*.test.js`. The page is built before the Rust
+checks because Tauri reads the built page (`dist`) when it compiles.
+
+Eleven more tests are run by hand, because each needs an engine, a model,
+Docker, a key, or the internet. Six need only this computer and the
+internet. One asks the running engine for 2+2, one looks for the app's
+models on this computer, one starts a second engine on a free port and
+stops it again, one starts a stack of its own on a free port and removes it
+again (it needs Docker running), one checks the small pinned files against
+Hugging Face, and one asks GitHub for the newest release:
+
+```bash
+cd src-tauri && cargo test -- --ignored --skip a_whole_model_downloads_from_hugging_face --skip answers_two_plus_two
+```
+
+Four ask an outside engine for 2+2, each with the key in a file you name in
+`RUSTY_XAI_KEY_FILE`, `RUSTY_OPENAI_KEY_FILE`, `RUSTY_ANTHROPIC_KEY_FILE`,
+or `RUSTY_GOOGLE_KEY_FILE`. Run one at a time, for example:
+
+```bash
+cd src-tauri && RUSTY_ANTHROPIC_KEY_FILE=<the key file> cargo test -- --ignored claude_answers_two_plus_two
+```
+
+The last downloads Phi-4 whole, 8.3 GB, into an empty folder you name:
 
 ```bash
 cd src-tauri && RUSTY_DOWNLOAD_TO=<an empty folder> cargo test -- --ignored a_whole_model_downloads_from_hugging_face

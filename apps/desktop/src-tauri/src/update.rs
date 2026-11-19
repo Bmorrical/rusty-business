@@ -113,7 +113,9 @@ impl Download {
             Download::Deb | Download::Rpm => {
                 "When it is downloaded, run this in the folder it is in. It replaces this version."
             }
-            Download::TarGz => "When it is downloaded, quit Rusty Business™ and unpack it in place of this copy.",
+            Download::TarGz => {
+                "When it is downloaded, quit Rusty Business™ and unpack it in place of this copy."
+            }
         }
     }
 
@@ -232,7 +234,11 @@ fn update_from(current: &str, answer: &[u8], download: Download) -> Option<Updat
         return None;
     }
     let file = download.file();
-    if !release.assets.iter().any(|asset| asset.name == file && asset.state == "uploaded") {
+    if !release
+        .assets
+        .iter()
+        .any(|asset| asset.name == file && asset.state == "uploaded")
+    {
         return None;
     }
     Some(Update {
@@ -289,7 +295,10 @@ fn client(gate: &Gate) -> Result<reqwest::Client, String> {
 }
 
 /// An answer, read up to `most` bytes and no further.
-async fn read_capped(chunks: impl Stream<Item = Result<Vec<u8>, String>>, most: usize) -> Result<Vec<u8>, String> {
+async fn read_capped(
+    chunks: impl Stream<Item = Result<Vec<u8>, String>>,
+    most: usize,
+) -> Result<Vec<u8>, String> {
     let mut chunks = std::pin::pin!(chunks);
     let mut answer = Vec::new();
     while let Some(chunk) = chunks.next().await {
@@ -307,7 +316,9 @@ async fn read_capped(chunks: impl Stream<Item = Result<Vec<u8>, String>>, most: 
 /// past that.
 fn status_problem(status: u16) -> String {
     match status {
-        403 | 429 => "GitHub has had too many checks from this network for now. Try again later.".to_string(),
+        403 | 429 => {
+            "GitHub has had too many checks from this network for now. Try again later.".to_string()
+        }
         _ => format!("GitHub answered {status}."),
     }
 }
@@ -329,9 +340,11 @@ async fn ask(client: reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     if !response.status().is_success() {
         return Err(status_problem(response.status().as_u16()));
     }
-    let chunks = response
-        .bytes_stream()
-        .map(|chunk| chunk.map(|bytes| bytes.to_vec()).map_err(|error| error.to_string()));
+    let chunks = response.bytes_stream().map(|chunk| {
+        chunk
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| error.to_string())
+    });
     read_capped(chunks, MOST_BYTES).await
 }
 
@@ -355,13 +368,19 @@ impl Updates {
     /// found, and gives back why it failed.
     fn keep(&self, checked: Result<Option<Update>, String>) -> Result<Option<Update>, String> {
         let update = checked?;
-        let mut found = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut found = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *found = update.clone();
         Ok(update)
     }
 
     fn found(&self) -> Option<Update> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 
@@ -369,11 +388,16 @@ impl Updates {
 /// off. A check that fails keeps what the last one found and answers why,
 /// which the Check for updates button shows and the other checks let pass.
 #[tauri::command]
-pub async fn check_update(updates: tauri::State<'_, Updates>, gate: tauri::State<'_, Gate>) -> Result<Option<Update>, String> {
+pub async fn check_update(
+    updates: tauri::State<'_, Updates>,
+    gate: tauri::State<'_, Gate>,
+) -> Result<Option<Update>, String> {
     let Some(download) = this_download() else {
         return Ok(None);
     };
-    let checked = ask_through(&gate, &latest_url()).await.map(|answer| update_from(env!("CARGO_PKG_VERSION"), &answer, download));
+    let checked = ask_through(&gate, &latest_url())
+        .await
+        .map(|answer| update_from(env!("CARGO_PKG_VERSION"), &answer, download));
     updates.keep(checked)
 }
 
@@ -392,8 +416,14 @@ pub enum Part {
 /// The address of the part asked for, on this repository's releases.
 fn address(update: &Update, part: Part) -> Result<reqwest::Url, String> {
     let address = match part {
-        Part::Download => format!("https://{SITE_HOST}/{REPOSITORY}/releases/download/v{}/{}", update.version, update.file),
-        Part::Notes => format!("https://{SITE_HOST}/{REPOSITORY}/releases/tag/v{}", update.version),
+        Part::Download => format!(
+            "https://{SITE_HOST}/{REPOSITORY}/releases/download/v{}/{}",
+            update.version, update.file
+        ),
+        Part::Notes => format!(
+            "https://{SITE_HOST}/{REPOSITORY}/releases/tag/v{}",
+            update.version
+        ),
     };
     let url = reqwest::Url::parse(&address).map_err(|_| COULD_NOT_OPEN.to_string())?;
     if !on_releases(&url) {
@@ -422,14 +452,20 @@ fn to_open(part: Part, updates: &Updates, gate: &Gate) -> Result<reqwest::Url, S
     if !gate.is_open() {
         return Err(GATE_OFF_OPEN.to_string());
     }
-    let update = updates.found().ok_or_else(|| "No new version has been found.".to_string())?;
+    let update = updates
+        .found()
+        .ok_or_else(|| "No new version has been found.".to_string())?;
     address(&update, part)
 }
 
 /// Opens the new version's file or notes in the browser, unless the outbound
 /// gate is off. The page names only which, never an address.
 #[tauri::command]
-pub fn open_update(part: Part, updates: tauri::State<'_, Updates>, gate: tauri::State<'_, Gate>) -> Result<(), String> {
+pub fn open_update(
+    part: Part,
+    updates: tauri::State<'_, Updates>,
+    gate: tauri::State<'_, Gate>,
+) -> Result<(), String> {
     let url = to_open(part, &updates, &gate)?;
     let mut child = browser(&url)
         .stdin(Stdio::null())
@@ -463,10 +499,16 @@ mod tests {
     }
 
     fn every_file() -> Vec<&'static str> {
-        [Download::Mac, Download::Windows, Download::Deb, Download::Rpm, Download::TarGz]
-            .iter()
-            .flat_map(|download| [download.file(), "checksum"])
-            .collect()
+        [
+            Download::Mac,
+            Download::Windows,
+            Download::Deb,
+            Download::Rpm,
+            Download::TarGz,
+        ]
+        .iter()
+        .flat_map(|download| [download.file(), "checksum"])
+        .collect()
     }
 
     // "when a new build is ready, the user is notified in app, and it gives
@@ -487,11 +529,22 @@ mod tests {
         );
         // The page reads these names.
         let told = serde_json::to_value(&found).unwrap();
-        let mut names: Vec<&str> = told.as_object().unwrap().keys().map(String::as_str).collect();
+        let mut names: Vec<&str> = told
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         names.sort_unstable();
-        assert_eq!(names, ["command", "current", "file", "page", "steps", "version"]);
+        assert_eq!(
+            names,
+            ["command", "current", "file", "page", "steps", "version"]
+        );
         let url = address(&found, Part::Download).unwrap();
-        assert_eq!(url.as_str(), "https://github.com/Bmorrical/rusty-business/releases/download/v0.5.0/Rusty-Business-mac-arm64.dmg");
+        assert_eq!(
+            url.as_str(),
+            "https://github.com/Bmorrical/rusty-business/releases/download/v0.5.0/Rusty-Business-mac-arm64.dmg"
+        );
         assert_eq!(
             address(&found, Part::Notes).unwrap().as_str(),
             "https://github.com/Bmorrical/rusty-business/releases/tag/v0.5.0"
@@ -501,7 +554,11 @@ mod tests {
     #[test]
     fn the_same_or_an_older_release_is_not() {
         for tag in ["v0.4.0", "v0.3.9", "v0.0.1"] {
-            assert_eq!(update_from("0.4.0", &answer(tag, &every_file()), Download::Mac), None, "{tag}");
+            assert_eq!(
+                update_from("0.4.0", &answer(tag, &every_file()), Download::Mac),
+                None,
+                "{tag}"
+            );
         }
     }
 
@@ -520,42 +577,89 @@ mod tests {
         let earlier = answer("v0.5.0", &[MAC, "Rusty-Business-windows-x64-setup.exe"]);
         assert!(update_from("0.4.0", &earlier, Download::Mac).is_some());
         for download in [Download::Deb, Download::Rpm, Download::TarGz] {
-            assert_eq!(update_from("0.4.0", &earlier, download), None, "{download:?}");
+            assert_eq!(
+                update_from("0.4.0", &earlier, download),
+                None,
+                "{download:?}"
+            );
         }
         // A file still on its way up is not there yet.
         let uploading = serde_json::json!({
             "tag_name": "v0.5.0", "draft": false, "prerelease": false,
             "assets": [{ "name": MAC, "state": "starter" }],
         });
-        assert_eq!(update_from("0.4.0", uploading.to_string().as_bytes(), Download::Mac), None);
+        assert_eq!(
+            update_from("0.4.0", uploading.to_string().as_bytes(), Download::Mac),
+            None
+        );
         // A name that only starts like it is another file.
-        assert_eq!(update_from("0.4.0", &answer("v0.5.0", &[&format!("{MAC}.sha256")]), Download::Mac), None);
+        assert_eq!(
+            update_from(
+                "0.4.0",
+                &answer("v0.5.0", &[&format!("{MAC}.sha256")]),
+                Download::Mac
+            ),
+            None
+        );
     }
 
     #[test]
     fn a_draft_a_prerelease_or_an_odd_tag_is_not() {
         for flag in ["draft", "prerelease"] {
-            let mut release: serde_json::Value = serde_json::from_slice(&answer("v0.5.0", &every_file())).unwrap();
+            let mut release: serde_json::Value =
+                serde_json::from_slice(&answer("v0.5.0", &every_file())).unwrap();
             release[flag] = true.into();
-            assert_eq!(update_from("0.4.0", release.to_string().as_bytes(), Download::Mac), None, "{flag}");
+            assert_eq!(
+                update_from("0.4.0", release.to_string().as_bytes(), Download::Mac),
+                None,
+                "{flag}"
+            );
         }
         for tag in [
-            "0.5.0", "v0.5", "v0.5.0.1", "v0.5.0-beta", "v0.5.0+1", "v00.5.0", "v0.05.0", "V0.5.0", "v 0.5.0", "v0.5.0/../../x",
-            "latest", "", "v1234567890.0.0",
+            "0.5.0",
+            "v0.5",
+            "v0.5.0.1",
+            "v0.5.0-beta",
+            "v0.5.0+1",
+            "v00.5.0",
+            "v0.05.0",
+            "V0.5.0",
+            "v 0.5.0",
+            "v0.5.0/../../x",
+            "latest",
+            "",
+            "v1234567890.0.0",
         ] {
-            assert_eq!(update_from("0.4.0", &answer(tag, &every_file()), Download::Mac), None, "{tag:?}");
+            assert_eq!(
+                update_from("0.4.0", &answer(tag, &every_file()), Download::Mac),
+                None,
+                "{tag:?}"
+            );
         }
         assert_eq!(update_from("0.4.0", b"not json", Download::Mac), None);
         assert_eq!(update_from("0.4.0", b"{}", Download::Mac), None);
-        assert_eq!(update_from("not a version", &answer("v0.5.0", &every_file()), Download::Mac), None);
+        assert_eq!(
+            update_from(
+                "not a version",
+                &answer("v0.5.0", &every_file()),
+                Download::Mac
+            ),
+            None
+        );
     }
 
     #[test]
     fn each_system_gets_its_own_file_and_steps() {
-        let files: Vec<_> = [Download::Mac, Download::Windows, Download::Deb, Download::Rpm, Download::TarGz]
-            .iter()
-            .map(|download| download.file())
-            .collect();
+        let files: Vec<_> = [
+            Download::Mac,
+            Download::Windows,
+            Download::Deb,
+            Download::Rpm,
+            Download::TarGz,
+        ]
+        .iter()
+        .map(|download| download.file())
+        .collect();
         assert_eq!(
             files,
             [
@@ -566,8 +670,14 @@ mod tests {
                 "Rusty-Business-linux-x64.tar.gz",
             ]
         );
-        assert_eq!(Download::Deb.command().as_deref(), Some("sudo apt install ./Rusty-Business-linux-x64.deb"));
-        assert_eq!(Download::Rpm.command().as_deref(), Some("sudo dnf install ./Rusty-Business-linux-x64.rpm"));
+        assert_eq!(
+            Download::Deb.command().as_deref(),
+            Some("sudo apt install ./Rusty-Business-linux-x64.deb")
+        );
+        assert_eq!(
+            Download::Rpm.command().as_deref(),
+            Some("sudo dnf install ./Rusty-Business-linux-x64.rpm")
+        );
         for download in [Download::Mac, Download::Windows, Download::TarGz] {
             assert_eq!(download.command(), None, "{download:?}");
         }
@@ -575,8 +685,16 @@ mod tests {
         let packaged = Path::new("/usr/bin/rusty-business");
         assert_eq!(linux_download(packaged, true), Download::Deb);
         assert_eq!(linux_download(packaged, false), Download::Rpm);
-        for elsewhere in ["/home/me/Rusty-Business-linux-x64/bin/rusty-business", "/usr/local/bin/rusty-business", "/opt/rusty-business"] {
-            assert_eq!(linux_download(Path::new(elsewhere), true), Download::TarGz, "{elsewhere}");
+        for elsewhere in [
+            "/home/me/Rusty-Business-linux-x64/bin/rusty-business",
+            "/usr/local/bin/rusty-business",
+            "/opt/rusty-business",
+        ] {
+            assert_eq!(
+                linux_download(Path::new(elsewhere), true),
+                Download::TarGz,
+                "{elsewhere}"
+            );
         }
 
         if cfg!(target_os = "macos") {
@@ -586,7 +704,10 @@ mod tests {
 
     #[test]
     fn the_check_asks_only_githubs_api_for_this_repositorys_newest_release() {
-        assert_eq!(latest_url(), "https://api.github.com/repos/Bmorrical/rusty-business/releases/latest");
+        assert_eq!(
+            latest_url(),
+            "https://api.github.com/repos/Bmorrical/rusty-business/releases/latest"
+        );
         let url = reqwest::Url::parse(&latest_url()).unwrap();
         assert!(https_on(&url, API_HOST));
         for away in [
@@ -598,7 +719,10 @@ mod tests {
             "https://github.com/x",
             "https://140.82.112.6/x",
         ] {
-            assert!(!https_on(&reqwest::Url::parse(away).unwrap(), API_HOST), "{away}");
+            assert!(
+                !https_on(&reqwest::Url::parse(away).unwrap(), API_HOST),
+                "{away}"
+            );
         }
     }
 
@@ -634,10 +758,17 @@ mod tests {
         // a stand-in listening for it is never reached.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let error = block_on(ask(client_for_test(), &format!("http://127.0.0.1:{port}/repos"))).unwrap_err();
+        let error = block_on(ask(
+            client_for_test(),
+            &format!("http://127.0.0.1:{port}/repos"),
+        ))
+        .unwrap_err();
         assert_eq!(error, "The app could not reach GitHub.");
         listener.set_nonblocking(true).unwrap();
-        assert!(listener.accept().is_err(), "the check reached the stand-in over plain http");
+        assert!(
+            listener.accept().is_err(),
+            "the check reached the stand-in over plain http"
+        );
     }
 
     fn client_for_test() -> reqwest::Client {
@@ -646,9 +777,24 @@ mod tests {
 
     #[test]
     fn an_answer_is_read_up_to_its_size_and_no_further() {
-        let chunks = |sizes: &[usize]| futures_util::stream::iter(sizes.iter().map(|size| Ok(vec![b'x'; *size])).collect::<Vec<_>>());
-        assert_eq!(block_on(read_capped(chunks(&[400, 600]), 1000)).unwrap().len(), 1000);
-        assert_eq!(block_on(read_capped(chunks(&[400, 601]), 1000)).unwrap_err(), "GitHub's answer was too large.");
+        let chunks = |sizes: &[usize]| {
+            futures_util::stream::iter(
+                sizes
+                    .iter()
+                    .map(|size| Ok(vec![b'x'; *size]))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            block_on(read_capped(chunks(&[400, 600]), 1000))
+                .unwrap()
+                .len(),
+            1000
+        );
+        assert_eq!(
+            block_on(read_capped(chunks(&[400, 601]), 1000)).unwrap_err(),
+            "GitHub's answer was too large."
+        );
         let broken = futures_util::stream::iter(vec![Ok(vec![b'x']), Err("cut off".to_string())]);
         assert_eq!(block_on(read_capped(broken, 1000)).unwrap_err(), "cut off");
         // GitHub's answer for a release of ten files is about 24 KB; the check
@@ -658,7 +804,8 @@ mod tests {
 
     #[test]
     fn only_this_repositorys_releases_are_opened() {
-        let found = update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Windows).unwrap();
+        let found =
+            update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Windows).unwrap();
         for part in [Part::Download, Part::Notes] {
             assert!(on_releases(&address(&found, part).unwrap()), "{part:?}");
         }
@@ -679,18 +826,38 @@ mod tests {
         }
         // An address built from a bent file name is checked and refused too.
         for bent in ["../../../../someone/else", "x?y=1"] {
-            let mut odd = update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Windows).unwrap();
+            let mut odd =
+                update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Windows).unwrap();
             odd.file = bent.to_string();
-            assert_eq!(address(&odd, Part::Download).unwrap_err(), COULD_NOT_OPEN, "{bent}");
+            assert_eq!(
+                address(&odd, Part::Download).unwrap_err(),
+                COULD_NOT_OPEN,
+                "{bent}"
+            );
         }
         // The page names a part, never an address.
-        assert_eq!(serde_json::from_str::<Part>(r#""download""#).unwrap(), Part::Download);
-        assert_eq!(serde_json::from_str::<Part>(r#""notes""#).unwrap(), Part::Notes);
+        assert_eq!(
+            serde_json::from_str::<Part>(r#""download""#).unwrap(),
+            Part::Download
+        );
+        assert_eq!(
+            serde_json::from_str::<Part>(r#""notes""#).unwrap(),
+            Part::Notes
+        );
         assert!(serde_json::from_str::<Part>(r#""https://example.com""#).is_err());
 
         let opens = browser(&address(&found, Part::Download).unwrap());
-        let last = opens.get_args().last().unwrap().to_str().unwrap().to_string();
-        assert_eq!(last, "https://github.com/Bmorrical/rusty-business/releases/download/v0.5.0/Rusty-Business-windows-x64-setup.exe");
+        let last = opens
+            .get_args()
+            .last()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            last,
+            "https://github.com/Bmorrical/rusty-business/releases/download/v0.5.0/Rusty-Business-windows-x64-setup.exe"
+        );
         if cfg!(target_os = "macos") {
             assert_eq!(opens.get_program(), "/usr/bin/open");
         }
@@ -719,21 +886,43 @@ mod tests {
     fn with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let error = block_on(ask_through(&Gate::at(false), &format!("https://127.0.0.1:{port}/repos"))).unwrap_err();
+        let error = block_on(ask_through(
+            &Gate::at(false),
+            &format!("https://127.0.0.1:{port}/repos"),
+        ))
+        .unwrap_err();
         assert_eq!(error, "The gate is off. Turn it on to check for updates.");
         assert_eq!(error, GATE_OFF);
         listener.set_nonblocking(true).unwrap();
-        assert!(listener.accept().is_err(), "the check went out with the gate off");
+        assert!(
+            listener.accept().is_err(),
+            "the check went out with the gate off"
+        );
         assert!(GATE_OFF.contains("Turn it on") && GATE_OFF.contains("check for updates"));
 
         // A version found while the gate was on is not opened once it is off.
         let updates = Updates::default();
-        updates.keep(Ok(update_from("0.4.0", &answer("v0.5.0", &every_file()), Download::Mac))).unwrap();
+        updates
+            .keep(Ok(update_from(
+                "0.4.0",
+                &answer("v0.5.0", &every_file()),
+                Download::Mac,
+            )))
+            .unwrap();
         for part in [Part::Download, Part::Notes] {
-            assert_eq!(to_open(part, &updates, &Gate::at(false)).unwrap_err(), "The gate is off. Turn it on to open the download.");
-            assert!(on_releases(&to_open(part, &updates, &Gate::at(true)).unwrap()), "{part:?}");
+            assert_eq!(
+                to_open(part, &updates, &Gate::at(false)).unwrap_err(),
+                "The gate is off. Turn it on to open the download."
+            );
+            assert!(
+                on_releases(&to_open(part, &updates, &Gate::at(true)).unwrap()),
+                "{part:?}"
+            );
         }
-        assert_eq!(to_open(Part::Notes, &Updates::default(), &Gate::at(true)).unwrap_err(), "No new version has been found.");
+        assert_eq!(
+            to_open(Part::Notes, &Updates::default(), &Gate::at(true)).unwrap_err(),
+            "No new version has been found."
+        );
     }
 
     #[test]
@@ -749,9 +938,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(300));
             let _ = switch.set(false);
         });
-        let error = block_on(ask_through(&gate, &format!("https://127.0.0.1:{port}/repos"))).unwrap_err();
+        let error = block_on(ask_through(
+            &gate,
+            &format!("https://127.0.0.1:{port}/repos"),
+        ))
+        .unwrap_err();
         assert_eq!(error, GATE_OFF);
-        assert!(started.elapsed() < CONNECT_WAIT, "the check ran on after the gate was turned off");
+        assert!(
+            started.elapsed() < CONNECT_WAIT,
+            "the check ran on after the gate was turned off"
+        );
         turned_off.join().unwrap();
         drop(held.join().unwrap());
     }
@@ -769,7 +965,8 @@ mod tests {
     #[ignore = "asks GitHub itself; run with --ignored"]
     fn github_answers_the_check() {
         let answer = block_on(ask(client_for_test(), &latest_url())).unwrap();
-        let found = update_from("0.0.1", &answer, Download::Mac).expect("the newest release has the .dmg");
+        let found =
+            update_from("0.0.1", &answer, Download::Mac).expect("the newest release has the .dmg");
         assert!(version(&found.version).unwrap() > [0, 0, 1]);
         assert_eq!(found.file, MAC);
     }

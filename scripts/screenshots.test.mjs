@@ -164,7 +164,7 @@ function offPanel() {
 
 /** The app's allow-list, read from the Rust source. */
 function catalog() {
-  const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", license: "([^"]+)", context: ([\d_]+) \}/g;
+  const entry = /CatalogEntry \{\s+needle: "([^"]+)",\s+name: "([^"]+)",\s+maker: "([^"]+)",\s+license: "([^"]+)",\s+context: ([\d_]+),?\s+\}/g;
   return [...read(ENGINE).matchAll(entry)].map(([, needle, name, maker, license, context]) => ({
     needle,
     name,

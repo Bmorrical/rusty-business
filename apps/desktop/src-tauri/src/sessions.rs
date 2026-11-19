@@ -84,13 +84,20 @@ pub struct SessionSummary {
 /// The models that answered the latest question: the replies after the last
 /// question, in order, each model once.
 pub fn latest_answers(messages: &[Turn]) -> Vec<String> {
-    let start = messages.iter().rposition(|turn| turn.role == "user").map(|at| at + 1).unwrap_or(0);
+    let start = messages
+        .iter()
+        .rposition(|turn| turn.role == "user")
+        .map(|at| at + 1)
+        .unwrap_or(0);
     let mut models: Vec<String> = Vec::new();
     for turn in &messages[start..] {
-        if let Some(model) = turn.model.as_ref().filter(|model| turn.role == "assistant" && !model.is_empty()) {
-            if !models.contains(model) {
-                models.push(model.clone());
-            }
+        if let Some(model) = turn
+            .model
+            .as_ref()
+            .filter(|model| turn.role == "assistant" && !model.is_empty())
+            && !models.contains(model)
+        {
+            models.push(model.clone());
         }
     }
     models
@@ -125,9 +132,14 @@ fn summary(session: Session) -> SessionSummary {
 /// on one line, or None when it does not.
 fn snippet(text: &str, needle: &str) -> Option<String> {
     let characters: Vec<char> = text.chars().collect();
-    let lower: Vec<char> = characters.iter().map(|character| character.to_lowercase().next().unwrap_or(*character)).collect();
+    let lower: Vec<char> = characters
+        .iter()
+        .map(|character| character.to_lowercase().next().unwrap_or(*character))
+        .collect();
     let wanted: Vec<char> = needle.chars().collect();
-    let at = lower.windows(wanted.len()).position(|window| window == wanted.as_slice())?;
+    let at = lower
+        .windows(wanted.len())
+        .position(|window| window == wanted.as_slice())?;
     let start = at.saturating_sub(SNIPPET_AROUND);
     let end = (at + wanted.len() + SNIPPET_AROUND).min(characters.len());
     let middle: String = characters[start..end].iter().collect();
@@ -142,13 +154,20 @@ pub struct Store {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|since| since.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// An id is letters, digits, and hyphens only, so it can never name a file
 /// outside the sessions folder.
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 fn failed(what: &str) -> impl Fn(std::io::Error) -> String + '_ {
@@ -182,7 +201,7 @@ impl Store {
     pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
         let mut summaries = Vec::new();
         self.each(|session| summaries.push(summary(session)))?;
-        summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        summaries.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
         Ok(summaries)
     }
 
@@ -190,7 +209,10 @@ impl Store {
     /// `visit` keeps of them is held at once.
     fn each(&self, mut visit: impl FnMut(Session)) -> Result<(), String> {
         self.ready()?;
-        for entry in fs::read_dir(&self.dir).map_err(failed("Could not read the sessions folder"))?.flatten() {
+        for entry in fs::read_dir(&self.dir)
+            .map_err(failed("Could not read the sessions folder"))?
+            .flatten()
+        {
             let path = entry.path();
             if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
                 continue;
@@ -219,23 +241,37 @@ impl Store {
         self.each(|session| {
             let hit = snippet(&session.title, &needle)
                 .map(|_| String::new())
-                .or_else(|| session.messages.iter().find_map(|turn| snippet(&turn.content, &needle)));
+                .or_else(|| {
+                    session
+                        .messages
+                        .iter()
+                        .find_map(|turn| snippet(&turn.content, &needle))
+                });
             if let Some(snippet) = hit {
-                found.push(Found { session: summary(session), snippet });
+                found.push(Found {
+                    session: summary(session),
+                    snippet,
+                });
             }
         })?;
-        found.sort_by(|a, b| b.session.updated_at.cmp(&a.session.updated_at));
+        found.sort_by_key(|a| std::cmp::Reverse(a.session.updated_at));
         found.truncate(FOUND_LIMIT);
         Ok(found)
     }
 
     /// Pins a chat, or moves it into a project or out of one, without
     /// changing when it was last written to.
-    pub fn arrange(&self, id: &str, pinned: bool, project: Option<String>) -> Result<SessionSummary, String> {
+    pub fn arrange(
+        &self,
+        id: &str,
+        pinned: bool,
+        project: Option<String>,
+    ) -> Result<SessionSummary, String> {
         let mut session = self.load(id)?;
         session.pinned = pinned;
         session.project = project.filter(|project| !project.is_empty());
-        let text = serde_json::to_string_pretty(&session).map_err(|_| "Could not write the session.".to_string())?;
+        let text = serde_json::to_string_pretty(&session)
+            .map_err(|_| "Could not write the session.".to_string())?;
         let path = self.path(id)?;
         let partial = path.with_extension("json.partial");
         fs::write(&partial, text).map_err(failed("Could not save the session"))?;
@@ -244,8 +280,10 @@ impl Store {
     }
 
     pub fn load(&self, id: &str) -> Result<Session, String> {
-        let text = fs::read_to_string(self.path(id)?).map_err(failed("Could not open that session"))?;
-        serde_json::from_str(&text).map_err(|_| "That session's file could not be read.".to_string())
+        let text =
+            fs::read_to_string(self.path(id)?).map_err(failed("Could not open that session"))?;
+        serde_json::from_str(&text)
+            .map_err(|_| "That session's file could not be read.".to_string())
     }
 
     /// Saves a session, giving a new one its id. The file is written beside
@@ -263,8 +301,13 @@ impl Store {
         }
         session.updated_at = now;
         let title: String = session.title.trim().chars().take(TITLE_LIMIT).collect();
-        session.title = if title.is_empty() { "New chat".to_string() } else { title };
-        let text = serde_json::to_string_pretty(&session).map_err(|_| "Could not write the session.".to_string())?;
+        session.title = if title.is_empty() {
+            "New chat".to_string()
+        } else {
+            title
+        };
+        let text = serde_json::to_string_pretty(&session)
+            .map_err(|_| "Could not write the session.".to_string())?;
         let partial = path.with_extension("json.partial");
         fs::write(&partial, text).map_err(failed("Could not save the session"))?;
         fs::rename(&partial, &path).map_err(failed("Could not save the session"))?;
@@ -276,7 +319,8 @@ impl Store {
         let path = self.path(id)?;
         let trash = self.dir.join("trash");
         fs::create_dir_all(&trash).map_err(failed("Could not open the trash folder"))?;
-        fs::rename(&path, trash.join(format!("{id}-{}.json", now_ms()))).map_err(failed("Could not move that session to the trash"))
+        fs::rename(&path, trash.join(format!("{id}-{}.json", now_ms())))
+            .map_err(failed("Could not move that session to the trash"))
     }
 }
 
@@ -296,7 +340,10 @@ pub fn save_session(store: tauri::State<'_, Store>, session: Session) -> Result<
 }
 
 #[tauri::command]
-pub fn search_sessions(store: tauri::State<'_, Store>, query: String) -> Result<Vec<Found>, String> {
+pub fn search_sessions(
+    store: tauri::State<'_, Store>,
+    query: String,
+) -> Result<Vec<Found>, String> {
     store.search(&query)
 }
 
@@ -320,7 +367,9 @@ mod tests {
     use super::*;
 
     fn scratch_store() -> Store {
-        Store::new(std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4())))
+        Store::new(
+            std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4())),
+        )
     }
 
     fn chat(title: &str) -> Session {
@@ -328,7 +377,11 @@ mod tests {
             title: title.to_string(),
             model: "mlx-community/phi-4-4bit".to_string(),
             messages: vec![
-                Turn { role: "user".to_string(), content: "What is 2+2?".to_string(), ..Turn::default() },
+                Turn {
+                    role: "user".to_string(),
+                    content: "What is 2+2?".to_string(),
+                    ..Turn::default()
+                },
                 Turn {
                     role: "assistant".to_string(),
                     content: "4.".to_string(),
@@ -355,7 +408,11 @@ mod tests {
         let store = scratch_store();
         let first = store.save(chat("Sums")).unwrap();
         let mut edited = first.clone();
-        edited.messages.push(Turn { role: "user".to_string(), content: "And 3+3?".to_string(), ..Turn::default() });
+        edited.messages.push(Turn {
+            role: "user".to_string(),
+            content: "And 3+3?".to_string(),
+            ..Turn::default()
+        });
         let second = store.save(edited).unwrap();
         assert_eq!(second.id, first.id);
         assert_eq!(second.created_at, first.created_at);
@@ -370,9 +427,18 @@ mod tests {
         let newer = store.save(chat("Newer")).unwrap();
         // Force the order whatever the clock's resolution.
         older.updated_at = 1;
-        fs::write(store.path(&older.id).unwrap(), serde_json::to_string(&older).unwrap()).unwrap();
+        fs::write(
+            store.path(&older.id).unwrap(),
+            serde_json::to_string(&older).unwrap(),
+        )
+        .unwrap();
         fs::write(store.dir.join("broken.json"), "not json").unwrap();
-        let titles: Vec<String> = store.list().unwrap().into_iter().map(|summary| summary.title).collect();
+        let titles: Vec<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.title)
+            .collect();
         assert_eq!(titles, ["Newer", "Older"]);
         assert!(store.dir.join("broken.json").exists());
         assert_eq!(store.load(&newer.id).unwrap().title, "Newer");
@@ -381,7 +447,15 @@ mod tests {
     #[test]
     fn an_id_cannot_reach_outside_the_folder() {
         let store = scratch_store();
-        for id in ["../secrets", "..", "a/b", "a\\b", "", "name.json", &"x".repeat(65)] {
+        for id in [
+            "../secrets",
+            "..",
+            "a/b",
+            "a\\b",
+            "",
+            "name.json",
+            &"x".repeat(65),
+        ] {
             assert!(store.load(id).is_err(), "{id:?} should be refused");
             assert!(store.trash(id).is_err(), "{id:?} should be refused");
             let mut session = chat("Sneaky");
@@ -398,14 +472,22 @@ mod tests {
         let saved = store.save(chat("Sums")).unwrap();
         store.trash(&saved.id).unwrap();
         assert!(store.list().unwrap().is_empty());
-        let kept: Vec<_> = fs::read_dir(store.dir.join("trash")).unwrap().flatten().collect();
+        let kept: Vec<_> = fs::read_dir(store.dir.join("trash"))
+            .unwrap()
+            .flatten()
+            .collect();
         assert_eq!(kept.len(), 1);
         let text = fs::read_to_string(kept[0].path()).unwrap();
         assert_eq!(serde_json::from_str::<Session>(&text).unwrap(), saved);
     }
 
     fn answer(model: &str, content: &str) -> Turn {
-        Turn { role: "assistant".to_string(), content: content.to_string(), model: Some(model.to_string()), ..Turn::default() }
+        Turn {
+            role: "assistant".to_string(),
+            content: content.to_string(),
+            model: Some(model.to_string()),
+            ..Turn::default()
+        }
     }
 
     // Brad, 2026-11-17: "the next step is user can run the same question in
@@ -414,14 +496,28 @@ mod tests {
     fn the_list_names_every_model_that_answered_the_latest_question() {
         let store = scratch_store();
         let mut session = chat("Nails");
-        session.messages.push(Turn { role: "user".to_string(), content: "Why do nails rust?".to_string(), ..Turn::default() });
-        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Water and air."));
-        session.messages.push(answer("mlx-community/phi-4-4bit", "Oxygen."));
-        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Again."));
+        session.messages.push(Turn {
+            role: "user".to_string(),
+            content: "Why do nails rust?".to_string(),
+            ..Turn::default()
+        });
+        session.messages.push(answer(
+            "mlx-community/gpt-oss-20b-MXFP4-Q8",
+            "Water and air.",
+        ));
+        session
+            .messages
+            .push(answer("mlx-community/phi-4-4bit", "Oxygen."));
+        session
+            .messages
+            .push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Again."));
         store.save(session).unwrap();
         assert_eq!(
             store.list().unwrap()[0].models,
-            ["mlx-community/gpt-oss-20b-MXFP4-Q8", "mlx-community/phi-4-4bit"],
+            [
+                "mlx-community/gpt-oss-20b-MXFP4-Q8",
+                "mlx-community/phi-4-4bit"
+            ],
             "each model that answered, in order, once; the earlier question's answer is not counted",
         );
     }
@@ -429,10 +525,17 @@ mod tests {
     #[test]
     fn a_question_with_no_answer_yet_names_no_model() {
         let mut messages = chat("Sums").messages;
-        assert!(latest_answers(&messages).is_empty(), "an answer saved without its model names none");
+        assert!(
+            latest_answers(&messages).is_empty(),
+            "an answer saved without its model names none"
+        );
         messages.push(answer("mlx-community/phi-4-4bit", "4."));
         assert_eq!(latest_answers(&messages), ["mlx-community/phi-4-4bit"]);
-        messages.push(Turn { role: "user".to_string(), content: "And 3+3?".to_string(), ..Turn::default() });
+        messages.push(Turn {
+            role: "user".to_string(),
+            content: "And 3+3?".to_string(),
+            ..Turn::default()
+        });
         assert!(latest_answers(&messages).is_empty());
         // A saved file may hold any role; only an answer names its model.
         messages.push(Turn {
@@ -441,7 +544,10 @@ mod tests {
             model: Some("mlx-community/phi-4-4bit".to_string()),
             ..Turn::default()
         });
-        assert!(latest_answers(&messages).is_empty(), "a turn that is no answer was counted");
+        assert!(
+            latest_answers(&messages).is_empty(),
+            "a turn that is no answer was counted"
+        );
         assert!(latest_answers(&[]).is_empty());
     }
 
@@ -451,12 +557,22 @@ mod tests {
     fn a_grade_is_kept_and_names_no_model_as_an_answer() {
         let store = scratch_store();
         let mut session = chat("Nails");
-        session.messages.push(Turn { role: "user".to_string(), content: "Why do nails rust?".to_string(), ..Turn::default() });
-        session.messages.push(answer("mlx-community/phi-4-4bit", "Oxygen."));
-        session.messages.push(answer("mlx-community/gpt-oss-20b-MXFP4-Q8", "Water and air."));
+        session.messages.push(Turn {
+            role: "user".to_string(),
+            content: "Why do nails rust?".to_string(),
+            ..Turn::default()
+        });
+        session
+            .messages
+            .push(answer("mlx-community/phi-4-4bit", "Oxygen."));
+        session.messages.push(answer(
+            "mlx-community/gpt-oss-20b-MXFP4-Q8",
+            "Water and air.",
+        ));
         session.messages.push(Turn {
             role: "grade".to_string(),
-            content: "Answer 1: B. Short.\nAnswer 2: A. Clear.\nSummary: Both are right.".to_string(),
+            content: "Answer 1: B. Short.\nAnswer 2: A. Clear.\nSummary: Both are right."
+                .to_string(),
             thinking: Some("Read both.".to_string()),
             model: Some("xai:grok-4".to_string()),
             ..Turn::default()
@@ -464,10 +580,16 @@ mod tests {
         let saved = store.save(session).unwrap();
         let loaded = store.load(&saved.id).unwrap();
         assert_eq!(loaded, saved, "the grade does not come back whole");
-        assert_eq!(loaded.messages.last().map(|turn| turn.role.as_str()), Some("grade"));
+        assert_eq!(
+            loaded.messages.last().map(|turn| turn.role.as_str()),
+            Some("grade")
+        );
         assert_eq!(
             store.list().unwrap()[0].models,
-            ["mlx-community/phi-4-4bit", "mlx-community/gpt-oss-20b-MXFP4-Q8"],
+            [
+                "mlx-community/phi-4-4bit",
+                "mlx-community/gpt-oss-20b-MXFP4-Q8"
+            ],
             "the model that graded is named as one that answered",
         );
     }
@@ -477,7 +599,8 @@ mod tests {
         let store = scratch_store();
         let sums = store.save(chat("Sums")).unwrap();
         let mut other = chat("Paleo weekend");
-        other.messages[1].content = "Buy eggs, bacon, and SWEET potatoes for the weekend.".to_string();
+        other.messages[1].content =
+            "Buy eggs, bacon, and SWEET potatoes for the weekend.".to_string();
         let paleo = store.save(other).unwrap();
         assert_eq!(store.search("sums").unwrap()[0].session.id, sums.id);
         let found = store.search("sweet").unwrap();
@@ -492,11 +615,15 @@ mod tests {
     fn arranging_pins_and_files_a_chat_without_moving_it_in_time() {
         let store = scratch_store();
         let saved = store.save(chat("Sums")).unwrap();
-        let arranged = store.arrange(&saved.id, true, Some("gledit".to_string())).unwrap();
+        let arranged = store
+            .arrange(&saved.id, true, Some("gledit".to_string()))
+            .unwrap();
         assert!(arranged.pinned);
         assert_eq!(arranged.project.as_deref(), Some("gledit"));
         assert_eq!(arranged.updated_at, saved.updated_at);
-        let back = store.arrange(&saved.id, false, Some(String::new())).unwrap();
+        let back = store
+            .arrange(&saved.id, false, Some(String::new()))
+            .unwrap();
         assert!(!back.pinned && back.project.is_none());
         assert!(store.arrange("../x", true, None).is_err());
     }
@@ -505,6 +632,14 @@ mod tests {
     fn an_empty_title_gets_a_name_and_a_long_one_is_cut() {
         let store = scratch_store();
         assert_eq!(store.save(chat("   ")).unwrap().title, "New chat");
-        assert_eq!(store.save(chat(&"t".repeat(500))).unwrap().title.chars().count(), TITLE_LIMIT);
+        assert_eq!(
+            store
+                .save(chat(&"t".repeat(500)))
+                .unwrap()
+                .title
+                .chars()
+                .count(),
+            TITLE_LIMIT
+        );
     }
 }

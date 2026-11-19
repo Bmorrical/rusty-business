@@ -55,7 +55,11 @@ pub enum Layout {
 impl Layout {
     /// The layout this system's engine reads.
     pub fn here() -> Self {
-        if cfg!(target_os = "macos") { Self::Hub } else { Self::Gguf }
+        if cfg!(target_os = "macos") {
+            Self::Hub
+        } else {
+            Self::Gguf
+        }
     }
 
     /// The folder a model has in the models folder. `llama-server` gives the
@@ -103,8 +107,15 @@ pub fn models_folder() -> Option<PathBuf> {
 ///
 /// `variable` reads one environment variable. A folder that is not a full
 /// path is no answer: the app does not start where the engine starts.
-pub fn hub_folder(variable: impl Fn(&str) -> Option<String>, home: Option<&Path>) -> Option<PathBuf> {
-    let set = |name: &str| variable(name).map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+pub fn hub_folder(
+    variable: impl Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    let set = |name: &str| {
+        variable(name)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
     let folder = if let Some(hub) = set("HF_HUB_CACHE").or_else(|| set("HUGGINGFACE_HUB_CACHE")) {
         from_home(&hub, home)
     } else if let Some(hugging_face) = set("HF_HOME") {
@@ -204,7 +215,10 @@ pub(crate) fn whole(folder: &Path) -> bool {
         return false;
     };
     let weights: BTreeSet<&str> = index.weight_map.values().map(String::as_str).collect();
-    !weights.is_empty() && weights.iter().all(|name| plain_name(name) && is_file(&snapshot.join(name)))
+    !weights.is_empty()
+        && weights
+            .iter()
+            .all(|name| plain_name(name) && is_file(&snapshot.join(name)))
 }
 
 /// The app's models that are whole in the app's own models folder, in the
@@ -230,16 +244,29 @@ pub fn gguf_models_in(folder: &Path) -> Vec<ModelInfo> {
     }
     // The list is asked first, so a folder for a model that is not on it is
     // never opened.
-    let ids: Vec<String> = folders.keys().chain(&loose).cloned().collect::<BTreeSet<_>>().into_iter().collect();
+    let ids: Vec<String> = folders
+        .keys()
+        .chain(&loose)
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     engine::allowed_models(&ids)
         .into_iter()
-        .filter(|model| loose.contains(&model.id) || folders.get(&model.id).is_some_and(|folder| whole_gguf(folder)))
+        .filter(|model| {
+            loose.contains(&model.id)
+                || folders
+                    .get(&model.id)
+                    .is_some_and(|folder| whole_gguf(folder))
+        })
         .collect()
 }
 
 /// A GGUF file that is the model itself, not its projector or a draft model.
 fn is_model_file(name: &str) -> bool {
-    name.ends_with(".gguf") && !name.contains("mmproj") && !DRAFT.iter().any(|draft| name.starts_with(draft))
+    name.ends_with(".gguf")
+        && !name.contains("mmproj")
+        && !DRAFT.iter().any(|draft| name.starts_with(draft))
 }
 
 /// True when the folder holds a model `llama-server` can load, whole: a GGUF
@@ -280,14 +307,19 @@ fn every_part(first: &str, files: &BTreeSet<String>) -> bool {
 
 /// A file, or a link that leads to one. A link to nothing is not a file.
 fn is_file(path: &Path) -> bool {
-    fs::metadata(path).map(|found| found.is_file()).unwrap_or(false)
+    fs::metadata(path)
+        .map(|found| found.is_file())
+        .unwrap_or(false)
 }
 
 /// One plain name, with nothing in it that steps out of the folder it is
 /// joined to.
 fn plain_name(name: &str) -> bool {
     let mut parts = Path::new(name).components();
-    matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None))
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(Component::Normal(_)), None)
+    )
 }
 
 #[cfg(test)]
@@ -305,7 +337,8 @@ mod tests {
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
     fn scratch() -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
+        let folder =
+            std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
         folder
     }
@@ -325,8 +358,11 @@ mod tests {
     }
 
     fn index_naming(weights: &[String]) -> String {
-        let map: HashMap<String, &String> =
-            weights.iter().enumerate().map(|(part, name)| (format!("layers.{part}.weight"), name)).collect();
+        let map: HashMap<String, &String> = weights
+            .iter()
+            .enumerate()
+            .map(|(part, name)| (format!("layers.{part}.weight"), name))
+            .collect();
         serde_json::json!({ "metadata": { "format": "mlx" }, "weight_map": map }).to_string()
     }
 
@@ -368,7 +404,12 @@ mod tests {
         while let Some(next) = waiting.pop() {
             for entry in fs::read_dir(&next).unwrap().flatten() {
                 let found = fs::symlink_metadata(entry.path()).unwrap();
-                seen.push(format!("{:?} {} {:?}", entry.path(), found.len(), found.modified().unwrap()));
+                seen.push(format!(
+                    "{:?} {} {:?}",
+                    entry.path(),
+                    found.len(),
+                    found.modified().unwrap()
+                ));
                 if found.is_dir() {
                     waiting.push(entry.path());
                 }
@@ -387,22 +428,44 @@ mod tests {
         download(&hub, PHI, 2);
 
         // The cache holds other things too. None of them is a model.
-        fs::write(hub.join("CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55").unwrap();
+        fs::write(
+            hub.join("CACHEDIR.TAG"),
+            "Signature: 8a477f597d28d172789f06886806bc55",
+        )
+        .unwrap();
         fs::create_dir_all(hub.join("blobs")).unwrap();
         fs::create_dir_all(hub.join(".locks")).unwrap();
         fs::create_dir_all(hub.join("datasets--someone--phi-4-questions")).unwrap();
-        fs::write(hub.join("models--mlx-community--phi-4-notes.txt"), "not a folder").unwrap();
+        fs::write(
+            hub.join("models--mlx-community--phi-4-notes.txt"),
+            "not a folder",
+        )
+        .unwrap();
 
         let found = models_in(&hub);
-        assert_eq!(names(&found), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
-        assert_eq!(found[0], ModelInfo { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), context: 16_384 });
+        assert_eq!(
+            names(&found),
+            ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]
+        );
+        assert_eq!(
+            found[0],
+            ModelInfo {
+                id: PHI.to_string(),
+                name: "Phi-4".to_string(),
+                maker: "Microsoft".to_string(),
+                context: 16_384
+            }
+        );
         assert_eq!(found[1].id, GPT_OSS);
         assert_eq!(found[2].id, NEMOTRON);
     }
 
     #[test]
     fn a_folder_name_is_read_the_way_the_engine_reads_it() {
-        assert_eq!(model_id("models--mlx-community--phi-4-4bit").as_deref(), Some(PHI));
+        assert_eq!(
+            model_id("models--mlx-community--phi-4-4bit").as_deref(),
+            Some(PHI)
+        );
         assert_eq!(model_id("models--phi-4").as_deref(), Some("phi-4"));
         assert_eq!(model_id("models--"), None);
         assert_eq!(model_id("datasets--someone--phi-4-questions"), None);
@@ -426,19 +489,38 @@ mod tests {
     fn a_half_download_is_not_counted() {
         type Break = fn(&Path, &Path);
         let breaks: [(&str, Break); 9] = [
-            ("one weights file has not arrived", |snapshot, _| not_arrived(&snapshot.join(shard(2, 2)))),
+            ("one weights file has not arrived", |snapshot, _| {
+                not_arrived(&snapshot.join(shard(2, 2)))
+            }),
             ("no weights file has arrived", |snapshot, _| {
                 not_arrived(&snapshot.join(shard(1, 2)));
                 not_arrived(&snapshot.join(shard(2, 2)));
             }),
-            ("config.json has not arrived", |snapshot, _| not_arrived(&snapshot.join("config.json"))),
-            ("tokenizer_config.json has not arrived", |snapshot, _| not_arrived(&snapshot.join("tokenizer_config.json"))),
-            ("the list of weights files has not arrived", |snapshot, _| not_arrived(&snapshot.join(WEIGHTS_INDEX))),
-            ("the list of weights files names none", |snapshot, _| fs::write(snapshot.join(WEIGHTS_INDEX), index_naming(&[])).unwrap()),
-            ("the list of weights files cannot be read", |snapshot, _| fs::write(snapshot.join(WEIGHTS_INDEX), "{ cut off").unwrap()),
-            ("nothing says which download is current", |_, folder| not_arrived(&folder.join("refs").join("main"))),
+            ("config.json has not arrived", |snapshot, _| {
+                not_arrived(&snapshot.join("config.json"))
+            }),
+            ("tokenizer_config.json has not arrived", |snapshot, _| {
+                not_arrived(&snapshot.join("tokenizer_config.json"))
+            }),
+            (
+                "the list of weights files has not arrived",
+                |snapshot, _| not_arrived(&snapshot.join(WEIGHTS_INDEX)),
+            ),
+            ("the list of weights files names none", |snapshot, _| {
+                fs::write(snapshot.join(WEIGHTS_INDEX), index_naming(&[])).unwrap()
+            }),
+            ("the list of weights files cannot be read", |snapshot, _| {
+                fs::write(snapshot.join(WEIGHTS_INDEX), "{ cut off").unwrap()
+            }),
+            ("nothing says which download is current", |_, folder| {
+                not_arrived(&folder.join("refs").join("main"))
+            }),
             ("the current download is not there", |_, folder| {
-                fs::write(folder.join("refs").join("main"), "fedcba9876543210fedcba9876543210fedcba98").unwrap()
+                fs::write(
+                    folder.join("refs").join("main"),
+                    "fedcba9876543210fedcba9876543210fedcba98",
+                )
+                .unwrap()
             }),
         ];
 
@@ -475,8 +557,17 @@ mod tests {
         let folder = model_folder(&hub, PHI);
         fs::create_dir_all(folder.join("refs")).unwrap();
         fs::create_dir_all(folder.join("snapshots")).unwrap();
-        let elsewhere = format!("../../{MODEL_FOLDER}mlx-community--gpt-oss-20b-MXFP4-Q8/snapshots/{COMMIT}");
-        assert!(is_file(&folder.join("snapshots").join(&elsewhere).join("config.json")), "the other download is there");
+        let elsewhere =
+            format!("../../{MODEL_FOLDER}mlx-community--gpt-oss-20b-MXFP4-Q8/snapshots/{COMMIT}");
+        assert!(
+            is_file(
+                &folder
+                    .join("snapshots")
+                    .join(&elsewhere)
+                    .join("config.json")
+            ),
+            "the other download is there"
+        );
         fs::write(folder.join("refs").join("main"), &elsewhere).unwrap();
         assert_eq!(names(&models_in(&hub)), ["gpt-oss 20B"]);
 
@@ -484,7 +575,11 @@ mod tests {
         let hub = scratch_hub();
         let snapshot = download(&hub, PHI, 1);
         fs::write(snapshot.join("..").join("outside.safetensors"), "weights").unwrap();
-        fs::write(snapshot.join(WEIGHTS_INDEX), index_naming(&["../outside.safetensors".to_string()])).unwrap();
+        fs::write(
+            snapshot.join(WEIGHTS_INDEX),
+            index_naming(&["../outside.safetensors".to_string()]),
+        )
+        .unwrap();
         assert_eq!(models_in(&hub), Vec::new());
     }
 
@@ -503,13 +598,24 @@ mod tests {
         for (number, entry) in fs::read_dir(&snapshot).unwrap().flatten().enumerate() {
             let blob = blobs.join(format!("blob-{number}"));
             fs::rename(entry.path(), &blob).unwrap();
-            symlink(Path::new("../../blobs").join(format!("blob-{number}")), entry.path()).unwrap();
+            symlink(
+                Path::new("../../blobs").join(format!("blob-{number}")),
+                entry.path(),
+            )
+            .unwrap();
             linked.push((entry.file_name(), blob));
         }
-        assert_eq!(linked.len(), 5, "three files the engine asks for, and two weights files");
+        assert_eq!(
+            linked.len(),
+            5,
+            "three files the engine asks for, and two weights files"
+        );
         assert_eq!(names(&models_in(&hub)), ["Phi-4"]);
 
-        let (_, blob) = linked.iter().find(|(name, _)| name.to_str() == Some(shard(2, 2).as_str())).unwrap();
+        let (_, blob) = linked
+            .iter()
+            .find(|(name, _)| name.to_str() == Some(shard(2, 2).as_str()))
+            .unwrap();
         not_arrived(blob);
         assert_eq!(models_in(&hub), Vec::new());
     }
@@ -537,7 +643,11 @@ mod tests {
 
         let before = everything_in(&hub);
         assert_eq!(names(&models_in(&hub)), ["Phi-4"]);
-        assert_eq!(names(&models_in(&hub)), ["Phi-4"], "asked again, the same answer");
+        assert_eq!(
+            names(&models_in(&hub)),
+            ["Phi-4"],
+            "asked again, the same answer"
+        );
         assert_eq!(everything_in(&hub), before);
     }
 
@@ -547,16 +657,25 @@ mod tests {
         let home = root.join("home");
         let at = |name: &str| root.join(name).to_str().unwrap().to_string();
         let with = |pairs: &[(&str, String)]| {
-            let set: HashMap<String, String> = pairs.iter().map(|(name, value)| (name.to_string(), value.clone())).collect();
+            let set: HashMap<String, String> = pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.clone()))
+                .collect();
             hub_folder(|name| set.get(name).cloned(), Some(&home))
         };
 
         // Nothing set: the cache in the home folder.
-        assert_eq!(with(&[]), Some(home.join(".cache").join("huggingface").join("hub")));
+        assert_eq!(
+            with(&[]),
+            Some(home.join(".cache").join("huggingface").join("hub"))
+        );
 
         // Each variable wins over the ones after it.
         let mut set = vec![("XDG_CACHE_HOME", at("xdg"))];
-        assert_eq!(with(&set), Some(root.join("xdg").join("huggingface").join("hub")));
+        assert_eq!(
+            with(&set),
+            Some(root.join("xdg").join("huggingface").join("hub"))
+        );
         set.push(("HF_HOME", at("hf-home")));
         assert_eq!(with(&set), Some(root.join("hf-home").join("hub")));
         set.push(("HUGGINGFACE_HUB_CACHE", at("older-name")));
@@ -565,16 +684,34 @@ mod tests {
         assert_eq!(with(&set), Some(root.join("hub-cache")));
 
         // A leading ~ is the home folder.
-        assert_eq!(with(&[("HF_HOME", "~/models".to_string())]), Some(home.join("models").join("hub")));
-        assert_eq!(with(&[("HF_HUB_CACHE", "~".to_string())]), Some(home.clone()));
+        assert_eq!(
+            with(&[("HF_HOME", "~/models".to_string())]),
+            Some(home.join("models").join("hub"))
+        );
+        assert_eq!(
+            with(&[("HF_HUB_CACHE", "~".to_string())]),
+            Some(home.clone())
+        );
 
         // A variable set to nothing is not set.
-        assert_eq!(with(&[("HF_HUB_CACHE", "  ".to_string()), ("HF_HOME", at("hf-home"))]), Some(root.join("hf-home").join("hub")));
+        assert_eq!(
+            with(&[
+                ("HF_HUB_CACHE", "  ".to_string()),
+                ("HF_HOME", at("hf-home"))
+            ]),
+            Some(root.join("hf-home").join("hub"))
+        );
 
         // A folder that is not a full path is no answer, and neither is no home.
         assert_eq!(with(&[("HF_HUB_CACHE", "models/hub".to_string())]), None);
         assert_eq!(hub_folder(|_| None, None), None);
-        assert_eq!(hub_folder(|name| (name == "HF_HOME").then(|| "~/models".to_string()), None), None);
+        assert_eq!(
+            hub_folder(
+                |name| (name == "HF_HOME").then(|| "~/models".to_string()),
+                None
+            ),
+            None
+        );
     }
 
     #[test]
@@ -594,7 +731,10 @@ mod tests {
             start_hint: "mlx_lm.server --port 8080".to_string(),
         };
         let told = serde_json::to_value(&status).unwrap();
-        assert_eq!(told["onDisk"], serde_json::json!([{ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "context": 16_384 }]));
+        assert_eq!(
+            told["onDisk"],
+            serde_json::json!([{ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "context": 16_384 }])
+        );
         assert_eq!(told["models"], serde_json::json!([]));
     }
 
@@ -619,15 +759,29 @@ mod tests {
     fn the_gguf_models_in_the_apps_own_folder_are_found_the_way_llama_server_finds_them() {
         // "add an engine to linux and windows distro's"
         let own = scratch().join("models");
-        gguf(&own.join(NEMOTRON_GGUF), &["NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf"]);
+        gguf(
+            &own.join(NEMOTRON_GGUF),
+            &["NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf"],
+        );
         gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf"]);
         gguf(&own, &["meta-llama-3.1-8b-instruct-q4_0.gguf"]);
         let found = gguf_models_in(&own);
-        assert_eq!(names(&found), ["Phi-4", "Nemotron 3.5 Lightning", "Llama 3.1 8B"], "in the list's order");
+        assert_eq!(
+            names(&found),
+            ["Phi-4", "Nemotron 3.5 Lightning", "Llama 3.1 8B"],
+            "in the list's order"
+        );
         let ids: Vec<&str> = found.iter().map(|model| model.id.as_str()).collect();
-        assert_eq!(ids, [PHI_GGUF, NEMOTRON_GGUF, "meta-llama-3.1-8b-instruct-q4_0"], "under the ids llama-server gives them");
+        assert_eq!(
+            ids,
+            [PHI_GGUF, NEMOTRON_GGUF, "meta-llama-3.1-8b-instruct-q4_0"],
+            "under the ids llama-server gives them"
+        );
         assert_eq!(Layout::Gguf.folder_name("microsoft/phi-4-gguf"), PHI_GGUF);
-        assert_eq!(Layout::Hub.folder_name("microsoft/phi-4-gguf"), "models--microsoft--phi-4-gguf");
+        assert_eq!(
+            Layout::Hub.folder_name("microsoft/phi-4-gguf"),
+            "models--microsoft--phi-4-gguf"
+        );
     }
 
     #[test]
@@ -638,23 +792,41 @@ mod tests {
             whole_gguf(&gguf(&folder, files))
         };
         assert!(whole(&["phi-4-Q4_K.gguf"]));
-        assert!(whole(&["mmproj-phi-4-f16.gguf", "phi-4-Q4_K.gguf"]), "a projector beside the model");
-        assert!(whole(&["phi-4-00001-of-00002.gguf", "phi-4-00002-of-00002.gguf"]), "every part");
+        assert!(
+            whole(&["mmproj-phi-4-f16.gguf", "phi-4-Q4_K.gguf"]),
+            "a projector beside the model"
+        );
+        assert!(
+            whole(&["phi-4-00001-of-00002.gguf", "phi-4-00002-of-00002.gguf"]),
+            "every part"
+        );
 
         assert!(!whole(&[]), "an empty folder");
         assert!(!whole(&["mmproj-phi-4-f16.gguf"]), "only the projector");
         assert!(!whole(&["mtp-phi-4.gguf"]), "only a draft model");
         assert!(!whole(&["dspark-phi-4.gguf"]), "only a draft model");
         assert!(!whole(&["dflash-phi-4.gguf"]), "only a draft model");
-        assert!(!whole(&["phi-4-Q4_K.gguf.part"]), "a download still under way");
+        assert!(
+            !whole(&["phi-4-Q4_K.gguf.part"]),
+            "a download still under way"
+        );
         assert!(!whole(&["phi-4-Q4_K.safetensors"]), "not a GGUF file");
-        assert!(!whole(&["phi-4-00001-of-00003.gguf", "phi-4-00003-of-00003.gguf"]), "a part missing");
-        assert!(!whole(&["phi-4-00001-of-0000x.gguf"]), "a count that is not a number");
+        assert!(
+            !whole(&["phi-4-00001-of-00003.gguf", "phi-4-00003-of-00003.gguf"]),
+            "a part missing"
+        );
+        assert!(
+            !whole(&["phi-4-00001-of-0000x.gguf"]),
+            "a count that is not a number"
+        );
         assert!(!whole(&["phi-4-00001-of-00000.gguf"]), "no parts at all");
 
         let folder_not_file = gguf(&root.join("folder"), &[]);
         fs::create_dir(folder_not_file.join("phi-4-Q4_K.gguf")).unwrap();
-        assert!(!whole_gguf(&folder_not_file), "a folder named like a model file");
+        assert!(
+            !whole_gguf(&folder_not_file),
+            "a folder named like a model file"
+        );
         assert!(!whole_gguf(&root.join("not-there")), "no folder");
     }
 
@@ -662,7 +834,8 @@ mod tests {
     #[test]
     fn a_gguf_link_to_nothing_is_not_a_model() {
         let folder = gguf(&scratch().join(PHI_GGUF), &[]);
-        std::os::unix::fs::symlink(folder.join("gone.gguf"), folder.join("phi-4-Q4_K.gguf")).unwrap();
+        std::os::unix::fs::symlink(folder.join("gone.gguf"), folder.join("phi-4-Q4_K.gguf"))
+            .unwrap();
         assert!(!whole_gguf(&folder));
         let real = gguf(&scratch(), &["phi-4-Q4_K.gguf"]).join("phi-4-Q4_K.gguf");
         fs::remove_file(folder.join("phi-4-Q4_K.gguf")).unwrap();
@@ -673,7 +846,10 @@ mod tests {
     #[test]
     fn a_gguf_model_off_the_list_or_half_there_is_not_reported() {
         let own = scratch().join("models");
-        gguf(&own.join("someone--other-model-GGUF"), &["other-model-Q4_0.gguf"]);
+        gguf(
+            &own.join("someone--other-model-GGUF"),
+            &["other-model-Q4_0.gguf"],
+        );
         gguf(&own, &["other-model-Q4_0.gguf"]);
         gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf.part"]);
         gguf(&own.join(NEMOTRON_GGUF), &["mmproj-nemotron-f16.gguf"]);
@@ -689,8 +865,14 @@ mod tests {
     fn no_gguf_folder_means_no_models_and_looking_changes_nothing() {
         assert!(gguf_models_in(&scratch().join("not-there")).is_empty());
         let own = scratch().join("models");
-        gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf", "phi-4-Q4_K.gguf.part"]);
-        gguf(&own.join("someone--other-model-GGUF"), &["other-model-Q4_0.gguf"]);
+        gguf(
+            &own.join(PHI_GGUF),
+            &["phi-4-Q4_K.gguf", "phi-4-Q4_K.gguf.part"],
+        );
+        gguf(
+            &own.join("someone--other-model-GGUF"),
+            &["other-model-Q4_0.gguf"],
+        );
         let before = everything_in(&own);
         assert_eq!(names(&gguf_models_in(&own)), ["Phi-4"]);
         assert_eq!(everything_in(&own), before);
@@ -702,8 +884,15 @@ mod tests {
     fn live_on_this_computer() {
         let found = on_disk();
         println!("On this computer: {:?}", names(&found));
-        assert!(!found.is_empty(), "none of the app's models is in the cache folder");
+        assert!(
+            !found.is_empty(),
+            "none of the app's models is in the cache folder"
+        );
         let ids: Vec<String> = found.iter().map(|model| model.id.clone()).collect();
-        assert_eq!(engine::allowed_models(&ids), found, "every model found is on the app's list");
+        assert_eq!(
+            engine::allowed_models(&ids),
+            found,
+            "every model found is on the app's list"
+        );
     }
 }
