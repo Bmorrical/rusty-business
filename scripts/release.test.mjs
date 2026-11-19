@@ -174,23 +174,24 @@ test('a release asks once whether the tag is there, then makes it at this commit
   const notes = result.calls[1][10];
   assert.deepEqual(result.calls[1], createOf(TAG, VERSION, notes, dist));
 
-  // What a person reads on the release page. The roadmap, for Windows:
-  // "Until Windows has an engine, the window opens and says so. Unsigned at
-  // first; see pin 1."
+  // What a person reads on the release page. Brad, 2026-11-19: "add an
+  // engine to linux and windows distro's." The app starts llama.cpp's
+  // llama-server there once it is installed, so the notes say so, and no
+  // longer that the app has no engine.
   for (const words of [
     `Rusty Business™ ${VERSION}, for a Mac, for Windows, and for Linux.`,
     'On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:',
     `Download ${DMG}, open it, and drag Rusty Business™ to Applications.`,
     'It is not signed yet, so macOS stops it',
     'Privacy & Security, and choose Open Anyway.',
-    'On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the window opens and says so.',
+    "On 64-bit Windows 10 or 11. The installer carries no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.",
     `Download ${EXE} and open it.`,
     'It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.',
     `    shasum -a 256 -c ${DMG}.sha256`,
     `    (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]`,
     // The roadmap, for Linux: "A `.deb`, an `.rpm`, and a `.tar.gz`, linked
     // from the README beside the Mac's `.dmg` and the Windows `.exe`".
-    'On 64-bit Linux on an Intel or AMD processor. The app has no model engine for Linux yet, so the window opens and says so.',
+    "On 64-bit Linux on an Intel or AMD processor. The files carry no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.",
     `On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}`,
     `On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}`,
     `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.`,
@@ -200,6 +201,7 @@ test('a release asks once whether the tag is there, then makes it at this commit
   ]) {
     assert.ok(notes.includes(words), `the release notes do not say: ${words}`);
   }
+  assert.ok(!notes.includes('has no model engine'), 'the release notes still say the app has no engine');
 
   assert.deepEqual(result.tokens, [TOKEN, TOKEN], 'gh did not get the token in its environment');
   for (const call of result.calls) {

@@ -24,7 +24,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.6.0. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.6.1. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
