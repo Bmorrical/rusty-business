@@ -11,10 +11,28 @@
 **On this page:** [Screenshots](#screenshots) ·
 [Rusty Business™ or Ollama?](#rusty-business-or-ollama) ·
 [Rusty Business™, Ollama, or Colibri?](#rusty-business-ollama-or-colibri) ·
-[What is here](#what-is-here) · [Mac](#run-the-chat-window-macos) ·
-[Windows](#run-the-chat-window-windows) · [Linux](#run-the-chat-window-linux) ·
+[What is here](#what-is-here) ·
+[Download the built app](#download-the-built-app) ·
+[Mac](#run-the-chat-window-macos) · [Windows](#run-the-chat-window-windows) ·
+[Linux](#run-the-chat-window-linux) ·
+[Build it from source](#build-it-from-source) ·
+[Run it from localhost](#run-it-from-localhost) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
 [Roadmap](#roadmap) · [Security](#security) · [License](#license)
+
+**Three ways to install it:**
+
+1. [**Download the built app**](#download-the-built-app). Pick your system
+   in the table above. There is nothing to build, and the Mac app carries
+   its model engine. The Windows and Linux apps have none yet.
+2. [**Build it from source**](#build-it-from-source). One line clones it
+   and builds the same app. It needs Apple's command line tools on a Mac,
+   Git Bash and Microsoft's C++ build tools on Windows, or WebKitGTK,
+   OpenSSL, and a C compiler on Linux. It fetches its own Rust and Node.
+3. [**Run it from localhost**](#run-it-from-localhost). The window loads
+   its page from a server on your own computer and reloads it as you edit.
+   It needs Rust, Node 20 or later, what building from source needs, and a
+   model engine on the computer.
 
 A desktop window for chatting with models that run on your own computer, and
 the start of the servers that will sit behind it. It is local first: a chat
@@ -24,8 +42,8 @@ OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
 with your own key.
 
 **Status:** version 0.6.0, and early. It runs on a Mac with Apple silicon:
-[download it](#run-the-chat-window-macos), or build it from source with one
-command. Windows has [an installer](#run-the-chat-window-windows), and Linux
+[download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
+with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
 has a model engine yet. What it cannot do yet is under [Limits](#limits).
 
@@ -176,6 +194,17 @@ The chat window starts the stack when Docker is on the computer and the
 outbound gate is on, and does not use it yet: it talks only to the model engine on this computer. The stack is
 the ground the next features stand on.
 
+## Download the built app
+
+The table at the top of this page links the newest download for each
+system. What each one needs, and how to open it the first time, is in its
+own section: [Mac](#run-the-chat-window-macos),
+[Windows](#run-the-chat-window-windows), and
+[Linux](#run-the-chat-window-linux). None is signed yet, so a Mac or a
+Windows computer warns once before it opens one. Each file's checksum is
+beside it on the
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+
 ## Run the chat window (macOS)
 
 On a Mac with Apple silicon and macOS 14 or later:
@@ -190,29 +219,8 @@ On a Mac with Apple silicon and macOS 14 or later:
 The model engine is inside the app, so there is nothing else to install. The
 `.dmg`'s checksum is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest),
-for checking the download first.
-
-### Or build it yourself
-
-This one line builds the same app, with its model engine inside, and opens
-it:
-
-```bash
-git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && make app
-```
-
-It needs Apple's command line tools, which bring `git` and `make`. On a Mac
-without them, the first `git` offers to install them; then run the line
-again. Everything else it fetches itself, its own Rust, Node, and Python
-included, each pinned by version and checksum. All of it stays in
-`apps/desktop/src-tauri/target/mac`, which git ignores, and nothing is
-installed in your home folder or on the system. The first run takes longer,
-since it fetches and builds everything once; later runs keep what still
-matches its pins.
-
-`make dmg` builds the same app and packs it as a `.dmg`, with its checksum
-beside it, in that folder. The download above is that `.dmg`, built on
-GitHub's Mac by the Release workflow after a green gate.
+for checking the download first. To build the same app yourself, see
+[Build it from source](#on-a-mac).
 
 On a first run, with none of its models on the computer, the app lists the
 models of the makers you tick, Microsoft to begin with, with their download
@@ -252,21 +260,6 @@ When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
 and left running.
 
-To work on the app itself, with the page reloading as you edit it, you need
-Rust, Node 20 or later, Xcode's command line tools, and the model engine,
-`mlx_lm.server`, on the computer:
-
-```bash
-cd apps/desktop && npm install && npm run tauri dev
-```
-
-Run that way, the app carries no engine, so it starts `mlx_lm.server` from
-where it is installed. To start one yourself, in another terminal:
-
-```bash
-mlx_lm.server --port 8080
-```
-
 When Docker is on the computer and the gate is on, the app also starts the
 stack, opening Docker Desktop first when it is not running. It pulls the API
 and the worker from GitHub's container registry, so nothing is built, and the
@@ -294,21 +287,8 @@ The app has no model engine for Windows yet, so the window opens and says
 so. (On the roadmap: An engine for Windows and Linux.) The `.exe`'s checksum
 is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
-
-### Or build it yourself
-
-In Git Bash on 64-bit Windows, with Microsoft's C++ build tools installed,
-this one line builds the same installer:
-
-```bash
-git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && scripts/windows-app.sh
-```
-
-It fetches its own Rust and Node, each pinned by version and checksum, into
-`apps/desktop/src-tauri/target/windows`, which git ignores, and leaves the
-installer there. It changes no setting of the computer's. The download above
-is that installer, built on GitHub's Windows computer by the Release workflow
-after a green gate.
+To build the same installer yourself, see
+[Build it from source](#on-windows).
 
 ## Run the chat window (Linux)
 
@@ -332,10 +312,54 @@ The app has no model engine for Linux yet, so the window opens and says so.
 (On the roadmap: An engine for Windows and Linux.) Each file's checksum is
 beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+To build the same three files yourself, see
+[Build it from source](#on-linux).
 
-### Or build it yourself
+## Build it from source
 
-On 64-bit Linux, this one line builds the same three files:
+One line builds the same app as the download, from this repository. Each
+system's line, and what it needs, is below.
+
+### On a Mac
+
+This one line builds the app, with its model engine inside, and opens it:
+
+```bash
+git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && make app
+```
+
+It needs Apple's command line tools, which bring `git` and `make`. On a Mac
+without them, the first `git` offers to install them; then run the line
+again. Everything else it fetches itself, its own Rust, Node, and Python
+included, each pinned by version and checksum. All of it stays in
+`apps/desktop/src-tauri/target/mac`, which git ignores, and nothing is
+installed in your home folder or on the system. The first run takes longer,
+since it fetches and builds everything once; later runs keep what still
+matches its pins.
+
+`make dmg` builds the same app and packs it as a `.dmg`, with its checksum
+beside it, in that folder. The Mac download is that `.dmg`, built on
+GitHub's Mac by the Release workflow after a green gate.
+
+### On Windows
+
+In Git Bash on 64-bit Windows, with Microsoft's C++ build tools installed,
+this one line builds the installer:
+
+```bash
+git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && scripts/windows-app.sh
+```
+
+It fetches its own Rust and Node, each pinned by version and checksum, into
+`apps/desktop/src-tauri/target/windows`, which git ignores, and leaves the
+installer there. It changes no setting of the computer's. The Windows
+download is that installer, built on GitHub's Windows computer by the
+Release workflow after a green gate.
+
+### On Linux
+
+On 64-bit Linux, this one line builds the `.deb`, the `.rpm`, and the
+`.tar.gz`:
 
 ```bash
 git clone https://github.com/Bmorrical/rusty-business.git && cd rusty-business && scripts/linux-app.sh
@@ -346,10 +370,34 @@ missing, it stops and gives the line that installs them on Ubuntu or Debian.
 It fetches its own Rust and Node, each pinned by version and checksum, into
 `apps/desktop/src-tauri/target/linux`, which git ignores, and leaves the
 three files there. It installs nothing and changes no setting of the
-computer's. The downloads above are those files, built in Ubuntu 22.04 on
+computer's. The Linux downloads are those files, built in Ubuntu 22.04 on
 GitHub's computer by the Release workflow after a green gate. A program built
 against a newer glibc does not start on an older one, so they are built on
 the oldest system they are for.
+
+## Run it from localhost
+
+To work on the app itself, run it from its source. The window then loads
+its page from a server on your own computer, at 127.0.0.1:1420, and reloads
+it as you edit. You need Rust, Node 20 or later, what
+[building from source](#build-it-from-source) needs on your system, and a
+model engine on the computer. In a copy of this repository:
+
+```bash
+cd apps/desktop && npm install && npm run tauri dev
+```
+
+Run that way, the app carries no engine, so it starts the one it finds on
+the computer. On a Mac, that is `mlx_lm.server`, from Python's `mlx-lm`
+package. To start one yourself, in another terminal:
+
+```bash
+mlx_lm.server --port 8080
+```
+
+On Windows and Linux, the app looks for llama.cpp's `llama-server` instead,
+and starts it with its own models folder. The downloads do not carry one
+yet.
 
 ## Run the stack
 
