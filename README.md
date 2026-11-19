@@ -217,6 +217,13 @@ On a Mac with Apple silicon and macOS 14 or later:
    open it, and drag Rusty Business™ to Applications.
 2. Open the app. It is not signed yet, so macOS stops it the first time:
    open System Settings, then Privacy & Security, and choose Open Anyway.
+   Or, in Terminal, clear the mark macOS puts on a download, then open the
+   app as usual:
+
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/Rusty Business.app"
+   ```
+
    See pin 1 on the [roadmap](ROADMAP.md).
 
 The model engine is inside the app, so there is nothing else to install. The
@@ -482,7 +489,8 @@ next.
   once you install it, and until then the window says it found none. (On
   the roadmap: An engine for Windows and Linux.)
 - **Not signed yet.** macOS stops the downloaded app the first time it
-  opens, until you choose Open Anyway in System Settings. Windows may stop
+  opens, until you choose Open Anyway in System Settings or run the command
+  in [Run the chat window (macOS)](#run-the-chat-window-macos). Windows may stop
   the installer until you choose More info, then Run anyway. (On the
   roadmap: Signed installers.)
 - **A new version is a download.** When one is out, the window says so, and
