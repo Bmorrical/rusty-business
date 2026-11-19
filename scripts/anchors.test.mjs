@@ -121,7 +121,10 @@ test('right under the picture, a table gives every download, one click each, wit
     ['run-the-chat-window-macos', 'run-the-chat-window-windows', 'run-the-chat-window-linux'],
     'each row does not end with a link to its own steps',
   );
-  for (const row of rows.slice(1)) assert.ok(row.includes('no model engine yet'), `a row does not say it has no engine: ${row}`);
+  // Brad, 2026-11-19: "add an engine to linux and windows distro's." The
+  // Windows and Linux apps start llama.cpp once it is installed, so their rows
+  // say what to install.
+  for (const row of rows.slice(1)) assert.ok(row.includes('with llama.cpp installed'), `a row does not say it needs llama.cpp: ${row}`);
 });
 
 test('under the downloads, the index links every section, in the order of the page', () => {
@@ -206,4 +209,28 @@ test('at the top, three ways to install it, each a link to the section that desc
   }
   assert.ok(sectionOf('run-it-from-localhost').includes('npm run tauri dev'), 'the Run it from localhost section does not give npm run tauri dev');
   assert.ok(sectionOf('run-it-from-localhost').includes('127.0.0.1:1420'), 'the Run it from localhost section does not say where the page is served');
+});
+
+// Brad, 2026-11-19: "add an engine to linux and windows distro's." Since
+// 0.6.0 the Windows and Linux apps start llama.cpp's llama-server once it is
+// installed, though the downloads do not carry it yet. So the README says
+// where the app looks, links llama.cpp's own install page, and no longer says
+// those apps have no engine.
+const LLAMA_INSTALL = 'https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md';
+const STALE = [', no model engine yet', 'has no model engine', 'have none yet', 'with no engine yet', 'Chats need a Mac'];
+
+test('the Windows and Linux sections say the app starts an installed llama.cpp, and how to get one', () => {
+  for (const address of ['run-the-chat-window-windows', 'run-the-chat-window-linux']) {
+    const body = sectionOf(address).replace(/\s+/g, ' ');
+    assert.ok(body.includes("The app starts llama.cpp's"), `${address} does not say the app starts llama.cpp`);
+    assert.ok(body.includes(`](${LLAMA_INSTALL})`), `${address} does not link llama.cpp's install page`);
+    assert.ok(body.includes('`RUSTY_ENGINE_PROGRAM` names one kept somewhere else, by its full path'), `${address} does not say how to name one kept elsewhere`);
+    assert.ok(body.includes('Without it, the window opens and says so') || body.includes('otherwise the window opens and says so'), `${address} does not say what happens without it`);
+    assert.ok(body.includes('(On the roadmap: An engine for Windows and Linux.)'), `${address} does not point at the roadmap`);
+  }
+  assert.ok(sectionOf('run-the-chat-window-windows').includes('`llama-server.exe` when it finds it in a folder on `PATH`'), 'the Windows section does not say it looks on PATH');
+  const linux = sectionOf('run-the-chat-window-linux').replace(/\s+/g, ' ');
+  assert.ok(linux.includes('`~/.local/bin`, Homebrew\'s folder, `/usr/local/bin`, and `/usr/bin`'), 'the Linux section does not give the folders the app looks in');
+  const flat = readme.replace(/\s+/g, ' ');
+  for (const words of STALE) assert.ok(!flat.includes(words), `the README still says "${words}"`);
 });

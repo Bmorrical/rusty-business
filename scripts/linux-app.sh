@@ -18,8 +18,9 @@
 # C compiler, is installed once by a person who may, and when any of it is
 # missing the script stops and gives the line that installs it.
 #
-# The window has no engine on Linux yet, so the packages carry none, and the
-# window says so.
+# The packages carry no model engine yet. The app starts llama.cpp's
+# llama-server when it finds it on the computer, and otherwise the window
+# says so.
 #
 # Safe to run again: what is already fetched and still matches its pin is
 # kept.

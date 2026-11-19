@@ -58,7 +58,7 @@ Release puts the app on a GitHub release named for its version, such as
 `v0.3.0`: `Rusty-Business-mac-arm64.dmg`, with the model engine inside,
 `Rusty-Business-windows-x64-setup.exe`, and for Linux
 `Rusty-Business-linux-x64.deb`, `Rusty-Business-linux-x64.rpm`, and
-`Rusty-Business-linux-x64.tar.gz`, those four with no engine yet, and a
+`Rusty-Business-linux-x64.tar.gz`, those four with no engine inside yet, and a
 checksum for each. It is marked as the newest release, which is the one the README's
 download links find.
 
