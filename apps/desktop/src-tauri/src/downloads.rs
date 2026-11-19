@@ -5,16 +5,19 @@
 //! the models folder the engine reads. The engine lists it the next time it is
 //! asked, so nothing needs a restart.
 //!
-//! Five rules live here:
+//! Six rules live here:
 //! - only a model on the app's list is downloaded, at the revision pinned in
-//!   `pinned-models.json`, and only the files listed there;
+//!   `pinned-models.json` on a Mac, or in `pinned-gguf-models.json` on Windows
+//!   and Linux, and only the files listed there;
 //! - only from Hugging Face, over https: a redirect anywhere else is refused,
 //!   and no proxy, account, token, or cookie is used;
 //! - every file's size and SHA-256 are checked as it arrives, and a mismatch
 //!   throws the whole download away;
 //! - the models folder is only added to: a finished model moves in whole, and
 //!   only where there is no folder for it yet;
-//! - one download at a time, and Cancel stops it and leaves nothing behind.
+//! - one download at a time, and Cancel stops it and leaves nothing behind;
+//! - nothing is asked for while the outbound gate is off, and turning it off
+//!   stops a download as Cancel does, then says why.
 //!
 //! A download is put together in the app's own folder, beside `sessions`, and
 //! moves into the models folder in one step once every file has been checked.
@@ -35,6 +38,7 @@ use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::gate::Gate;
 use crate::{engine, models};
 
 /// Where the app downloads from.
@@ -92,10 +96,28 @@ impl Pinned {
     }
 }
 
-/// The models the app can download. The list is built into the app, and its
-/// tests check it.
+/// The models the app can download on a Mac, as MLX models. The list is built
+/// into the app, and its tests check it.
 static PINNED: LazyLock<Vec<Pinned>> =
     LazyLock::new(|| serde_json::from_str(include_str!("../pinned-models.json")).unwrap_or_default());
+
+/// The same models as GGUF files, which `llama-server` serves on Windows and
+/// Linux: from the maker's own copy first, then ggml-org's.
+static GGUF_PINNED: LazyLock<Vec<Pinned>> =
+    LazyLock::new(|| serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap_or_default());
+
+/// The list for this system's engine.
+fn pins_here() -> &'static [Pinned] {
+    pins_for(models::Layout::here())
+}
+
+/// The list for the engine that reads models laid out this way.
+fn pins_for(layout: models::Layout) -> &'static [Pinned] {
+    match layout {
+        models::Layout::Hub => &PINNED,
+        models::Layout::Gguf => &GGUF_PINNED,
+    }
+}
 
 /// True when a pin can be used as it is: an id with one slash, a revision that
 /// is a whole commit, and plain file names, each with its size and SHA-256.
@@ -139,15 +161,14 @@ pub struct Offer {
     pub id: String,
     pub name: String,
     pub maker: String,
+    pub license: String,
     pub bytes: u64,
 }
 
-/// Every model the app can download, in the list's order. The page shows
-/// them only while none of them is on the disk. The models are MLX models,
-/// which only the Mac's engine serves, so nothing is offered on other
-/// systems yet.
+/// Every model the app can download for this system's engine, in the list's
+/// order. The page shows them only while none of them is on the disk.
 pub fn offers() -> Vec<Offer> {
-    if cfg!(target_os = "macos") { offers_from(&PINNED) } else { Vec::new() }
+    offers_from(pins_here())
 }
 
 fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
@@ -156,7 +177,8 @@ fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
         .into_iter()
         .filter_map(|model| {
             let bytes = pinned(pins, &model.id)?.bytes();
-            Some(Offer { id: model.id, name: model.name, maker: model.maker, bytes })
+            let license = engine::license_of(&model.name)?.to_string();
+            Some(Offer { id: model.id, name: model.name, maker: model.maker, license, bytes })
         })
         .collect()
 }
@@ -253,9 +275,9 @@ fn size(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
-fn facts(pin: Option<&Pinned>, hub: Option<&Path>, staging: &Path, busy: bool) -> Facts {
+fn facts(pin: Option<&Pinned>, layout: models::Layout, hub: Option<&Path>, staging: &Path, busy: bool) -> Facts {
     let there = match (pin, hub) {
-        (Some(pin), Some(hub)) => what_is_there(&hub.join(models::folder_name(&pin.id))),
+        (Some(pin), Some(hub)) => what_is_there(layout, &hub.join(layout.folder_name(&pin.id))),
         _ => There::Nothing,
     };
     Facts {
@@ -271,10 +293,10 @@ fn facts(pin: Option<&Pinned>, hub: Option<&Path>, staging: &Path, busy: bool) -
 
 /// Anything at all where the folder would go, even a link to nothing, is
 /// there. Only a whole model counts as the model.
-fn what_is_there(folder: &Path) -> There {
+fn what_is_there(layout: models::Layout, folder: &Path) -> There {
     match fs::symlink_metadata(folder) {
         Err(error) if error.kind() == ErrorKind::NotFound => There::Nothing,
-        _ if models::whole(folder) => There::Whole,
+        _ if layout.whole(folder) => There::Whole,
         _ => There::Part,
     }
 }
@@ -357,19 +379,26 @@ fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-/// The one client downloads use. It sends no account, token, or cookie: no
-/// such thing is ever added to a request here, and it keeps no cookies.
-fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .no_proxy()
-        .https_only(true)
-        .redirect(redirect_policy())
-        .referer(false)
-        .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(CONNECT_WAIT)
-        .read_timeout(READ_WAIT)
-        .build()
-        .map_err(|error| format!("Could not set up the connection: {error}"))
+/// What Download says while the outbound gate is off.
+const GATE_OFF: &str = "The gate is off. Turn it on to download a model.";
+
+/// What a download says when the gate is turned off part way.
+const GATE_TURNED_OFF: &str = "The gate was turned off, so the download stopped.";
+
+/// The one client downloads use, through the outbound gate. It sends no
+/// account, token, or cookie: no such thing is ever added to a request here,
+/// and it keeps no cookies.
+fn client(gate: &Gate) -> Result<reqwest::Client, String> {
+    gate.client(GATE_OFF, |builder| {
+        builder
+            .no_proxy()
+            .https_only(true)
+            .redirect(redirect_policy())
+            .referer(false)
+            .user_agent(concat!("rusty-business/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_WAIT)
+            .read_timeout(READ_WAIT)
+    })
 }
 
 fn file_url(pin: &Pinned, file: &PinnedFile) -> String {
@@ -486,19 +515,26 @@ async fn fetch_file(
 }
 
 /// Puts a whole model together in `staged`, laid out the way the models
-/// folder lays out a model: its files under `snapshots/<revision>`, and
-/// `refs/main` naming that revision.
+/// folder lays out a model. In the Hugging Face cache, that is its files
+/// under `snapshots/<revision>`, and `refs/main` naming that revision. In the
+/// app's own models folder, it is the files alone.
 async fn fetch_model(
     pin: &Pinned,
+    layout: models::Layout,
     staged: &Path,
     open: &mut impl FnMut(String) -> Opening,
     cancel: &mut watch::Receiver<bool>,
     report: &mut impl FnMut(Progress),
 ) -> Result<Fetched, String> {
     let cannot = |error: std::io::Error| format!("The app could not write the download: {error}.");
-    let snapshot = staged.join("snapshots").join(&pin.revision);
+    let snapshot = match layout {
+        models::Layout::Hub => staged.join("snapshots").join(&pin.revision),
+        models::Layout::Gguf => staged.to_path_buf(),
+    };
     fs::create_dir_all(&snapshot).map_err(cannot)?;
-    fs::create_dir_all(staged.join("refs")).map_err(cannot)?;
+    if layout == models::Layout::Hub {
+        fs::create_dir_all(staged.join("refs")).map_err(cannot)?;
+    }
     let total = pin.bytes();
     let mut done = 0;
     let mut told = Instant::now();
@@ -521,9 +557,11 @@ async fn fetch_model(
         }
         report(Progress { done, total });
     }
-    // No line ending: the engine reads the revision exactly as written.
-    fs::write(staged.join("refs").join("main"), &pin.revision).map_err(cannot)?;
-    if !models::whole(staged) {
+    if layout == models::Layout::Hub {
+        // No line ending: the engine reads the revision exactly as written.
+        fs::write(staged.join("refs").join("main"), &pin.revision).map_err(cannot)?;
+    }
+    if !layout.whole(staged) {
         return Err("The download finished without a whole model, so it was thrown away.".to_string());
     }
     Ok(Fetched::Whole)
@@ -629,6 +667,7 @@ impl Downloads {
         &self,
         id: &str,
         pins: &[Pinned],
+        layout: models::Layout,
         hub: Option<PathBuf>,
         mut open: impl FnMut(String) -> Opening,
         mut report: impl FnMut(Progress),
@@ -637,7 +676,7 @@ impl Downloads {
         let name = name_of(id);
         let mut cancel = {
             let mut slot = self.slot();
-            let facts = facts(pin, hub.as_deref(), &self.staging, slot.is_some());
+            let facts = facts(pin, layout, hub.as_deref(), &self.staging, slot.is_some());
             match plan(&facts) {
                 Step::Nothing => return Ok(DownloadReport { whole: true, stopped: false }),
                 Step::Cannot(why) => return Err(sentence(why, &name, facts.needed)),
@@ -652,10 +691,11 @@ impl Downloads {
         let (Some(pin), Some(hub)) = (pin, hub) else {
             return Err(sentence(Why::NotListed, &name, 0));
         };
-        let folder = models::folder_name(&pin.id);
-        let staged = self.staging.join(&folder);
+        // Staged under the cache's name on every system, so `clear` knows it.
+        let staged = self.staging.join(models::folder_name(&pin.id));
+        let folder = layout.folder_name(&pin.id);
         self.clear();
-        let fetched = fetch_model(pin, &staged, &mut open, &mut cancel, &mut report).await;
+        let fetched = fetch_model(pin, layout, &staged, &mut open, &mut cancel, &mut report).await;
         let result = match fetched {
             Ok(Fetched::Whole) => move_in(&staged, &hub, &folder, &name).map(|()| DownloadReport { whole: true, stopped: false }),
             Ok(Fetched::Stopped) => Ok(DownloadReport { whole: false, stopped: true }),
@@ -666,20 +706,59 @@ impl Downloads {
     }
 }
 
+/// A download while the outbound gate stays on. Each file is asked for only
+/// while it is on, and a download stopped by turning it off says so.
+async fn download_through(
+    downloads: &Downloads,
+    gate: &Gate,
+    id: &str,
+    pins: &[Pinned],
+    layout: models::Layout,
+    hub: Option<PathBuf>,
+    mut open: impl FnMut(String) -> Opening,
+    report: impl FnMut(Progress),
+) -> Result<DownloadReport, String> {
+    if !gate.is_open() {
+        return Err(GATE_OFF.to_string());
+    }
+    let watching = gate.clone();
+    let gated = move |url: String| -> Opening { if watching.is_open() { open(url) } else { Box::pin(async { Err(GATE_TURNED_OFF.to_string()) }) } };
+    let done = downloads.download(id, pins, layout, hub, gated, report).await?;
+    if done.stopped && !gate.is_open() {
+        return Err(GATE_TURNED_OFF.to_string());
+    }
+    Ok(done)
+}
+
 #[tauri::command]
 pub async fn download_model(
     downloads: tauri::State<'_, Downloads>,
+    gate: tauri::State<'_, Gate>,
     id: String,
     on_progress: Channel<Progress>,
 ) -> Result<DownloadReport, String> {
-    let home = std::env::home_dir();
-    let hub = models::hub_folder(|name| std::env::var(name).ok(), home.as_deref());
-    let client = client()?;
+    let hub = models::models_folder();
+    let client = client(&gate)?;
     let open = move |url: String| open_url(client.clone(), url);
     let report = move |progress: Progress| {
         let _ = on_progress.send(progress);
     };
-    downloads.download(&id, &PINNED, hub, open, report).await
+    let layout = models::Layout::here();
+    let done = download_through(&downloads, &gate, &id, pins_here(), layout, hub, open, report).await?;
+    if reloads_after(layout, &done)
+        && let Ok(base) = engine::base_url()
+    {
+        engine::reload_models(&base).await;
+    }
+    Ok(done)
+}
+
+/// True when the engine is asked to read its models folder again: once a
+/// model has moved in whole, on Windows and Linux. `llama-server` reads the
+/// folder when it starts, so a model downloaded while it runs is not listed
+/// until then. On a Mac, `mlx_lm.server` looks in the cache each time.
+fn reloads_after(layout: models::Layout, done: &DownloadReport) -> bool {
+    layout == models::Layout::Gguf && done.whole
 }
 
 #[tauri::command]
@@ -696,6 +775,7 @@ mod tests {
     // when Download is pressed.
 
     use super::*;
+    use crate::models::Layout;
     use std::io::Read;
     use std::net::TcpListener;
     use std::sync::Arc;
@@ -758,6 +838,11 @@ mod tests {
                 Ok(Box::pin(futures_util::stream::iter(parts)) as Chunks)
             })
         }
+    }
+
+    /// The app's own client, with the gate on.
+    fn open_client() -> reqwest::Client {
+        client(&Gate::at(true)).unwrap()
     }
 
     fn never_asked() -> (Arc<Mutex<Vec<String>>>, impl FnMut(String) -> Opening) {
@@ -824,7 +909,7 @@ mod tests {
     fn every_model_on_the_list_is_pinned_and_nothing_else_is() {
         let read: Vec<Pinned> = serde_json::from_str(include_str!("../pinned-models.json")).unwrap();
         assert_eq!(read.len(), PINNED.len());
-        assert_eq!(names_of(&offers_from(&PINNED)), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
+        assert_eq!(names_of(&offers_from(&PINNED)), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
         let ids: BTreeSet<&str> = PINNED.iter().map(|pin| pin.id.as_str()).collect();
         assert_eq!(ids.len(), PINNED.len(), "each model is pinned once");
         for pin in PINNED.iter() {
@@ -857,10 +942,14 @@ mod tests {
                 (PHI, 8_256_384_748),
                 ("mlx-community/gpt-oss-20b-MXFP4-Q8", 12_104_215_835),
                 ("mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", 17_792_581_692),
+                ("mlx-community/gemma-4-26b-a4b-it-4bit", 15_373_586_252),
+                ("mlx-community/Llama-3.1-8B-Instruct-4bit", 4_534_808_112),
             ]
         );
         let offered: Vec<u64> = offers_from(&PINNED).iter().map(|offer| offer.bytes).collect();
-        assert_eq!(offered, [8_256_384_748, 12_104_215_835, 17_792_581_692]);
+        assert_eq!(offered, [8_256_384_748, 12_104_215_835, 17_792_581_692, 15_373_586_252, 4_534_808_112]);
+        let licenses: Vec<String> = offers_from(&PINNED).into_iter().map(|offer| offer.license).collect();
+        assert_eq!(licenses, ["MIT", "Apache 2.0", "OpenMDW 1.1", "Apache 2.0", "Llama 3.1 Community License"]);
     }
 
     #[test]
@@ -889,6 +978,69 @@ mod tests {
             assert!(!usable(&pin), "{what}");
             assert!(pinned(&[pin], PHI).is_none() || what.starts_with("an id"), "{what}");
         }
+    }
+
+    // Brad, 2026-11-19: "add an engine to linux and windows distro's", with
+    // its models "Maker first, then ggml-org (Recommended)". On Windows and
+    // Linux, the same five models come as GGUF files for `llama-server`.
+
+    const FIVE: [&str; 5] = ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"];
+
+    #[test]
+    fn every_gguf_model_is_pinned_from_the_maker_first_then_ggml_org() {
+        // "Maker first, then ggml-org (Recommended)"
+        let read: Vec<Pinned> = serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap();
+        assert_eq!(read.len(), GGUF_PINNED.len());
+        assert_eq!(names_of(&offers_from(&GGUF_PINNED)), FIVE, "the same five models as on a Mac");
+        let owners: Vec<&str> = GGUF_PINNED.iter().map(|pin| pin.id.split('/').next().unwrap()).collect();
+        assert_eq!(owners, ["microsoft", "ggml-org", "ggml-org", "google", "ggml-org"]);
+        let makers = [("Microsoft", "microsoft"), ("OpenAI", "openai"), ("NVIDIA", "nvidia"), ("Google", "google"), ("Meta", "meta-llama")];
+        for pin in GGUF_PINNED.iter() {
+            assert!(usable(pin), "{} is not usable as pinned", pin.id);
+            let model = engine::allowed_models(std::slice::from_ref(&pin.id));
+            assert_eq!(model.len(), 1, "{} is on the list", pin.id);
+            let maker = makers.iter().find(|(name, _)| *name == model[0].maker).map(|(_, owner)| *owner).expect("a maker the test knows");
+            let owner = pin.id.split('/').next().unwrap();
+            assert!(owner == maker || owner == "ggml-org", "{} comes from {maker} or ggml-org", pin.id);
+        }
+    }
+
+    #[test]
+    fn each_gguf_pin_is_a_model_llama_server_loads_whole() {
+        // "add an engine to linux and windows distro's"
+        for pin in GGUF_PINNED.iter() {
+            assert!(pin.files.iter().all(|file| file.name.ends_with(".gguf")), "{} is GGUF files only", pin.id);
+            let folder = scratch().join(Layout::Gguf.folder_name(&pin.id));
+            fs::create_dir_all(&folder).unwrap();
+            for file in &pin.files {
+                fs::write(folder.join(&file.name), "weights").unwrap();
+            }
+            assert!(models::whole_gguf(&folder), "{} lands as a whole model", pin.id);
+            // llama-server names the model by its folder, and the app knows
+            // the model by that name.
+            let by_folder = engine::allowed_models(&[Layout::Gguf.folder_name(&pin.id)]);
+            assert_eq!(by_folder.first().map(|model| model.name.clone()), Some(name_of(&pin.id)), "{}", pin.id);
+        }
+    }
+
+    #[test]
+    fn the_gguf_sizes_offered_are_the_whole_downloads() {
+        let offered: Vec<u64> = offers_from(&GGUF_PINNED).iter().map(|offer| offer.bytes).collect();
+        assert_eq!(offered, [9_053_114_560, 12_109_566_624, 18_898_091_584, 14_439_363_584, 6_036_116_480]);
+        let licenses: Vec<String> = offers_from(&GGUF_PINNED).into_iter().map(|offer| offer.license).collect();
+        assert_eq!(licenses, ["MIT", "Apache 2.0", "OpenMDW 1.1", "Apache 2.0", "Llama 3.1 Community License"]);
+    }
+
+    #[test]
+    fn every_system_is_offered_the_five_models() {
+        // Windows and Linux were offered nothing before llama-server.
+        assert_eq!(names_of(&offers()), FIVE);
+        let gguf: Vec<&str> = pins_for(Layout::Gguf).iter().map(|pin| pin.id.as_str()).collect();
+        assert_eq!(gguf.len(), 5);
+        assert!(gguf.iter().all(|id| id.to_lowercase().contains("gguf")), "Windows and Linux get the GGUF list: {gguf:?}");
+        let mlx: Vec<&str> = pins_for(Layout::Hub).iter().map(|pin| pin.id.as_str()).collect();
+        assert!(mlx.iter().all(|id| id.starts_with("mlx-community/")), "a Mac gets the MLX list: {mlx:?}");
+        assert_eq!(names_of(&offers_from(pins_for(Layout::Hub))), names_of(&offers_from(pins_for(Layout::Gguf))));
     }
 
     #[test]
@@ -943,7 +1095,7 @@ mod tests {
     #[test]
     fn the_room_needed_is_the_download_and_some_to_spare() {
         let pin = pin_for(PHI, &files());
-        let found = facts(Some(&pin), None, &scratch(), false);
+        let found = facts(Some(&pin), Layout::Hub, None, &scratch(), false);
         // Two gigabytes left over, so a download never fills the disk.
         assert_eq!(found.needed, pin.bytes() + 2_000_000_000);
         assert!(!found.hub);
@@ -1039,7 +1191,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let callers = answer_at(listener, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string());
-        let error = block_on(client().unwrap().get(format!("http://127.0.0.1:{port}/")).send()).unwrap_err();
+        let error = block_on(open_client().get(format!("http://127.0.0.1:{port}/")).send()).unwrap_err();
         assert!(error.is_builder(), "{error:?}");
         thread::sleep(Duration::from_millis(100));
         assert_eq!(callers.load(Ordering::SeqCst), 0);
@@ -1048,14 +1200,30 @@ mod tests {
     #[test]
     fn the_apps_client_uses_no_proxy_and_the_redirect_rule_and_sends_no_referer() {
         // A client cannot be asked how it was built, so this reads the builder.
-        let built = include_str!("downloads.rs")
-            .split_once("fn client()")
-            .and_then(|(_, rest)| rest.split_once(".build()"))
-            .expect("the app's client")
-            .0;
+        let built =
+            include_str!("downloads.rs").split_once("fn client(gate: &Gate)").and_then(|(_, rest)| rest.split_once("\n}\n")).expect("the app's client").0;
+        assert!(built.contains("gate.client(GATE_OFF,"), "the client does not go through the gate: {built}");
         for setting in [".no_proxy()", ".https_only(true)", ".redirect(redirect_policy())", ".referer(false)"] {
             assert!(built.contains(setting), "{setting} is missing from: {built}");
         }
+    }
+
+    #[test]
+    fn llama_server_is_asked_to_read_its_folder_once_a_model_is_whole() {
+        // Brad, 2026-11-19: "add an engine to linux and windows distro's".
+        // `llama-server` reads its models folder when it starts, so a model
+        // downloaded while it runs would not be listed until then.
+        let whole = DownloadReport { whole: true, stopped: false };
+        let stopped = DownloadReport { whole: false, stopped: true };
+        assert!(reloads_after(models::Layout::Gguf, &whole));
+        assert!(!reloads_after(models::Layout::Gguf, &stopped));
+        assert!(!reloads_after(models::Layout::Hub, &whole), "mlx_lm.server looks in the cache each time");
+        let command = include_str!("downloads.rs")
+            .split_once("pub async fn download_model(")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .expect("the download command")
+            .0;
+        assert!(command.contains("reloads_after(layout, &done)") && command.contains("engine::reload_models(&base).await"), "{command}");
     }
 
     #[test]
@@ -1080,7 +1248,7 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         let asked = Arc::new(Mutex::new(Vec::new()));
         let mut told = Vec::new();
-        let report = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), serving(files.clone(), asked.clone()), |progress| told.push(progress)))
+        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), serving(files.clone(), asked.clone()), |progress| told.push(progress)))
             .unwrap();
         assert_eq!(report, DownloadReport { whole: true, stopped: false });
         assert_eq!(names(&models::models_in(&place.hub)), ["Phi-4"]);
@@ -1103,9 +1271,67 @@ mod tests {
         assert!(told.windows(2).all(|pair| pair[0].done <= pair[1].done));
     }
 
+    const PHI_GGUF: &str = "microsoft/phi-4-gguf";
+
+    fn gguf_files() -> Files {
+        vec![("phi-4-Q4_K.gguf".to_string(), (0..300_000u32).map(|n| (n % 241) as u8).collect())]
+    }
+
+    #[test]
+    fn a_gguf_model_downloads_whole_into_the_apps_own_folder() {
+        // "add an engine to linux and windows distro's"
+        let place = place();
+        let files = gguf_files();
+        let pins = vec![pin_for(PHI_GGUF, &files)];
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let report = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), serving(files.clone(), asked.clone()), |_| {}))
+            .unwrap();
+        assert_eq!(report, DownloadReport { whole: true, stopped: false });
+        assert_eq!(names(&models::gguf_models_in(&place.hub)), ["Phi-4"]);
+        assert_eq!(*asked.lock().unwrap(), [format!("https://huggingface.co/{PHI_GGUF}/resolve/{REVISION}/phi-4-Q4_K.gguf")]);
+
+        let folder = place.hub.join("microsoft--phi-4-gguf");
+        assert_eq!(fs::read(folder.join("phi-4-Q4_K.gguf")).unwrap(), files[0].1);
+        assert_eq!(everything_in(&folder), ["phi-4-Q4_K.gguf 300000"], "the file alone: no refs, no snapshots, nothing part way");
+        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+
+        // Once it is whole, nothing is asked for again.
+        let (asked, open) = never_asked();
+        let again = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), open, |_| {})).unwrap();
+        assert_eq!(again, DownloadReport { whole: true, stopped: false });
+        assert!(asked.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_gguf_file_that_does_not_match_its_checksum_leaves_nothing() {
+        let place = place();
+        let pins = vec![pin_for(PHI_GGUF, &gguf_files())];
+        let served = with_body(&gguf_files(), "phi-4-Q4_K.gguf", vec![7; 300_000]);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let error = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), serving(served, asked), |_| {})).unwrap_err();
+        assert!(error.contains("checksum"), "{error}");
+        assert!(everything_in(&place.hub).is_empty(), "nothing moved in");
+        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+    }
+
+    #[test]
+    fn part_of_a_gguf_model_in_the_apps_own_folder_is_left_as_it_is() {
+        let place = place();
+        let pins = vec![pin_for(PHI_GGUF, &gguf_files())];
+        let folder = place.hub.join("microsoft--phi-4-gguf");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("phi-4-Q4_K.gguf.part"), "half").unwrap();
+        let before = everything_in(&place.hub);
+        let (asked, open) = never_asked();
+        let error = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        assert_eq!(error, sentence(Why::PartThere, "Phi-4", 0));
+        assert!(asked.lock().unwrap().is_empty());
+        assert_eq!(everything_in(&place.hub), before);
+    }
+
     fn refused(place: &Place, served: Files, pins: &[Pinned]) -> String {
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let error = block_on(place.downloads.download(PHI, pins, Some(place.hub.clone()), serving(served, asked), |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(PHI, pins, Layout::Hub, Some(place.hub.clone()), serving(served, asked), |_| {})).unwrap_err();
         assert!(everything_in(&place.hub).is_empty(), "the models folder is not changed: {error}");
         assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder: {error}");
         assert!(place.downloads.slot().is_none(), "the slot is free again: {error}");
@@ -1163,7 +1389,7 @@ mod tests {
             };
             Box::pin(async move { Ok(Box::pin(futures_util::stream::iter(parts)) as Chunks) })
         };
-        let error = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
         assert_eq!(error, "The connection to Hugging Face dropped during model.safetensors.");
         assert!(everything_in(&place.hub).is_empty());
         assert!(everything_in(&place.staging).is_empty());
@@ -1223,7 +1449,7 @@ mod tests {
         };
         // If Cancel went unheard, the rest would never come, so the test gives
         // up after a while instead of waiting with it.
-        let stopping = place.downloads.download(PHI, &pins, Some(place.hub.clone()), open, |_| {});
+        let stopping = place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {});
         let report = block_on(async { tokio::time::timeout(Duration::from_secs(30), stopping).await }).expect("Cancel was not heard").unwrap();
         assert_eq!(report, DownloadReport { whole: false, stopped: true });
         assert_eq!(parts_seen.load(Ordering::SeqCst), 1, "Cancel came part way through the weights");
@@ -1238,11 +1464,69 @@ mod tests {
         let files = files();
         let pins = vec![pin_for(PHI, &files)];
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let report = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), serving(files, asked.clone()), |_| place.downloads.stop()))
+        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), serving(files, asked.clone()), |_| place.downloads.stop()))
             .unwrap();
         assert_eq!(report, DownloadReport { whole: false, stopped: true });
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&place.staging).is_empty());
+    }
+
+    // Brad, 2026-11-17: "there is a hard switch / circuit breaker to hard stop
+    // all outbound communication", and "off by default, everything stops".
+    #[test]
+    fn with_the_gate_off_nothing_is_downloaded() {
+        let place = place();
+        let files = files();
+        let pins = vec![pin_for(PHI, &files)];
+        let (asked, open) = never_asked();
+        let error = block_on(download_through(&place.downloads, &Gate::at(false), PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        assert_eq!(error, "The gate is off. Turn it on to download a model.");
+        assert_eq!(client(&Gate::at(false)).unwrap_err(), GATE_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&place.hub).is_empty());
+        assert!(everything_in(&place.staging).is_empty());
+    }
+
+    #[test]
+    fn turning_the_gate_off_stops_a_download_and_says_why() {
+        let files = files();
+        let pins = vec![pin_for(PHI, &files)];
+        // As the switch does: the gate turns off, and the download is stopped.
+        let first = place();
+        let gate = Gate::at(true);
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let switch = gate.clone();
+        let turn_off = |_| {
+            let _ = switch.set(false);
+            first.downloads.stop();
+        };
+        let error = block_on(download_through(&first.downloads, &gate, PHI, &pins, Layout::Hub, Some(first.hub.clone()), serving(files.clone(), asked.clone()), turn_off))
+            .unwrap_err();
+        assert_eq!(error, GATE_TURNED_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&first.hub).is_empty());
+        assert!(everything_in(&first.staging).is_empty());
+        assert!(first.downloads.slot().is_none(), "the slot is free again");
+
+        // Even unheard, the next file is not asked for.
+        let second = place();
+        let gate = Gate::at(true);
+        let switch = gate.clone();
+        let error = block_on(download_through(&second.downloads, &gate, PHI, &pins, Layout::Hub, Some(second.hub.clone()), serving(files, asked.clone()), |_| {
+            let _ = switch.set(false);
+        }))
+        .unwrap_err();
+        assert_eq!(error, GATE_TURNED_OFF);
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(everything_in(&second.staging).is_empty());
+
+        // Cancel with the gate on is still a plain stop.
+        let third = place();
+        let report = block_on(download_through(&third.downloads, &Gate::at(true), PHI, &pins, Layout::Hub, Some(third.hub.clone()), never_asked().1, |_| {
+            third.downloads.stop();
+        }))
+        .unwrap();
+        assert_eq!(report, DownloadReport { whole: false, stopped: true });
     }
 
     #[test]
@@ -1252,7 +1536,7 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         *place.downloads.slot() = Some(watch::channel(false).0);
         let (asked, open) = never_asked();
-        let error = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
         assert_eq!(error, "Another model is downloading, and the app downloads one at a time.");
         assert!(asked.lock().unwrap().is_empty());
         assert!(place.downloads.slot().is_some(), "the running download keeps its slot");
@@ -1266,7 +1550,7 @@ mod tests {
         whole_model(&place.hub, &files);
         let before = everything_in(&place.hub);
         let (asked, open) = never_asked();
-        let report = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), open, |_| {})).unwrap();
+        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap();
         assert_eq!(report, DownloadReport { whole: true, stopped: false });
         assert!(asked.lock().unwrap().is_empty());
         assert_eq!(everything_in(&place.hub), before);
@@ -1300,7 +1584,7 @@ mod tests {
             make(&place.hub);
             let before = everything_in(&place.hub);
             let (asked, open) = never_asked();
-            let error = block_on(place.downloads.download(PHI, &pins, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+            let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
             assert_eq!(error, "The models folder already holds part of Phi-4, and the app does not change what is there.", "{what}");
             assert!(asked.lock().unwrap().is_empty(), "{what}");
             assert_eq!(everything_in(&place.hub), before, "{what}");
@@ -1314,12 +1598,12 @@ mod tests {
         let pins = vec![pin_for(PHI, &files), pin_for("mlx-community/some-other-model", &files)];
         for id in ["mlx-community/some-other-model", "mlx-community/phi-4-8bit", "mlx-community/PHI-4-4bit", ""] {
             let (asked, open) = never_asked();
-            let error = block_on(place.downloads.download(id, &pins, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+            let error = block_on(place.downloads.download(id, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
             assert_eq!(error, "That model is not on this app's list.", "{id}");
             assert!(asked.lock().unwrap().is_empty(), "{id}");
         }
         let (asked, open) = never_asked();
-        let error = block_on(place.downloads.download(PHI, &pins, None, open, |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, None, open, |_| {})).unwrap_err();
         assert_eq!(error, "The app could not work out where the models folder is.");
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&place.hub).is_empty());
@@ -1405,8 +1689,8 @@ mod tests {
 
     #[test]
     fn the_page_is_told_under_the_names_it_reads() {
-        let offer = Offer { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), bytes: 8 };
-        assert_eq!(serde_json::to_value(&offer).unwrap(), serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "bytes": 8 }));
+        let offer = Offer { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), license: "MIT".to_string(), bytes: 8 };
+        assert_eq!(serde_json::to_value(&offer).unwrap(), serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "license": "MIT", "bytes": 8 }));
         assert_eq!(serde_json::to_value(Progress { done: 1, total: 2 }).unwrap(), serde_json::json!({ "done": 1, "total": 2 }));
         assert_eq!(
             serde_json::to_value(DownloadReport { whole: false, stopped: true }).unwrap(),
@@ -1422,7 +1706,7 @@ mod tests {
     #[test]
     #[ignore = "reaches Hugging Face"]
     fn the_small_pinned_files_match_hugging_face() {
-        let client = client().unwrap();
+        let client = open_client();
         let (_keep, mut cancel) = watch::channel(false);
         for pin in PINNED.iter() {
             let folder = scratch();
@@ -1450,10 +1734,10 @@ mod tests {
         let to = PathBuf::from(std::env::var("RUSTY_DOWNLOAD_TO").expect("RUSTY_DOWNLOAD_TO names an empty folder"));
         let hub = to.join("hub");
         let downloads = Downloads::new(to.join("downloads"));
-        let client = client().unwrap();
+        let client = open_client();
         let started = Instant::now();
         let mut last = Instant::now();
-        let report = block_on(downloads.download(PHI, &PINNED, Some(hub.clone()), move |url| open_url(client.clone(), url), |progress| {
+        let report = block_on(downloads.download(PHI, &PINNED, Layout::Hub, Some(hub.clone()), move |url| open_url(client.clone(), url), |progress| {
             if last.elapsed() >= Duration::from_secs(15) {
                 last = Instant::now();
                 println!("{} of {} bytes after {:?}", progress.done, progress.total, started.elapsed());

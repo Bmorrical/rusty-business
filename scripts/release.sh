@@ -14,9 +14,10 @@
 # needs a new version. Then it makes release v<version> at this commit, with
 # the ten files, marked as the newest, which is the one the README links.
 #
-# It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, and GH_TOKEN,
-# which the workflow passes on. Nothing here removes, edits, or replaces a
-# release or a tag.
+# It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, GH_TOKEN,
+# which the workflow passes on, and MAC_SIGNED, true or false, from the sign
+# job, which picks the notes' steps to open the Mac app. Nothing here removes,
+# edits, or replaces a release or a tag.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,6 +42,9 @@ commit="${GITHUB_SHA:-}"
 [[ "${commit}" =~ ^[0-9a-f]{40}$ ]] ||
     fail "GITHUB_SHA is not a whole commit: ${commit}"
 [ -n "${GH_TOKEN:-}" ] || fail "GH_TOKEN is not set, so no release can be made"
+mac_signed="${MAC_SIGNED:-}"
+[[ "${mac_signed}" =~ ^(true|false)$ ]] ||
+    fail "MAC_SIGNED is true or false, from the sign job, and is: ${mac_signed}"
 
 # The app's version, from the three files that say it. They must agree.
 version_of_app() {
@@ -66,14 +70,19 @@ sha256_of() {
 }
 
 notes_for() {
-    local version="$1"
+    local version="$1" mac_open
+    if [ "${mac_signed}" = true ]; then
+        mac_open="2. Open the app. It is signed, and notarized by Apple, so macOS asks once whether to open an app from the internet: choose Open."
+    else
+        mac_open="2. Open the app. It is not signed yet, so macOS stops it the first time: open System Settings, then Privacy & Security, and choose Open Anyway."
+    fi
     cat <<NOTES
 Rusty Business™ ${version}, for a Mac, for Windows, and for Linux.
 
 On a Mac with Apple silicon and macOS 14 or later, with its model engine inside:
 
 1. Download ${DMG}, open it, and drag Rusty Business™ to Applications.
-2. Open the app. It is not signed yet, so macOS stops it the first time: open System Settings, then Privacy & Security, and choose Open Anyway.
+${mac_open}
 
 On 64-bit Windows 10 or 11. The app has no model engine for Windows yet, so the window opens and says so.
 

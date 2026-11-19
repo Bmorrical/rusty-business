@@ -3,12 +3,12 @@
 //! The app speaks one contract: an OpenAI-style server on this computer
 //! (`GET /models`, `POST /chat/completions` with a streamed reply). Which
 //! program serves it is the only thing that changes per system: on a Mac it
-//! is `mlx_lm.server`; on Windows it will be another local server behind the
-//! same two calls. Nothing above this file knows the difference.
+//! is `mlx_lm.server`; on Windows and Linux it is llama.cpp's `llama-server`,
+//! behind the same two calls. Nothing above this file knows the difference.
 //!
 //! Three rules live here:
-//! - prompts never leave the computer (loopback addresses only, no proxy, no
-//!   redirects);
+//! - a prompt to the engine never leaves the computer (loopback addresses
+//!   only, no proxy, no redirects), so a chat needs no outbound gate;
 //! - only models on the list below are offered or accepted;
 //! - a model's thinking is separated from its answer, so the window never
 //!   shows raw markers.
@@ -18,13 +18,17 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::gate::Gate;
+use crate::makers::Makers;
+use crate::outside::{self, Outside};
+
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
-const DEFAULT_MAX_TOKENS: u32 = 4096;
+pub(crate) const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 // ---------------------------------------------------------------------------
 // Where the engine is
@@ -60,15 +64,17 @@ pub fn engine_name() -> &'static str {
 /// "windows", "linux"). Taking the system lets the Mac's tests check the
 /// words every other system gets.
 fn engine_name_on(os: &str) -> &'static str {
-    if os == "macos" {
-        "MLX"
-    } else {
-        "Local engine"
+    match os {
+        "macos" => "MLX",
+        "windows" | "linux" => "llama.cpp",
+        _ => "Local engine",
     }
 }
 
-/// How to start the engine by hand on `os`. Windows and Linux have no
-/// engine chosen yet, so they get no hint, and the window shows none.
+/// How to start the engine by hand on `os`. Windows and Linux get no hint,
+/// and the window shows none: the app starts `llama-server` itself, and no
+/// one command would fit every computer, since it needs the app's own models
+/// folder.
 fn start_hint_on(os: &str) -> &'static str {
     match os {
         "macos" => "mlx_lm.server --port 8080",
@@ -95,16 +101,41 @@ struct CatalogEntry {
     needle: &'static str,
     name: &'static str,
     maker: &'static str,
+    license: &'static str,
     context: u32,
 }
 
 /// The allow-list. A model the engine holds that is not here is never shown
-/// and never accepted. The first one the engine has is the default.
+/// and never accepted. The first one the engine has is the default. The
+/// person picks which makers' models they see (`makers.rs`).
 const CATALOG: &[CatalogEntry] = &[
-    CatalogEntry { needle: "phi-4", name: "Phi-4", maker: "Microsoft", context: 16_384 },
-    CatalogEntry { needle: "gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI", context: 131_072 },
-    CatalogEntry { needle: "nemotron-3.5-lightning", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", context: 262_144 },
+    CatalogEntry { needle: "phi-4", name: "Phi-4", maker: "Microsoft", license: "MIT", context: 16_384 },
+    CatalogEntry { needle: "gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI", license: "Apache 2.0", context: 131_072 },
+    CatalogEntry { needle: "nemotron-3.5-lightning", name: "Nemotron 3.5 Lightning", maker: "NVIDIA", license: "OpenMDW 1.1", context: 262_144 },
+    CatalogEntry { needle: "gemma-4-26b-a4b", name: "Gemma 4 26B", maker: "Google", license: "Apache 2.0", context: 262_144 },
+    CatalogEntry { needle: "llama-3.1-8b-instruct", name: "Llama 3.1 8B", maker: "Meta", license: "Llama 3.1 Community License", context: 131_072 },
 ];
+
+/// The makers on the list, in the list's order, each once.
+pub fn makers() -> Vec<&'static str> {
+    let mut makers: Vec<&'static str> = Vec::new();
+    for entry in CATALOG {
+        if !makers.contains(&entry.maker) {
+            makers.push(entry.maker);
+        }
+    }
+    makers
+}
+
+/// A maker's models on the list, each with its license.
+pub fn models_by(maker: &str) -> Vec<(&'static str, &'static str)> {
+    CATALOG.iter().filter(|entry| entry.maker == maker).map(|entry| (entry.name, entry.license)).collect()
+}
+
+/// The license of a model on the list, by its name.
+pub fn license_of(name: &str) -> Option<&'static str> {
+    CATALOG.iter().find(|entry| entry.name == name).map(|entry| entry.license)
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +176,9 @@ pub struct EngineStatus {
     pub url: String,
     pub reachable: bool,
     pub models: Vec<ModelInfo>,
+    /// Models the engine holds from makers the person did not pick. The page
+    /// never offers them, but a saved chat still names the model that wrote it.
+    pub set_aside: Vec<ModelInfo>,
     /// Models the engine holds that are not on the list.
     pub hidden: usize,
     /// Models on the list that are on this computer's disk, whether or not
@@ -168,9 +202,24 @@ struct ModelRow {
     id: String,
 }
 
+/// Where the engine lists its models. With `reload`, `llama-server` reads its
+/// models folder again first, so a model just downloaded is listed.
+fn models_url(base: &str, reload: bool) -> String {
+    if reload { format!("{base}/models?reload=1") } else { format!("{base}/models") }
+}
+
+/// Asks `llama-server` to read its models folder again, after a download.
+/// Nothing is lost when no engine answers: one started later reads the folder
+/// when it starts.
+pub(crate) async fn reload_models(base: &str) {
+    if let Ok(client) = client() {
+        let _ = client.get(models_url(base, true)).timeout(Duration::from_secs(30)).send().await;
+    }
+}
+
 pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
     let response = client()?
-        .get(format!("{base}/models"))
+        .get(models_url(base, false))
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -193,6 +242,7 @@ fn first_status() -> EngineStatus {
         url: DEFAULT_BASE_URL.to_string(),
         reachable: false,
         models: Vec::new(),
+        set_aside: Vec::new(),
         hidden: 0,
         on_disk: crate::models::on_disk(),
         offers: crate::downloads::offers(),
@@ -201,14 +251,30 @@ fn first_status() -> EngineStatus {
     }
 }
 
+/// Leaves in only the models of the makers the person picked: on the
+/// engine, on the disk, and offered. A model of a maker not picked is still
+/// on the list, so it is not counted as hidden; the engine's are set aside.
+fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
+    let served = status.models.clone();
+    makers.keep_picked(&mut status.models, |model| &model.maker);
+    status.set_aside = served.into_iter().filter(|model| !status.models.contains(model)).collect();
+    makers.keep_picked(&mut status.on_disk, |model| &model.maker);
+    makers.keep_picked(&mut status.offers, |offer| &offer.maker);
+    status
+}
+
 #[tauri::command]
-pub async fn engine_status() -> Result<EngineStatus, String> {
+pub async fn engine_status(makers: tauri::State<'_, Makers>) -> Result<EngineStatus, String> {
+    Ok(for_makers(status_now().await, &makers))
+}
+
+async fn status_now() -> EngineStatus {
     let mut status = first_status();
     let base = match base_url() {
         Ok(base) => base,
         Err(error) => {
             status.error = Some(error);
-            return Ok(status);
+            return status;
         }
     };
     status.url = base.clone();
@@ -220,7 +286,7 @@ pub async fn engine_status() -> Result<EngineStatus, String> {
         }
         Err(error) => status.error = Some(error),
     }
-    Ok(status)
+    status
 }
 
 // ---------------------------------------------------------------------------
@@ -469,18 +535,42 @@ pub struct ChatDone {
     pub seconds: f64,
 }
 
-/// Chats in flight, so one can be stopped by its id.
+/// Chats in flight, so one can be stopped by its id, and the turn they wait
+/// for.
 #[derive(Default)]
-pub struct Chats(Mutex<HashMap<String, watch::Sender<bool>>>);
+pub struct Chats {
+    stops: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// One model on this computer answers at a time. The engine holds one
+    /// model and loads another in its place, so models here take turns.
+    turn: tokio::sync::Mutex<()>,
+}
+
+/// Waits until no other model on this computer is answering. `None` when the
+/// chat is stopped first, so a stopped chat never takes its turn.
+async fn wait_for_turn<'a>(
+    turn: &'a tokio::sync::Mutex<()>,
+    cancel: &mut watch::Receiver<bool>,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    tokio::select! {
+        held = turn.lock() => Some(held),
+        _ = cancel.changed() => None,
+    }
+}
 
 fn checked_request(request: &ChatRequest) -> Result<(), String> {
     if catalog_entry(&request.model).is_none() {
         return Err("That model is not on this app's list.".to_string());
     }
-    if request.messages.is_empty() {
+    checked_messages(&request.messages)
+}
+
+/// The messages any engine is sent: at least one, each in a role an engine
+/// takes.
+pub(crate) fn checked_messages(messages: &[ChatMessage]) -> Result<(), String> {
+    if messages.is_empty() {
         return Err("There is nothing to send.".to_string());
     }
-    for message in &request.messages {
+    for message in messages {
         if !matches!(message.role.as_str(), "system" | "user" | "assistant") {
             return Err("A message has a role the engine does not take.".to_string());
         }
@@ -491,7 +581,7 @@ fn checked_request(request: &ChatRequest) -> Result<(), String> {
 pub async fn run_chat(
     request: &ChatRequest,
     cancel: &mut watch::Receiver<bool>,
-    mut emit: impl FnMut(ChatEvent),
+    emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
     checked_request(request)?;
     let base = base_url()?;
@@ -512,8 +602,67 @@ pub async fn run_chat(
         let detail: String = response.text().await.unwrap_or_default().chars().take(300).collect();
         return Err(format!("The engine answered {status}. {detail}").trim().to_string());
     }
+    read_reply(response.bytes_stream(), cancel, std::future::pending(), emit, "The engine stopped answering part way through.").await
+}
 
-    let mut bytes = response.bytes_stream();
+/// Reads a streamed answer into thinking and answer pieces, for the engine on
+/// this computer and for engines outside it alike. Stop keeps what came;
+/// `halt` ending stops the answer with its reason; a broken stream says
+/// `broke`.
+pub(crate) async fn read_reply<B: AsRef<[u8]>, E>(
+    bytes: impl Stream<Item = Result<B, E>>,
+    cancel: &mut watch::Receiver<bool>,
+    halt: impl Future<Output = String>,
+    emit: impl FnMut(ChatEvent),
+    broke: &str,
+) -> Result<ChatDone, String> {
+    read_stream(bytes, cancel, halt, emit, broke, chunk_payload).await
+}
+
+/// What one piece of a stream gave: the events it makes, and true when the
+/// stream says it has ended.
+pub(crate) type Taken = Result<(Vec<ChatEvent>, bool), String>;
+
+/// One piece of the stream the engine on this computer, Grok, and GPT send:
+/// pieces of the reply, then `[DONE]`.
+fn chunk_payload(payload: &str, reply: &mut ReplyStream, done: &mut ChatDone) -> Taken {
+    if payload == "[DONE]" {
+        return Ok((Vec::new(), true));
+    }
+    let Ok(chunk) = serde_json::from_str::<Chunk>(payload) else {
+        return Ok((Vec::new(), false));
+    };
+    if let Some(usage) = chunk.usage {
+        done.prompt_tokens = usage.prompt_tokens.or(done.prompt_tokens);
+        done.completion_tokens = usage.completion_tokens.or(done.completion_tokens);
+    }
+    let mut events = Vec::new();
+    for choice in chunk.choices {
+        if choice.finish_reason.is_some() {
+            done.finish_reason = choice.finish_reason;
+        }
+        if let Some(text) = choice.delta.reasoning.or(choice.delta.reasoning_content) {
+            events.extend(reply.push_reasoning(&text));
+        }
+        if let Some(text) = choice.delta.content {
+            events.extend(reply.push_content(&text));
+        }
+    }
+    Ok((events, false))
+}
+
+/// Reads a streamed answer whose pieces `take` reads, as `read_reply` does.
+/// A piece `take` refuses ends the answer with its reason.
+pub(crate) async fn read_stream<B: AsRef<[u8]>, E>(
+    bytes: impl Stream<Item = Result<B, E>>,
+    cancel: &mut watch::Receiver<bool>,
+    halt: impl Future<Output = String>,
+    mut emit: impl FnMut(ChatEvent),
+    broke: &str,
+    mut take: impl FnMut(&str, &mut ReplyStream, &mut ChatDone) -> Taken,
+) -> Result<ChatDone, String> {
+    let mut bytes = std::pin::pin!(bytes);
+    let mut halt = std::pin::pin!(halt);
     let mut lines = SseLines::default();
     let mut reply = ReplyStream::default();
     let mut done = ChatDone::default();
@@ -526,40 +675,23 @@ pub async fn run_chat(
                 done.stopped = true;
                 break 'stream;
             }
+            reason = &mut halt => return Err(reason),
             next = bytes.next() => next,
         };
         let piece = match next {
             None => break 'stream,
-            Some(Err(_)) => return Err("The engine stopped answering part way through.".to_string()),
+            Some(Err(_)) => return Err(broke.to_string()),
             Some(Ok(piece)) => piece,
         };
-        for payload in lines.push(&piece) {
-            if payload == "[DONE]" {
+        for payload in lines.push(piece.as_ref()) {
+            let (events, ended) = take(&payload, &mut reply, &mut done)?;
+            if !events.is_empty() {
+                first_piece.get_or_insert_with(Instant::now);
+                last_piece = Instant::now();
+            }
+            events.into_iter().for_each(&mut emit);
+            if ended {
                 break 'stream;
-            }
-            let Ok(chunk) = serde_json::from_str::<Chunk>(&payload) else {
-                continue;
-            };
-            if let Some(usage) = chunk.usage {
-                done.prompt_tokens = usage.prompt_tokens.or(done.prompt_tokens);
-                done.completion_tokens = usage.completion_tokens.or(done.completion_tokens);
-            }
-            for choice in chunk.choices {
-                if choice.finish_reason.is_some() {
-                    done.finish_reason = choice.finish_reason;
-                }
-                let mut events = Vec::new();
-                if let Some(text) = choice.delta.reasoning.or(choice.delta.reasoning_content) {
-                    events.extend(reply.push_reasoning(&text));
-                }
-                if let Some(text) = choice.delta.content {
-                    events.extend(reply.push_content(&text));
-                }
-                if !events.is_empty() {
-                    first_piece.get_or_insert_with(Instant::now);
-                    last_piece = Instant::now();
-                }
-                events.into_iter().for_each(&mut emit);
             }
         }
     }
@@ -575,17 +707,33 @@ pub async fn run_chat(
 #[tauri::command]
 pub async fn chat_stream(
     chats: tauri::State<'_, Chats>,
+    gate: tauri::State<'_, Gate>,
+    outside: tauri::State<'_, Outside>,
     chat_id: String,
     request: ChatRequest,
     on_event: Channel<ChatEvent>,
 ) -> Result<ChatDone, String> {
     let (stop, mut stopped) = watch::channel(false);
-    chats.0.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
-    let result = run_chat(&request, &mut stopped, |event| {
-        let _ = on_event.send(event);
-    })
-    .await;
-    if let Ok(mut map) = chats.0.lock() {
+    chats.stops.lock().map_err(|_| "Could not start the chat.".to_string())?.insert(chat_id.clone(), stop);
+    let result = if outside::is_outside(&request.model) {
+        // An engine outside this computer waits for no turn here.
+        outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
+            let _ = on_event.send(event);
+        })
+        .await
+    } else {
+        // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
+        match wait_for_turn(&chats.turn, &mut stopped).await {
+            None => Ok(ChatDone { stopped: true, ..ChatDone::default() }),
+            Some(_turn) => {
+                run_chat(&request, &mut stopped, |event| {
+                    let _ = on_event.send(event);
+                })
+                .await
+            }
+        }
+    };
+    if let Ok(mut map) = chats.stops.lock() {
         map.remove(&chat_id);
     }
     result
@@ -593,7 +741,7 @@ pub async fn chat_stream(
 
 #[tauri::command]
 pub fn stop_chat(chats: tauri::State<'_, Chats>, chat_id: String) {
-    if let Ok(map) = chats.0.lock() {
+    if let Ok(map) = chats.stops.lock() {
         if let Some(stop) = map.get(&chat_id) {
             let _ = stop.send(true);
         }
@@ -696,14 +844,36 @@ mod tests {
             "mlx-community/gemma-3-27b-it-qat-4bit",
             "mlx-community/gpt-oss-20b-MXFP4-Q8",
             "mlx-community/Llama-3.1-8B-Instruct-4bit",
+            "mlx-community/Qwen3-30B-A3B-4bit",
+            "mlx-community/gemma-4-26b-a4b-it-4bit",
         ]
         .iter()
         .map(|id| id.to_string())
         .collect();
         let models = allowed_models(&ids);
         let makers: Vec<&str> = models.iter().map(|model| model.maker.as_str()).collect();
-        assert_eq!(makers, ["Microsoft", "OpenAI", "NVIDIA"]);
-        assert!(models.iter().all(|model| !model.id.to_lowercase().contains("gemma") && !model.id.to_lowercase().contains("llama")));
+        assert_eq!(makers, ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
+        let names: Vec<&str> = models.iter().map(|model| model.name.as_str()).collect();
+        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+        // Only the model named on the list: not an older Gemma, and no model
+        // from a maker that is not on it.
+        assert!(models.iter().all(|model| !model.id.contains("gemma-3") && !model.id.contains("Qwen")));
+    }
+
+    // Brad, 2026-11-17: "user can pick google, gemini, meta from the app if
+    // they want those instead." Gemma is Google's model that runs here; its
+    // hosted one comes with the outside engines.
+    #[test]
+    fn the_list_names_each_maker_once_with_each_models_license() {
+        assert_eq!(makers(), ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]);
+        assert_eq!(models_by("Microsoft"), [("Phi-4", "MIT")]);
+        assert_eq!(models_by("OpenAI"), [("gpt-oss 20B", "Apache 2.0")]);
+        assert_eq!(models_by("NVIDIA"), [("Nemotron 3.5 Lightning", "OpenMDW 1.1")]);
+        assert_eq!(models_by("Google"), [("Gemma 4 26B", "Apache 2.0")]);
+        assert_eq!(models_by("Meta"), [("Llama 3.1 8B", "Llama 3.1 Community License")]);
+        assert_eq!(models_by("Acme"), []);
+        assert_eq!(license_of("Gemma 4 26B"), Some("Apache 2.0"));
+        assert_eq!(license_of("Gemma 3 27B"), None);
     }
 
     #[test]
@@ -717,33 +887,74 @@ mod tests {
     }
 
     #[test]
-    fn windows_and_linux_get_no_command_to_start_an_engine_they_do_not_have() {
+    fn windows_and_linux_name_llama_cpp_and_get_no_command_to_type() {
         // Brad, 2026-11-16: "I should be able to just pull the .dmg or .exe
         // from read me and install and go, one click ready." The roadmap, of
         // the .exe: "Until Windows has an engine, the window opens and says
         // so." Brad, 2026-11-17, to a request for Linux downloads: "I got
-        // you in coming build". Windows and Linux get no command to run; the
-        // Mac keeps its own.
+        // you in coming build". Then, 2026-11-19: "add an engine to linux
+        // and windows distro's". The app starts llama-server there itself,
+        // so Windows and Linux still get no command to type; the Mac keeps
+        // its own.
         assert_eq!(start_hint_on("windows"), "");
         assert_eq!(start_hint_on("linux"), "");
         assert_eq!(start_hint_on("macos"), "mlx_lm.server --port 8080");
         assert_eq!(start_hint_on("freebsd"), "Start an OpenAI-style server on port 8080 of this computer.");
         assert_eq!(engine_name_on("macos"), "MLX");
-        assert_eq!(engine_name_on("windows"), "Local engine");
-        assert_eq!(engine_name_on("linux"), "Local engine");
+        assert_eq!(engine_name_on("windows"), "llama.cpp");
+        assert_eq!(engine_name_on("linux"), "llama.cpp");
+        assert_eq!(engine_name_on("freebsd"), "Local engine");
         let first = first_status();
         assert_eq!(first.start_hint, start_hint_on(std::env::consts::OS));
         assert_eq!(first.name, engine_name_on(std::env::consts::OS));
     }
 
     #[test]
+    fn llama_server_is_asked_to_read_its_folder_again_only_when_told_to() {
+        let base = "http://127.0.0.1:8080/v1";
+        assert_eq!(models_url(base, false), "http://127.0.0.1:8080/v1/models");
+        assert_eq!(models_url(base, true), "http://127.0.0.1:8080/v1/models?reload=1");
+    }
+
+    #[test]
     fn the_report_carries_the_models_the_app_can_download() {
         let offered = first_status().offers;
         assert_eq!(offered, crate::downloads::offers());
-        if cfg!(target_os = "macos") {
-            let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
-            assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning"]);
-        }
+        // Every system, now that Windows and Linux have GGUF models.
+        let names: Vec<&str> = offered.iter().map(|offer| offer.name.as_str()).collect();
+        assert_eq!(names, ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+    }
+
+    #[test]
+    fn only_the_picked_makers_models_are_reported() {
+        // Brad, 2026-11-17: "user can pick google, gemini, meta from the app
+        // if they want those instead."
+        let folder = std::env::temp_dir().join(format!("rusty-engine-makers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let makers = Makers::new(folder.join("makers"), &[]);
+        makers.set(&["Google".to_string(), "Meta".to_string()]).unwrap();
+        let model = |name: &str, maker: &str| ModelInfo { id: format!("someone/{name}"), name: name.to_string(), maker: maker.to_string(), context: 8 };
+        let offer = |name: &str, maker: &str| crate::downloads::Offer {
+            id: format!("someone/{name}"),
+            name: name.to_string(),
+            maker: maker.to_string(),
+            license: "MIT".to_string(),
+            bytes: 1,
+        };
+        let mut status = first_status();
+        status.models = vec![model("Phi-4", "Microsoft"), model("Gemma 4 26B", "Google")];
+        status.hidden = 2;
+        status.on_disk = vec![model("Phi-4", "Microsoft"), model("Llama 3.1 8B", "Meta")];
+        status.offers = vec![offer("Gemma 4 26B", "Google"), offer("gpt-oss 20B", "OpenAI"), offer("Llama 3.1 8B", "Meta")];
+        let shown = for_makers(status, &makers);
+        let names = |models: &[ModelInfo]| models.iter().map(|model| model.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&shown.models), ["Gemma 4 26B"]);
+        assert_eq!(names(&shown.set_aside), ["Phi-4"], "a saved chat still names the model that wrote it");
+        assert_eq!(names(&shown.on_disk), ["Llama 3.1 8B"]);
+        let offered: Vec<&str> = shown.offers.iter().map(|offer| offer.name.as_str()).collect();
+        assert_eq!(offered, ["Gemma 4 26B", "Llama 3.1 8B"]);
+        assert_eq!(shown.hidden, 2, "a model of a maker not picked is on the list, so it is not hidden");
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
@@ -780,6 +991,34 @@ mod tests {
     fn events_carry_their_kind() {
         let json = serde_json::to_value(ChatEvent::Answer { text: "4".to_string() }).unwrap();
         assert_eq!(json, serde_json::json!({ "kind": "answer", "text": "4" }));
+    }
+
+    // Brad, 2026-11-17: "if they can't run asychronos then the models can
+    // iterate on the question." The engine here holds one model at a time,
+    // so the models on this computer take turns.
+    #[test]
+    fn models_on_this_computer_take_turns() {
+        tauri::async_runtime::block_on(async {
+            let turn = tokio::sync::Mutex::new(());
+            let (_first_stop, mut first) = watch::channel(false);
+            let answering = wait_for_turn(&turn, &mut first).await.expect("the first model gets its turn");
+
+            let (second_stop, mut second) = watch::channel(false);
+            let waited = tokio::time::timeout(Duration::from_millis(50), wait_for_turn(&turn, &mut second)).await;
+            assert!(waited.is_err(), "a second model answered while the first still was");
+
+            drop(answering);
+            let next = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut second)).await;
+            assert!(matches!(next, Ok(Some(_))), "the next model gets its turn once the first is done");
+            drop(next);
+
+            let _held = turn.lock().await;
+            let (third_stop, mut third) = watch::channel(false);
+            third_stop.send(true).unwrap();
+            let stopped = tokio::time::timeout(Duration::from_secs(1), wait_for_turn(&turn, &mut third)).await;
+            assert!(matches!(stopped, Ok(None)), "a model stopped while it waits never takes its turn");
+            drop(second_stop);
+        });
     }
 
     /// Needs the engine running with Phi-4 on hand: `cargo test -- --ignored`.

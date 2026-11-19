@@ -10,16 +10,20 @@
 //! are pulled from GitHub's container registry, pinned by digest, so nothing
 //! is built on this computer.
 //!
-//! Four rules live here:
+//! Five rules live here:
 //! - the whole plan is checked before anything starts: this system, the
-//!   port, Docker, and a place for the settings and the log;
+//!   outbound gate, the port, Docker, and a place for the settings and the
+//!   log;
 //! - only what is missing is started: a front door that answers is left
 //!   alone, and so is anything else that holds its port;
 //! - asking twice changes nothing: there is one start at a time, however
 //!   often the page asks;
 //! - the app stops only a stack it started itself, and only when the app
 //!   quits. Stopping keeps every container and its data, nothing here
-//!   removes a volume or an image, and Docker Desktop is left running.
+//!   removes a volume or an image, and Docker Desktop is left running;
+//! - nothing is started while the outbound gate is off, since a start may
+//!   download the stack, and turning the gate off ends a start under way. A
+//!   stack that is already running is left running: it is on this computer.
 //!
 //! The stack's passwords are made on its first start, from the system's
 //! random source, and kept in `stack.env` in the app's data folder, where
@@ -38,6 +42,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::Manager;
 
+use crate::gate::Gate;
 use crate::starter::can_run;
 
 /// The stack, as the app writes it to its data folder.
@@ -322,6 +327,8 @@ pub struct Facts {
     pub busy: bool,
     /// The app can start the stack on this system.
     pub here: bool,
+    /// The outbound gate is on, so the stack may be downloaded.
+    pub gate_open: bool,
     /// Something that is not the front door holds its port.
     pub port_taken: bool,
     /// Docker's program is on this computer.
@@ -336,6 +343,7 @@ pub struct Facts {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Why {
     NotOnThisSystem,
+    GateClosed,
     PortTaken,
     NoDocker,
     DockerNotRunning,
@@ -367,6 +375,9 @@ pub fn plan(facts: &Facts) -> Step {
     if !facts.here {
         return Step::Cannot(Why::NotOnThisSystem);
     }
+    if !facts.gate_open {
+        return Step::Cannot(Why::GateClosed);
+    }
     if facts.port_taken {
         return Step::Cannot(Why::PortTaken);
     }
@@ -386,6 +397,7 @@ pub fn plan(facts: &Facts) -> Step {
 pub fn sentence(why: Why, port: u16) -> String {
     match why {
         Why::NotOnThisSystem => "The app cannot start the stack on this system yet.".to_string(),
+        Why::GateClosed => "The gate is off, so the app did not start the stack; the chat does not need it yet.".to_string(),
         Why::PortTaken => format!("Something that is not the stack is using port {port} on this computer, so the app did not start the stack."),
         Why::NoDocker => "Docker is not on this computer, so the stack is not running; the chat does not need it yet.".to_string(),
         Why::DockerNotRunning => "Docker is not running, so the app did not start the stack; start Docker, then select Try again.".to_string(),
@@ -396,6 +408,7 @@ const DOCKER_DID_NOT_START: &str = "Docker Desktop did not start within 2 minute
 const NOT_READY: &str = "The stack was not ready within 15 minutes; select Try again to go on from where it stopped.";
 const NOT_ANSWERING: &str = "The stack started, and its front door is not answering yet.";
 const QUITTING: &str = "The app is closing, so it did not start the stack.";
+const GATE_TURNED_OFF: &str = "The gate was turned off, so the app stopped starting the stack.";
 
 fn failed(log: &Path) -> String {
     format!("The stack did not start, and what Docker said is in {}.", log.display())
@@ -445,6 +458,8 @@ pub struct Stack {
     port: u16,
     /// The name Docker keeps the stack under.
     project: String,
+    /// The outbound gate: nothing is started while it is off.
+    gate: Gate,
     state: Mutex<State>,
 }
 
@@ -478,6 +493,10 @@ enum Ran {
     Quitting,
     /// The app ended it, because it is quitting.
     Stopped,
+    /// The gate was off before it began.
+    GateClosed,
+    /// The app ended it, because the gate was turned off.
+    GateTurnedOff,
     CouldNotStart(String),
 }
 
@@ -492,12 +511,12 @@ impl Drop for Claim<'_> {
 }
 
 impl Stack {
-    pub fn new(folder: PathBuf, log: PathBuf, port: u16) -> Self {
-        Self::named(PROJECT, folder, log, port)
+    pub fn new(folder: PathBuf, log: PathBuf, port: u16, gate: Gate) -> Self {
+        Self::named(PROJECT, folder, log, port, gate)
     }
 
-    fn named(project: &str, folder: PathBuf, log: PathBuf, port: u16) -> Self {
-        Self { folder, log, port, project: project.to_string(), state: Mutex::new(State::default()) }
+    fn named(project: &str, folder: PathBuf, log: PathBuf, port: u16, gate: Gate) -> Self {
+        Self { folder, log, port, project: project.to_string(), gate, state: Mutex::new(State::default()) }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -530,10 +549,11 @@ impl Stack {
         };
 
         let here = cfg!(unix);
-        let undecided = !answering && !busy && here;
+        let gate_open = self.gate.is_open();
+        let undecided = !answering && !busy && here && gate_open;
         let port_taken = undecided && someone_answers(self.port);
         let docker_running = undecided && !port_taken && found.docker.as_deref().is_some_and(|docker| docker_runs(docker, &found.env));
-        let facts = Facts { answering, busy, here, port_taken, docker: found.docker.is_some(), docker_running, desktop: found.desktop.is_some() };
+        let facts = Facts { answering, busy, here, gate_open, port_taken, docker: found.docker.is_some(), docker_running, desktop: found.desktop.is_some() };
 
         let report = match plan(&facts) {
             Step::Nothing => return self.report(true, false, None),
@@ -581,7 +601,13 @@ impl Stack {
         let ours = Ours { docker, env: found.env.clone() };
 
         if open_docker && !self.open_docker(found, patience) {
-            let reason = if self.quitting() { QUITTING } else { DOCKER_DID_NOT_START };
+            let reason = if self.quitting() {
+                QUITTING
+            } else if !self.gate.is_open() {
+                GATE_TURNED_OFF
+            } else {
+                DOCKER_DID_NOT_START
+            };
             return self.report(false, false, Some(reason.to_string()));
         }
 
@@ -591,11 +617,14 @@ impl Stack {
             Ran::TooLong => return self.report(false, true, Some(NOT_READY.to_string())),
             Ran::Quitting => return self.report(false, false, Some(QUITTING.to_string())),
             Ran::Stopped => return self.report(false, true, Some(QUITTING.to_string())),
+            Ran::GateClosed => return self.report(false, false, Some(GATE_TURNED_OFF.to_string())),
+            Ran::GateTurnedOff => return self.report(false, true, Some(GATE_TURNED_OFF.to_string())),
             Ran::CouldNotStart(error) => return self.report(false, false, Some(could_not_start(&error))),
         }
         match self.run_ours(&ours, &BUCKET, patience.job) {
             Ran::Done => {}
             Ran::Quitting | Ran::Stopped => return self.report(false, true, Some(QUITTING.to_string())),
+            Ran::GateClosed | Ran::GateTurnedOff => return self.report(false, true, Some(GATE_TURNED_OFF.to_string())),
             Ran::Failed | Ran::TooLong => return self.report(false, true, Some(bucket_failed(&self.log))),
             Ran::CouldNotStart(error) => return self.report(false, true, Some(could_not_start(&error))),
         }
@@ -631,7 +660,7 @@ impl Stack {
                 return true;
             }
             let now = Instant::now();
-            if self.quitting() || now >= deadline {
+            if self.quitting() || !self.gate.is_open() || now >= deadline {
                 return false;
             }
             thread::sleep(Duration::from_secs(1).min(deadline - now));
@@ -645,6 +674,9 @@ impl Stack {
             let mut state = self.state();
             if state.quitting {
                 return Ran::Quitting;
+            }
+            if !self.gate.is_open() {
+                return Ran::GateClosed;
             }
             let (out, err) = match self.open_log(true).and_then(|log| Ok((log.try_clone()?, log))) {
                 Ok(both) => both,
@@ -672,6 +704,11 @@ impl Stack {
                     Ok(Some(status)) => {
                         state.child = None;
                         return if status.success() { Ran::Done } else { Ran::Failed };
+                    }
+                    Ok(None) if !self.gate.is_open() => {
+                        end(child);
+                        state.child = None;
+                        return Ran::GateTurnedOff;
                     }
                     Ok(None) if Instant::now() < deadline => {}
                     Ok(None) => {
@@ -843,7 +880,7 @@ mod tests {
 
     /// Everything in place, and nothing answering.
     fn ready() -> Facts {
-        Facts { answering: false, busy: false, here: true, port_taken: false, docker: true, docker_running: true, desktop: true }
+        Facts { answering: false, busy: false, here: true, gate_open: true, port_taken: false, docker: true, docker_running: true, desktop: true }
     }
 
     /// A settings file as name and value, without its comments.
@@ -861,7 +898,8 @@ mod tests {
 
         // A front door that answers is left alone, whatever else is true.
         assert_eq!(plan(&Facts { answering: true, ..ready() }), Step::Nothing);
-        let nothing_else = Facts { answering: true, busy: true, here: false, port_taken: true, docker: false, docker_running: false, desktop: false };
+        let nothing_else =
+            Facts { answering: true, busy: true, here: false, gate_open: false, port_taken: true, docker: false, docker_running: false, desktop: false };
         assert_eq!(plan(&nothing_else), Step::Nothing);
 
         // A start under way is waited for, not begun again.
@@ -883,12 +921,28 @@ mod tests {
     }
 
     #[test]
+    fn with_the_gate_off_the_stack_is_not_started() {
+        // Brad, 2026-11-17: "off by default, everything stops". A first start
+        // downloads the stack, so no start begins while the gate is off. A
+        // stack that answers is on this computer, and is left alone.
+        let off = Facts { gate_open: false, ..ready() };
+        assert_eq!(plan(&off), Step::Cannot(Why::GateClosed));
+        assert_eq!(plan(&Facts { docker_running: false, ..off.clone() }), Step::Cannot(Why::GateClosed));
+        assert_eq!(plan(&Facts { port_taken: true, docker: false, ..off.clone() }), Step::Cannot(Why::GateClosed));
+        assert_eq!(plan(&Facts { answering: true, ..off.clone() }), Step::Nothing);
+        assert_eq!(plan(&Facts { busy: true, ..off.clone() }), Step::Wait);
+        assert_eq!(plan(&Facts { here: false, ..off }), Step::Cannot(Why::NotOnThisSystem));
+    }
+
+    #[test]
     fn every_reason_is_one_plain_sentence() {
         let log = Path::new("/Users/someone/Library/Application Support/net.morrical.rusty-business/stack.log");
         let error = io::Error::from(io::ErrorKind::PermissionDenied);
-        let mut said: Vec<String> =
-            [Why::NotOnThisSystem, Why::PortTaken, Why::NoDocker, Why::DockerNotRunning].into_iter().map(|why| sentence(why, FRONT_DOOR_PORT)).collect();
-        said.extend([DOCKER_DID_NOT_START, NOT_READY, NOT_ANSWERING, QUITTING].map(String::from));
+        let mut said: Vec<String> = [Why::NotOnThisSystem, Why::GateClosed, Why::PortTaken, Why::NoDocker, Why::DockerNotRunning]
+            .into_iter()
+            .map(|why| sentence(why, FRONT_DOOR_PORT))
+            .collect();
+        said.extend([DOCKER_DID_NOT_START, NOT_READY, NOT_ANSWERING, QUITTING, GATE_TURNED_OFF].map(String::from));
         said.extend([failed(log), bucket_failed(log), could_not_write(&error), could_not_log(&error), could_not_start("No such file or directory")]);
         for one in &said {
             assert!(one.ends_with('.') && !one.contains('\n'), "{one:?}");
@@ -907,7 +961,7 @@ mod tests {
 
     #[test]
     fn the_page_is_told_under_the_names_it_reads() {
-        let stack = Stack::new(PathBuf::from("/nowhere/stack"), PathBuf::from("/nowhere/stack.log"), FRONT_DOOR_PORT);
+        let stack = Stack::new(PathBuf::from("/nowhere/stack"), PathBuf::from("/nowhere/stack.log"), FRONT_DOOR_PORT, Gate::at(true));
         assert_eq!(
             serde_json::to_value(stack.report(true, true, None)).unwrap(),
             serde_json::json!({ "running": true, "started": true, "address": "127.0.0.1:4700", "reason": null })
@@ -1169,7 +1223,11 @@ mod tests {
         }
 
         fn stack_at(place: &Path, port: u16) -> Stack {
-            Stack::named("rusty-business-test", data(place).join("stack"), data(place).join("stack.log"), port)
+            stack_behind(place, port, Gate::at(true))
+        }
+
+        fn stack_behind(place: &Path, port: u16, gate: Gate) -> Stack {
+            Stack::named("rusty-business-test", data(place).join("stack"), data(place).join("stack.log"), port, gate)
         }
 
         fn mode(path: &Path) -> u32 {
@@ -1521,6 +1579,84 @@ mod tests {
         }
 
         #[test]
+        fn with_the_gate_off_nothing_is_started_and_turning_it_off_ends_a_start() {
+            // Brad, 2026-11-17: "there is a hard switch / circuit breaker to
+            // hard stop all outbound communication". Then: "off by default,
+            // everything stops".
+            let _turn = my_turn();
+            let place = scratch();
+            let docker = docker_in(&place.join("tools"), "sleep 600 & echo $! > \"$0.grandchild\"; wait", "exit 0");
+            docker_is_running(&docker);
+            let port = free_port();
+            let gate = Gate::at(false);
+            let stack = stack_behind(&place, port, gate.clone());
+            let found = found(&place, Some(&docker), None, &docker);
+            let patience = Patience { up: Duration::from_secs(60), ..QUICKLY };
+
+            // Off: Docker is not even asked, and nothing is written.
+            let report = stack.bring_up(&found, &patience);
+            assert_eq!(
+                report,
+                StackReport { running: false, started: false, address: format!("127.0.0.1:{port}"), reason: Some(sentence(Why::GateClosed, port)) }
+            );
+            assert_eq!(runs(&docker), Vec::<String>::new());
+            assert!(!data(&place).exists());
+
+            // Off between the plan and Compose: Compose is not run either.
+            let report = stack.carry_out(false, &found, &patience);
+            assert_eq!(report.reason.as_deref(), Some(GATE_TURNED_OFF));
+            assert!(!report.started);
+            assert_eq!(runs(&docker), Vec::<String>::new());
+
+            // On, then off part way: the start under way is ended.
+            gate.set(true).unwrap_err();
+            let mut bystander = Bystander::start();
+            let report = thread::scope(|scope| {
+                let starting = scope.spawn(|| stack.bring_up(&found, &patience));
+                let left = grandchild(&docker);
+                gate.set(false).unwrap_err();
+                assert!(gone_soon(&left), "the start under way is ended");
+                starting.join().unwrap()
+            });
+            assert_eq!(report.reason.as_deref(), Some(GATE_TURNED_OFF));
+            assert!(!report.running && report.started);
+            assert_eq!(asked(&docker), [INFO, UP_LINE], "nothing more is asked of Docker");
+            assert!(bystander.running(), "nothing that is not the app's is ended");
+
+            // Off again: nothing more is started.
+            let report = stack.bring_up(&found, &patience);
+            assert_eq!(report.reason, Some(sentence(Why::GateClosed, port)));
+            assert_eq!(runs(&docker).len(), 2);
+        }
+
+        #[test]
+        fn turning_the_gate_off_stops_the_wait_for_docker_desktop() {
+            let _turn = my_turn();
+            let place = scratch();
+            let docker = docker_in(&place.join("tools"), "exit 0", "exit 0");
+            let opener = opener_in(&place.join("tools"), "exit 0");
+            let desktop = place.join("Docker.app");
+            let gate = Gate::at(true);
+            let stack = stack_behind(&place, free_port(), gate.clone());
+            let found = found(&place, Some(&docker), Some(&desktop), &opener);
+            let patience = Patience { docker: Duration::from_secs(60), ..QUICKLY };
+
+            let started = Instant::now();
+            let report = thread::scope(|scope| {
+                let starting = scope.spawn(|| stack.bring_up(&found, &patience));
+                while runs(&opener).is_empty() {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                gate.set(false).unwrap_err();
+                starting.join().unwrap()
+            });
+            assert_eq!(report.reason.as_deref(), Some(GATE_TURNED_OFF));
+            assert!(!report.started);
+            assert!(started.elapsed() < Duration::from_secs(30), "the wait went on: {:?}", started.elapsed());
+            assert!(asked(&docker).iter().all(|what| what == INFO), "only asked whether Docker runs: {:?}", asked(&docker));
+        }
+
+        #[test]
         #[ignore = "starts the real stack in Docker, under a name, a folder, and a port of its own"]
         fn live_start_on_a_free_port() {
             let place = scratch();
@@ -1550,7 +1686,7 @@ mod tests {
             }
             let _own = Own { docker: &docker, env: &found.env, folder: &folder, project: &project, port };
 
-            let stack = Stack::named(&project, folder.clone(), data(&place).join("stack.log"), port);
+            let stack = Stack::named(&project, folder.clone(), data(&place).join("stack.log"), port, Gate::at(true));
             let report = stack.bring_up(&found, &Patience::USUAL);
             let log = fs::read_to_string(data(&place).join("stack.log")).unwrap_or_default();
             assert_eq!(report, StackReport { running: true, started: true, address: format!("127.0.0.1:{port}"), reason: None }, "{log}");

@@ -104,12 +104,32 @@ const WRITERS = new Map([
   ['release.yml', { jobs: ['publish'], permissions: ['contents: write'] }],
 ]);
 
-// The one secret is GitHub's own token, and each workflow has one line that
-// may hand it on: to Docker's sign-in in Deploy, and to gh in Release.
+// GitHub's own token, and each workflow has one line that may hand it on: to
+// Docker's sign-in in Deploy, and to gh in Release. Release also hands the
+// five Mac signing secrets to its sign job, each by its own name, and to no
+// other job.
+const MAC_SECRETS = ['MAC_CERTIFICATE', 'MAC_CERTIFICATE_PASSWORD', 'MAC_NOTARY_KEY', 'MAC_NOTARY_KEY_ID', 'MAC_NOTARY_ISSUER'];
 const TOKEN_LINES = new Map([
   ['deploy.yml', /^ {10}REGISTRY_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/],
-  ['release.yml', /^ {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}$/],
+  [
+    'release.yml',
+    new RegExp(
+      `^ {10}(?:GH_TOKEN: \\$\\{\\{ secrets\\.GITHUB_TOKEN \\}\\}|(${MAC_SECRETS.join('|')}): \\$\\{\\{ secrets\\.\\1 \\}\\})$`,
+    ),
+  ],
 ]);
+
+// The sign job's one signing step, word for word: the switch from the
+// release environment's variables, and the five secrets, in its own env.
+const SIGN_STEP = [
+  '      - name: Sign and notarize the app and the .dmg, when the switch is on',
+  '        id: sign',
+  '        env:',
+  '          MAC_SIGNING: ${{ vars.MAC_SIGNING }}',
+  ...MAC_SECRETS.map((name) => `          ${name}: \${{ secrets.${name} }}`),
+  '        run: scripts/mac-sign.sh',
+  '',
+].join('\n');
 
 // The one line that signs in to the registry, word for word. The token
 // reaches Docker on its standard input, never on a command line.
@@ -218,13 +238,22 @@ test('the token reaches Docker only on its standard input, and gh only from its 
   }
 
   const release = withoutComments(workflow('release.yml'));
-  assert.equal((release.match(/secrets\./g) ?? []).length, 1, 'release.yml: the token is handed on more than once');
+  assert.equal(
+    (release.match(/secrets\./g) ?? []).length,
+    1 + MAC_SECRETS.length,
+    'release.yml: a secret is handed on more than once',
+  );
   const publish = jobsOf(workflow('release.yml')).find((each) => each.id === 'publish');
   assert.match(
     publish?.body ?? '',
-    /^ {6}- name: .*\n {8}env:\n {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}\n {8}run: scripts\/release\.sh publish dist\n/m,
+    /^ {6}- name: .*\n {8}env:\n {10}GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}\n {10}MAC_SIGNED: \$\{\{ needs\.sign\.outputs\.signed \}\}\n {8}run: scripts\/release\.sh publish dist\n/m,
     "release.yml: the token goes anywhere but the release step's own env",
   );
+  const sign = jobsOf(workflow('release.yml')).find((each) => each.id === 'sign');
+  assert.ok(sign?.body.includes(SIGN_STEP), "release.yml: the signing secrets go anywhere but the sign step's own env");
+  for (const other of ['deploy.yml', 'gate.yml']) {
+    assert.doesNotMatch(workflow(other), /MAC_|vars\.|environment:/, `${other}: a signing secret, the switch, or an environment`);
+  }
   for (const other of ['deploy.yml', 'gate.yml']) {
     assert.doesNotMatch(workflow(other), /GH_TOKEN/, `${other}: the token reaches gh`);
   }
@@ -339,9 +368,9 @@ test('Release builds the Mac app on a Mac, the Windows installer on Windows, and
   const jobs = jobsOf(text);
   assert.deepEqual(
     jobs.map((job) => job.id),
-    ['gate', 'mac', 'windows', 'linux', 'publish'],
+    ['gate', 'mac', 'sign', 'windows', 'linux', 'publish'],
   );
-  const [, mac, windows, linux, publish] = jobs;
+  const [, mac, , windows, linux, publish] = jobs;
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
   assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
@@ -361,7 +390,7 @@ test('Release builds the Mac app on a Mac, the Windows installer on Windows, and
   assert.match(mac.body, /^ {4}runs-on: macos-15$/m);
   assert.deepEqual(runsOf(mac.body), ['make dmg'], 'the mac job runs anything but make dmg');
   assert.ok(
-    mac.body.includes(keeps('mac-dmg', 'apps/desktop/src-tauri/target/mac', DMG)),
+    mac.body.includes(keeps('mac-dmg-built', 'apps/desktop/src-tauri/target/mac', DMG)),
     'the mac job does not keep exactly the .dmg and its checksum, or goes on without them',
   );
 
@@ -407,7 +436,7 @@ test('Release builds the Mac app on a Mac, the Windows installer on Windows, and
     'the linux job does not keep exactly the three downloads and their checksums, or goes on without them',
   );
 
-  assert.match(publish.body, /^ {4}needs: \[gate, mac, windows, linux\]$/m);
+  assert.match(publish.body, /^ {4}needs: \[gate, mac, sign, windows, linux\]$/m);
   assert.match(publish.body, /^ {4}runs-on: ubuntu-24\.04$/m);
   for (const name of ['mac-dmg', 'windows-exe', 'linux-packages']) {
     assert.ok(
@@ -417,6 +446,45 @@ test('Release builds the Mac app on a Mac, the Windows installer on Windows, and
   }
   assert.equal((publish.body.match(/download-artifact@/g) ?? []).length, 3, 'the publish job takes in more than the three builds');
   assert.deepEqual(runsOf(publish.body), ['scripts/release.sh publish dist'], 'the publish job runs anything but the release script');
+});
+
+// Brad, 2026-11-19: "keep shipping self-signed as an option until all the
+// peices are ready, when ready we can light it up". Then: "self signed for
+// now". The sign job is a switch, the release environment's MAC_SIGNING,
+// and while it is off the .dmg goes on as the mac job built it.
+test('Release signs the Mac app only in its sign job, on a Mac of its own, behind a switch in the release environment', () => {
+  const text = workflow('release.yml');
+  const plain = withoutComments(text);
+  const jobs = jobsOf(text);
+  const mac = jobs.find((job) => job.id === 'mac');
+  const sign = jobs.find((job) => job.id === 'sign');
+  const folder = 'apps/desktop/src-tauri/target/mac';
+
+  // The job that builds, and runs what it fetches, is handed nothing.
+  assert.doesNotMatch(mac.body, /secrets\.|vars\.|environment:/, 'the mac job is handed a secret, the switch, or the environment');
+
+  assert.match(sign.body, /^ {4}needs: \[gate, mac\]$/m);
+  assert.match(sign.body, /^ {4}runs-on: macos-15$/m);
+  assert.match(sign.body, /^ {4}environment: release$/m, 'the sign job does not run in the release environment');
+  assert.match(sign.body, /^ {4}outputs:\n {6}signed: \$\{\{ steps\.sign\.outputs\.signed \}\}\n/m);
+  assert.equal((plain.match(/environment:/g) ?? []).length, 1, 'release.yml: an environment anywhere but the sign job');
+  assert.equal((plain.match(/vars\./g) ?? []).length, 1, 'release.yml: a variable read anywhere but the switch');
+  assert.deepEqual(runsOf(sign.body), ['scripts/mac-sign.sh'], 'the sign job runs anything but scripts/mac-sign.sh');
+
+  // In order: the built .dmg in, signed, and kept for the publish job.
+  const takes = ['        with:', '          name: mac-dmg-built', `          path: ${folder}\n`].join('\n');
+  const keeps = [
+    '        with:',
+    '          name: mac-dmg',
+    '          path: |',
+    `            ${folder}/${DMG}`,
+    `            ${folder}/${DMG}.sha256`,
+    '          if-no-files-found: error',
+  ].join('\n');
+  assert.equal((sign.body.match(/download-artifact@/g) ?? []).length, 1, 'the sign job takes in more than the built .dmg');
+  assert.ok(sign.body.indexOf(takes) > 0, 'the sign job does not take the built .dmg into its folder');
+  assert.ok(sign.body.indexOf(takes) < sign.body.indexOf(SIGN_STEP), 'the sign job signs before the .dmg is in');
+  assert.ok(sign.body.indexOf(SIGN_STEP) < sign.body.indexOf(keeps), 'the sign job keeps the .dmg before it is signed');
 });
 
 test('jobs and triggers are read from the text, and comments are ignored', () => {

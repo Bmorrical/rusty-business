@@ -1,18 +1,22 @@
 //! The models already on this computer.
 //!
-//! The engine keeps each model it has downloaded in a folder of its own,
-//! inside the Hugging Face cache folder. This file looks there, so the app
-//! can say which of its models are on the disk before the engine is running.
+//! Each model is kept in a folder of its own. On a Mac, the engine keeps them
+//! inside the Hugging Face cache folder. On Windows and Linux, the app keeps
+//! them in its own models folder, which `llama-server` reads. This file looks
+//! there, so the app can say which of its models are on the disk before the
+//! engine is running.
 //!
 //! Three rules live here:
 //! - it only reads: nothing in the folder is written, moved, or removed;
 //! - the app keeps no list of its own: the disk is asked every time;
-//! - only models on the app's list are reported, and only when whole: the
-//!   files the engine asks for, and every weights file the model names.
+//! - only models on the app's list are reported, and only when whole: on a
+//!   Mac, the files the engine asks for and every weights file the model
+//!   names; elsewhere, the model's GGUF file, or every part of it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde::Deserialize;
 
@@ -28,9 +32,69 @@ const WEIGHTS_INDEX: &str = "model.safetensors.index.json";
 /// The files the engine asks for before it calls a folder a model.
 const NEEDED: [&str; 3] = ["config.json", WEIGHTS_INDEX, "tokenizer_config.json"];
 
+/// How `llama-server` tells a draft model from the model itself: by how its
+/// file's name starts.
+const DRAFT: [&str; 3] = ["mtp-", "dspark-", "dflash-"];
+
 // ---------------------------------------------------------------------------
 // Where the models are kept
 // ---------------------------------------------------------------------------
+
+/// How a system's engine lays its models out on the disk.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Layout {
+    /// The Hugging Face cache, which the Mac's engine reads: a folder
+    /// `models--owner--name` for each model, with `refs/main` naming the
+    /// revision under `snapshots`.
+    Hub,
+    /// The app's own models folder, which `llama-server` reads: a folder
+    /// `owner--name` for each model, holding its GGUF files.
+    Gguf,
+}
+
+impl Layout {
+    /// The layout this system's engine reads.
+    pub fn here() -> Self {
+        if cfg!(target_os = "macos") { Self::Hub } else { Self::Gguf }
+    }
+
+    /// The folder a model has in the models folder. `llama-server` gives the
+    /// model this folder's name as its id.
+    pub(crate) fn folder_name(self, id: &str) -> String {
+        match self {
+            Self::Hub => folder_name(id),
+            Self::Gguf => id.replace('/', "--"),
+        }
+    }
+
+    /// True when the folder holds a whole model, laid out this way.
+    pub(crate) fn whole(self, folder: &Path) -> bool {
+        match self {
+            Self::Hub => whole(folder),
+            Self::Gguf => whole_gguf(folder),
+        }
+    }
+}
+
+/// The app's own models folder, set once when the app starts.
+static OWN_FOLDER: OnceLock<PathBuf> = OnceLock::new();
+
+/// Sets the app's own models folder. Only the first call counts.
+pub fn use_own_folder(folder: PathBuf) {
+    let _ = OWN_FOLDER.set(folder);
+}
+
+/// Where this system's engine reads its models: the Hugging Face cache on a
+/// Mac, and the app's own models folder elsewhere.
+pub fn models_folder() -> Option<PathBuf> {
+    match Layout::here() {
+        Layout::Hub => {
+            let home = std::env::home_dir();
+            hub_folder(|name| std::env::var(name).ok(), home.as_deref())
+        }
+        Layout::Gguf => OWN_FOLDER.get().cloned(),
+    }
+}
 
 /// The cache folder that holds the models, worked out the way the engine
 /// works it out: `HF_HUB_CACHE`, then the older `HUGGINGFACE_HUB_CACHE`, then
@@ -70,10 +134,12 @@ fn from_home(written: &str, home: Option<&Path>) -> Option<PathBuf> {
 
 /// The app's models that are on this computer right now.
 pub fn on_disk() -> Vec<ModelInfo> {
-    let home = std::env::home_dir();
-    match hub_folder(|name| std::env::var(name).ok(), home.as_deref()) {
-        Some(hub) => models_in(&hub),
-        None => Vec::new(),
+    let Some(folder) = models_folder() else {
+        return Vec::new();
+    };
+    match Layout::here() {
+        Layout::Hub => models_in(&folder),
+        Layout::Gguf => gguf_models_in(&folder),
     }
 }
 
@@ -139,6 +205,77 @@ pub(crate) fn whole(folder: &Path) -> bool {
     };
     let weights: BTreeSet<&str> = index.weight_map.values().map(String::as_str).collect();
     !weights.is_empty() && weights.iter().all(|name| plain_name(name) && is_file(&snapshot.join(name)))
+}
+
+/// The app's models that are whole in the app's own models folder, in the
+/// list's order, read the way `llama-server` reads it: each folder is a
+/// model, named by the folder, and so is a GGUF file on its own, named by the
+/// file. A folder that is missing, or cannot be read, holds none.
+pub fn gguf_models_in(folder: &Path) -> Vec<ModelInfo> {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut folders = BTreeMap::new();
+    let mut loose = BTreeSet::new();
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            folders.insert(name, path);
+        } else if is_file(&path) && is_model_file(&name) {
+            loose.insert(name.replace(".gguf", ""));
+        }
+    }
+    // The list is asked first, so a folder for a model that is not on it is
+    // never opened.
+    let ids: Vec<String> = folders.keys().chain(&loose).cloned().collect::<BTreeSet<_>>().into_iter().collect();
+    engine::allowed_models(&ids)
+        .into_iter()
+        .filter(|model| loose.contains(&model.id) || folders.get(&model.id).is_some_and(|folder| whole_gguf(folder)))
+        .collect()
+}
+
+/// A GGUF file that is the model itself, not its projector or a draft model.
+fn is_model_file(name: &str) -> bool {
+    name.ends_with(".gguf") && !name.contains("mmproj") && !DRAFT.iter().any(|draft| name.starts_with(draft))
+}
+
+/// True when the folder holds a model `llama-server` can load, whole: a GGUF
+/// file that is the model itself, and, when the model comes in parts, every
+/// part. A download still under way is only `.part` files, and none counts.
+pub(crate) fn whole_gguf(folder: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return false;
+    };
+    let files: BTreeSet<String> = entries
+        .flatten()
+        .filter(|entry| is_file(&entry.path()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| is_model_file(name))
+        .collect();
+    match files.iter().find(|name| name.contains("-00001-of-")) {
+        Some(first) => every_part(first, &files),
+        None => !files.is_empty(),
+    }
+}
+
+/// `name-00001-of-00003.gguf` is the first of three parts, and the model is
+/// whole when the other two are there beside it.
+fn every_part(first: &str, files: &BTreeSet<String>) -> bool {
+    let Some((stem, rest)) = first.split_once("-00001-of-") else {
+        return false;
+    };
+    let Some(count) = rest.strip_suffix(".gguf") else {
+        return false;
+    };
+    let Ok(parts) = count.parse::<usize>() else {
+        return false;
+    };
+    count.bytes().all(|byte| byte.is_ascii_digit())
+        && parts > 0
+        && (1..=parts).all(|part| files.contains(&format!("{stem}-{part:05}-of-{count}.gguf")))
 }
 
 /// A file, or a link that leads to one. A link to nothing is not a file.
@@ -274,11 +411,11 @@ mod tests {
 
     #[test]
     fn a_model_off_the_list_is_never_reported() {
-        // Brad, on which models this project runs: "I want us only models, not
-        // meta or google". The list holds on the disk as it does on the engine.
+        // Only the models on the app's list are reported. The list holds on
+        // the disk as it does on the engine.
         let hub = scratch_hub();
         download(&hub, "mlx-community/gemma-3-27b-it-qat-4bit", 12);
-        download(&hub, "mlx-community/Llama-3.1-8B-Instruct-4bit", 1);
+        download(&hub, "mlx-community/Qwen3-30B-A3B-4bit", 1);
         assert_eq!(models_in(&hub), Vec::new());
 
         download(&hub, PHI, 2);
@@ -396,7 +533,7 @@ mod tests {
         download(&hub, PHI, 2);
         let half = download(&hub, GPT_OSS, 3);
         not_arrived(&half.join(shard(1, 3)));
-        download(&hub, "mlx-community/Llama-3.1-8B-Instruct-4bit", 1);
+        download(&hub, "mlx-community/Qwen3-30B-A3B-4bit", 1);
 
         let before = everything_in(&hub);
         assert_eq!(names(&models_in(&hub)), ["Phi-4"]);
@@ -449,6 +586,7 @@ mod tests {
             url: engine::DEFAULT_BASE_URL.to_string(),
             reachable: false,
             models: Vec::new(),
+            set_aside: Vec::new(),
             hidden: 0,
             on_disk: models_in(&hub),
             offers: Vec::new(),
@@ -458,6 +596,104 @@ mod tests {
         let told = serde_json::to_value(&status).unwrap();
         assert_eq!(told["onDisk"], serde_json::json!([{ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "context": 16_384 }]));
         assert_eq!(told["models"], serde_json::json!([]));
+    }
+
+    // Brad, 2026-11-19: "add an engine to linux and windows distro's." On
+    // Windows and Linux, `llama-server` reads the app's own models folder, so
+    // the app reads it the same way: each folder is a model named by the
+    // folder, and so is a GGUF file on its own, named by the file.
+
+    const PHI_GGUF: &str = "microsoft--phi-4-gguf";
+    const NEMOTRON_GGUF: &str = "ggml-org--NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF";
+
+    /// Puts these files in `folder`, which it makes if it has to.
+    fn gguf(folder: &Path, files: &[&str]) -> PathBuf {
+        fs::create_dir_all(folder).unwrap();
+        for name in files {
+            fs::write(folder.join(name), "weights").unwrap();
+        }
+        folder.to_path_buf()
+    }
+
+    #[test]
+    fn the_gguf_models_in_the_apps_own_folder_are_found_the_way_llama_server_finds_them() {
+        // "add an engine to linux and windows distro's"
+        let own = scratch().join("models");
+        gguf(&own.join(NEMOTRON_GGUF), &["NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf"]);
+        gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf"]);
+        gguf(&own, &["meta-llama-3.1-8b-instruct-q4_0.gguf"]);
+        let found = gguf_models_in(&own);
+        assert_eq!(names(&found), ["Phi-4", "Nemotron 3.5 Lightning", "Llama 3.1 8B"], "in the list's order");
+        let ids: Vec<&str> = found.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, [PHI_GGUF, NEMOTRON_GGUF, "meta-llama-3.1-8b-instruct-q4_0"], "under the ids llama-server gives them");
+        assert_eq!(Layout::Gguf.folder_name("microsoft/phi-4-gguf"), PHI_GGUF);
+        assert_eq!(Layout::Hub.folder_name("microsoft/phi-4-gguf"), "models--microsoft--phi-4-gguf");
+    }
+
+    #[test]
+    fn a_gguf_folder_counts_only_when_its_model_is_whole() {
+        let root = scratch();
+        let whole = |files: &[&str]| {
+            let folder = root.join(uuid::Uuid::new_v4().to_string());
+            whole_gguf(&gguf(&folder, files))
+        };
+        assert!(whole(&["phi-4-Q4_K.gguf"]));
+        assert!(whole(&["mmproj-phi-4-f16.gguf", "phi-4-Q4_K.gguf"]), "a projector beside the model");
+        assert!(whole(&["phi-4-00001-of-00002.gguf", "phi-4-00002-of-00002.gguf"]), "every part");
+
+        assert!(!whole(&[]), "an empty folder");
+        assert!(!whole(&["mmproj-phi-4-f16.gguf"]), "only the projector");
+        assert!(!whole(&["mtp-phi-4.gguf"]), "only a draft model");
+        assert!(!whole(&["dspark-phi-4.gguf"]), "only a draft model");
+        assert!(!whole(&["dflash-phi-4.gguf"]), "only a draft model");
+        assert!(!whole(&["phi-4-Q4_K.gguf.part"]), "a download still under way");
+        assert!(!whole(&["phi-4-Q4_K.safetensors"]), "not a GGUF file");
+        assert!(!whole(&["phi-4-00001-of-00003.gguf", "phi-4-00003-of-00003.gguf"]), "a part missing");
+        assert!(!whole(&["phi-4-00001-of-0000x.gguf"]), "a count that is not a number");
+        assert!(!whole(&["phi-4-00001-of-00000.gguf"]), "no parts at all");
+
+        let folder_not_file = gguf(&root.join("folder"), &[]);
+        fs::create_dir(folder_not_file.join("phi-4-Q4_K.gguf")).unwrap();
+        assert!(!whole_gguf(&folder_not_file), "a folder named like a model file");
+        assert!(!whole_gguf(&root.join("not-there")), "no folder");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_gguf_link_to_nothing_is_not_a_model() {
+        let folder = gguf(&scratch().join(PHI_GGUF), &[]);
+        std::os::unix::fs::symlink(folder.join("gone.gguf"), folder.join("phi-4-Q4_K.gguf")).unwrap();
+        assert!(!whole_gguf(&folder));
+        let real = gguf(&scratch(), &["phi-4-Q4_K.gguf"]).join("phi-4-Q4_K.gguf");
+        fs::remove_file(folder.join("phi-4-Q4_K.gguf")).unwrap();
+        std::os::unix::fs::symlink(real, folder.join("phi-4-Q4_K.gguf")).unwrap();
+        assert!(whole_gguf(&folder), "a link to a whole file is followed");
+    }
+
+    #[test]
+    fn a_gguf_model_off_the_list_or_half_there_is_not_reported() {
+        let own = scratch().join("models");
+        gguf(&own.join("someone--other-model-GGUF"), &["other-model-Q4_0.gguf"]);
+        gguf(&own, &["other-model-Q4_0.gguf"]);
+        gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf.part"]);
+        gguf(&own.join(NEMOTRON_GGUF), &["mmproj-nemotron-f16.gguf"]);
+        assert!(gguf_models_in(&own).is_empty());
+
+        // A whole file beside a folder that is not whole still counts, the
+        // way llama-server lists it.
+        gguf(&own, &[&format!("{PHI_GGUF}.gguf")]);
+        assert_eq!(names(&gguf_models_in(&own)), ["Phi-4"]);
+    }
+
+    #[test]
+    fn no_gguf_folder_means_no_models_and_looking_changes_nothing() {
+        assert!(gguf_models_in(&scratch().join("not-there")).is_empty());
+        let own = scratch().join("models");
+        gguf(&own.join(PHI_GGUF), &["phi-4-Q4_K.gguf", "phi-4-Q4_K.gguf.part"]);
+        gguf(&own.join("someone--other-model-GGUF"), &["other-model-Q4_0.gguf"]);
+        let before = everything_in(&own);
+        assert_eq!(names(&gguf_models_in(&own)), ["Phi-4"]);
+        assert_eq!(everything_in(&own), before);
     }
 
     /// Needs one of the app's models on this computer: `cargo test -- --ignored`.

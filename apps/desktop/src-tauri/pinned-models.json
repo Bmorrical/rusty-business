@@ -161,5 +161,97 @@
         "sha256": "ec380f0a6c0c2e294eb2435f5ec521fb2121cfc970e6ebf023d06829714a4eaa"
       }
     ]
+  },
+  {
+    "id": "mlx-community/gemma-4-26b-a4b-it-4bit",
+    "revision": "0d77464eeb233a2da68ebf9d7dc4edaac7db956d",
+    "files": [
+      {
+        "name": "chat_template.jinja",
+        "bytes": 17466,
+        "sha256": "36e3a42e5cf14cd0020e72d92e1fdd9970f59b82170e421f0cbe1bb42bead3f0"
+      },
+      {
+        "name": "config.json",
+        "bytes": 12180,
+        "sha256": "419e13a27ec359654c1ce7dd06d1a87149fd07d0c8af9f770494185e62e1b2ba"
+      },
+      {
+        "name": "generation_config.json",
+        "bytes": 208,
+        "sha256": "d4226bbe3117d2d253ba4609720ba82c6c4ce4627a9a6ae05387c78983ac03de"
+      },
+      {
+        "name": "model-00001-of-00003.safetensors",
+        "bytes": 5320218487,
+        "sha256": "683f420ee09550b8027bf0335c4202e196b37eb520b60a4bcbe8690b9e388c07"
+      },
+      {
+        "name": "model-00002-of-00003.safetensors",
+        "bytes": 5363328422,
+        "sha256": "feab2873c2976fb7ed666f8462549564a29409364388e0c8f6b015729d165e15"
+      },
+      {
+        "name": "model-00003-of-00003.safetensors",
+        "bytes": 4657658867,
+        "sha256": "bc607486deb1de5bc7e459932fda5c776a4f816b368feaa661bab8cfbb47e567"
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "bytes": 176940,
+        "sha256": "bf198c9f5ea6462addca1966e5dd669c407537a876e82cf06db9084c5c850b13"
+      },
+      {
+        "name": "processor_config.json",
+        "bytes": 1316,
+        "sha256": "de3e580aebdc98272d4c4547daffe6525fcbae18a83a0e0bcf0d7444d4ee6f37"
+      },
+      {
+        "name": "tokenizer.json",
+        "bytes": 32169626,
+        "sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "bytes": 2740,
+        "sha256": "080d9e1aff284e2f6043889cd05367966f7c7b80e025fbc0b06745e218158656"
+      }
+    ]
+  },
+  {
+    "id": "mlx-community/Llama-3.1-8B-Instruct-4bit",
+    "revision": "90215b22ec18e72f623dde2ea7af4097025160e2",
+    "files": [
+      {
+        "name": "config.json",
+        "bytes": 1097,
+        "sha256": "88804b1a541a86ce1b5b21dd0b38d95ee99006ef656a0b59ab267ecb0bce8b22"
+      },
+      {
+        "name": "model.safetensors",
+        "bytes": 4517489037,
+        "sha256": "192065799d1621df78b68274137974d3258c5dadce9ca71305ed014d997d67c4"
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "bytes": 52381,
+        "sha256": "9a76e05055778bb04cacb7aff616b378da0e57c87a181c932037a943efba5997"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "bytes": 296,
+        "sha256": "6f38c73729248f6c127296386e3cdde96e254636cc58b4169d3fd32328d9a8ec"
+      },
+      {
+        "name": "tokenizer.json",
+        "bytes": 17209920,
+        "sha256": "6b9e4e7fb171f92fd137b777cc2714bf87d11576700a1dcd7a399e7bbe39537b"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "bytes": 55381,
+        "sha256": "f0f2d5fa9caf736f4184e3fe3316378290696f9ebd9f11ac431d48fbda92a11c"
+      }
+    ]
   }
 ]

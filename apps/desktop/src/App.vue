@@ -6,12 +6,16 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import {
+  answersLine,
   arrangeSessions,
+  canGrade,
+  canRemove,
+  chatModels,
   checkedLine,
+  chipDetail,
   downloaded,
   downloadLine,
   firstRunOffers,
-  modelShelf,
   changeLines,
   findToolCall,
   attachmentLine,
@@ -24,14 +28,31 @@ import {
   workspacePrompt,
   formatCount,
   formatSize,
-  formatWindow,
-  fullness,
+  fullest,
+  gateLine,
+  GRADE_ROLE,
+  gradedAnswers,
+  gradeMessages,
+  graderFor,
+  gradesLine,
   greeting,
+  groups,
+  installLine,
+  isOutside,
+  keptPicks,
+  listedLine,
+  looksLikePath,
   memoryRequest,
+  meterLine,
+  moreLine,
+  namesLine,
   onDiskLine,
+  outsideModelsLine,
   parseFacts,
+  pickedMakers,
   quickest,
   requestMessages,
+  roundGrades,
   savedTurn,
   shouldStart,
   showsStartHint,
@@ -41,10 +62,11 @@ import {
   systemPrompt,
   titleFrom,
   tokensPerSecond,
-  tokensUsed,
   UPDATE_EVERY,
   updateDetail,
   updateLine,
+  withMaker,
+  withPick,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -81,7 +103,7 @@ const starting = ref(false);
 const startNote = ref("");
 const stack = ref(null);
 const stackStarting = ref(false);
-const modelId = ref("");
+const picked = ref([]);
 const sessions = ref([]);
 const current = ref(blankSession());
 const draft = ref("");
@@ -100,6 +122,28 @@ const updateOpened = ref("");
 const updateProblem = ref("");
 const updateChecking = ref(false);
 const updateChecked = ref("");
+const gate = ref(false);
+const gateBusy = ref(false);
+const gateNote = ref("");
+const makers = ref([]);
+const makersBusy = ref(false);
+const makersNote = ref("");
+// The outside engines, as Rust keeps them, in the Installers page's order.
+const outside = ref([]);
+// The change under way, as its command and the engine's id, or "".
+const outsideBusy = ref("");
+// Why the engines could not be read, and what each engine's last change said.
+const outsideNote = ref("");
+const outsideNotes = ref({});
+// The path typed for each engine's key, by the engine's id.
+const outsidePaths = ref({});
+// The model picked in Settings to grade the answers: its id, "" for no
+// grading, or null until one is picked.
+const graderPick = ref(rememberedGrader());
+// What the main pane shows: "chat", "installers", or "settings".
+const page = ref("chat");
+// The open page's title, which takes the focus when the page opens.
+const pageTitle = ref(null);
 let updateTimer = 0;
 
 // Projects, memory, search, and the side's own state.
@@ -116,7 +160,6 @@ const query = ref("");
 const found = ref([]);
 const searchBox = ref(null);
 const menuFor = ref("");
-const view = ref("chat");
 const settingsTab = ref("memory");
 const projectDialog = ref(null);
 const editing = ref(null);
@@ -128,8 +171,8 @@ let clockTimer = 0;
 let learning = Promise.resolve();
 
 let chatId = "";
-/** True once Stop is pressed, so the steps in a project's folder end too. */
-let halted = false;
+/** True once Stop is pressed: the models still waiting, and the steps in a project's folder, end too. */
+let stopAll = false;
 const TOOL_STATUS = { running: "Running", asked: "Waiting for you", done: "Done", failed: "Failed", skipped: "Skipped" };
 /** Settles the change waiting for Apply or Skip. */
 let approve = null;
@@ -140,10 +183,30 @@ function blankSession(project = null) {
   return { id: "", title: "", model: "", createdAt: 0, updatedAt: 0, messages: [], project, pinned: false };
 }
 
-const models = computed(() => engine.value?.models ?? []);
-const model = computed(() => models.value.find((entry) => entry.id === modelId.value) ?? null);
-const used = computed(() => tokensUsed(current.value.messages));
-const full = computed(() => fullness(used.value, model.value?.context));
+// An outside engine's models are offered only while the gate is on and the
+// engine is added.
+const outsideModels = computed(() => (gate.value ? outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []) : []));
+const models = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
+// The models a question goes to, in the list's order.
+const chosen = computed(() => models.value.filter((entry) => picked.value.includes(entry.id)));
+const many = computed(() => chosen.value.length > 1);
+const top = computed(() => fullest(current.value.messages, chosen.value));
+const rounds = computed(() => groups(current.value.messages));
+// Each round's grades and summary, by the round's key.
+const gradesFor = computed(() => new Map(rounds.value.map((round) => [round.key, roundGrades(round, modelName)])));
+// The model that grades the answers, of the models on hand, or null.
+const grader = computed(() => graderFor(graderPick.value, models.value));
+// What the list in Settings shows picked.
+const graderChoice = computed({
+  get: () => graderPick.value ?? grader.value?.id ?? "",
+  set: (id) => {
+    graderPick.value = id;
+    rememberGrader(id);
+  },
+});
+// A grader picked that is not on hand now, such as an outside engine with the
+// gate off.
+const graderAway = computed(() => (graderPick.value && !grader.value ? graderPick.value : ""));
 /** Files read and waiting to go with the next message. */
 const attached = ref([]);
 /** How many files are still being read. */
@@ -151,16 +214,25 @@ const attaching = ref(0);
 const dropping = ref(false);
 let stopDropping = null;
 const canSend = computed(
-  () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && Boolean(model.value) && !attaching.value,
+  () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && chosen.value.length > 0 && !attaching.value,
 );
-/** True when the waiting files would nearly fill the model's window. */
+/** The model picked with the smallest window, which files must fit. */
+const tightest = computed(() =>
+  chosen.value.filter((entry) => entry.context).reduce((least, entry) => (!least || entry.context < least.context ? entry : least), null),
+);
+/** True when the waiting files would nearly fill a picked model's window. */
 const tooBig = computed(
-  () => Boolean(model.value) && attached.value.length > 0 && attachmentTokens(attached.value) + (used.value || 0) > model.value.context * 0.85,
+  () =>
+    Boolean(tightest.value) &&
+    attached.value.length > 0 &&
+    attachmentTokens(attached.value) + (top.value?.used ?? 0) > tightest.value.context * 0.85,
 );
-const offers = computed(() => firstRunOffers(engine.value));
+// With an outside engine to ask, the first run's downloads wait on the
+// Installers page.
+const offers = computed(() => (outsideModels.value.length ? [] : firstRunOffers(engine.value)));
 const quick = computed(() => quickest(offers.value));
-const shelf = computed(() => modelShelf(engine.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
+const makersLocked = computed(() => makersBusy.value || Boolean(downloading.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
 const side = computed(() => arrangeSessions(sessions.value, projects.value, now.value));
 const searching = computed(() => Boolean(query.value.trim()));
@@ -185,21 +257,53 @@ function store(key, value) {
 }
 
 function remembered() {
-  return stored("model", "");
+  try {
+    const kept = JSON.parse(window.localStorage.getItem("models") ?? "null");
+    if (Array.isArray(kept)) return kept;
+    // Before several models could be asked, one was kept on its own.
+    const one = window.localStorage.getItem("model");
+    return one ? [one] : [];
+  } catch {
+    return [];
+  }
 }
 
-function remember(id) {
-  store("model", id);
+function remember(ids) {
+  try {
+    window.localStorage.setItem("models", JSON.stringify(ids));
+  } catch {
+    // The choice just is not kept for next time.
+  }
 }
 
-function pickModel(preferred) {
+function rememberedGrader() {
+  try {
+    return window.localStorage.getItem("grader");
+  } catch {
+    return null;
+  }
+}
+
+function rememberGrader(id) {
+  try {
+    window.localStorage.setItem("grader", id);
+  } catch {
+    // The choice just is not kept for next time.
+  }
+}
+
+/**
+ * Picks the models a question goes to: the first of the lists given that
+ * names a model on hand, then the models picked last time, then the first
+ * model on hand.
+ */
+function pickModels(...preferred) {
   const ids = models.value.map((entry) => entry.id);
-  const choice = [preferred, modelId.value, remembered(), ids[0]].find((id) => id && ids.includes(id));
-  modelId.value = choice ?? "";
+  picked.value = keptPicks(ids, ...preferred, remembered(), ids.slice(0, 1));
 }
 
-watch(modelId, (id) => {
-  if (id) remember(id);
+watch(picked, (ids) => {
+  if (ids.length) remember(ids);
 });
 
 function applyTheme() {
@@ -214,6 +318,17 @@ watch(theme, (value) => {
 
 watch(learnOn, (on) => store("learn", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
+
+/**
+ * "the next step is user can run the same question in 1-nth models and checks
+ * the results of each one". One click adds a model to the question or takes
+ * it away; the last one stays.
+ */
+function togglePick(id) {
+  if (busy.value) return;
+  const ids = models.value.map((entry) => entry.id);
+  picked.value = withPick(picked.value, id, !picked.value.includes(id), ids);
+}
 
 async function checkEngine() {
   if (!inApp) return;
@@ -236,7 +351,7 @@ async function checkEngine() {
     } else {
       startNote.value = "";
     }
-    pickModel(current.value.model);
+    pickModels(picked.value, chatModels(current.value));
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -247,6 +362,178 @@ async function checkEngine() {
       checkEngine();
     }
   }
+}
+
+/**
+ * "there is a hard switch / circuit breaker to hard stop all outbound
+ * communication, user can turn it on to use their inference", and "off by
+ * default, everything stops". Rust keeps the gate and holds every connection
+ * past this computer to it; the page only shows it and turns it on or off.
+ */
+async function readGate() {
+  try {
+    gate.value = (await invoke("gate_status")) === true;
+  } catch {
+    gate.value = false;
+  }
+}
+
+async function setGate(open) {
+  if (gateBusy.value) return;
+  gateBusy.value = true;
+  gateNote.value = "";
+  try {
+    gate.value = (await invoke("set_gate", { open })) === true;
+  } catch (error) {
+    // The gate changed but could not be kept for next time; Rust says so.
+    gateNote.value = String(error);
+    await readGate();
+  } finally {
+    gateBusy.value = false;
+  }
+  // The outside engines' models come and go with the gate.
+  pickModels(picked.value);
+  // With the gate on, what waited for it goes ahead, and a line saying the
+  // gate is off is gone.
+  if (gate.value) {
+    updateChecked.value = "";
+    checkStack();
+    checkUpdate();
+    // Each engine added before its models were found finds them now, one at
+    // a time.
+    for (const entry of outside.value.filter((each) => each.added && !each.models?.length)) {
+      await refreshOutside(entry.id);
+    }
+  }
+}
+
+/**
+ * "user can add their outside inference, start with Grok and Grok ai. user
+ * adds it manually, they will need to provide or specify a path to a key".
+ * And of the engines after Grok: "and claude and codex/gpt and gemmini". Rust
+ * keeps the path to each engine's key, reads the key from it each time the
+ * engine is asked, and never hands the key to the page. The page sends only
+ * the path typed.
+ */
+async function readOutside() {
+  try {
+    const listed = await invoke("outside_status");
+    outside.value = Array.isArray(listed) ? listed : [];
+    outsideNote.value = "";
+  } catch (error) {
+    outsideNote.value = String(error);
+  }
+}
+
+/**
+ * Asks Rust to change one outside engine, by its id. Gives back whether Rust
+ * took the change.
+ */
+async function changeOutside(command, id, args = {}) {
+  if (outsideBusy.value) return false;
+  outsideBusy.value = `${command} ${id}`;
+  outsideNotes.value = { ...outsideNotes.value, [id]: "" };
+  let taken = false;
+  let note = "";
+  try {
+    const changed = await invoke(command, { engine: id, ...args });
+    outside.value = outside.value.map((entry) => (entry.id === changed.id ? changed : entry));
+    // With the gate off, the line above the engines already says what waits
+    // for it.
+    note = gate.value ? (changed.error ?? "") : "";
+    taken = true;
+  } catch (error) {
+    // Nothing changed; Rust says why.
+    note = String(error);
+  } finally {
+    outsideBusy.value = "";
+  }
+  outsideNotes.value = { ...outsideNotes.value, [id]: note };
+  // The models a question goes to follow the engines'.
+  pickModels(picked.value);
+  return taken;
+}
+
+async function addOutside(id) {
+  const given = (outsidePaths.value[id] ?? "").trim();
+  if (!given) return;
+  const added = await changeOutside("add_outside", id, { keyPath: given });
+  // A key pasted where the path goes does not stay on screen.
+  if (added || !looksLikePath(given)) outsidePaths.value = { ...outsidePaths.value, [id]: "" };
+}
+
+function refreshOutside(id) {
+  return changeOutside("refresh_outside", id);
+}
+
+function removeOutside(id) {
+  return changeOutside("remove_outside", id);
+}
+
+/**
+ * "user can pick google, gemini, meta from the app if they want those instead.
+ * I think the user can pick one or more at install with microsoft default, and
+ * in settings they can one click more of them if they want." Rust keeps the
+ * makers picked and reports only their models; the page shows the list and
+ * asks Rust to change it. None of this leaves the computer.
+ */
+async function readMakers() {
+  try {
+    makers.value = await invoke("makers_status");
+  } catch (error) {
+    makersNote.value = String(error);
+  }
+}
+
+async function setMaker(name, on, box) {
+  // A checkbox shows what Rust kept. Vue leaves a box alone when the pick did
+  // not change, so a refused click would otherwise stay ticked.
+  const showKept = () => {
+    if (box) box.checked = pickedMakers(makers.value).includes(name);
+  };
+  if (makersLocked.value) return showKept();
+  makersBusy.value = true;
+  makersNote.value = "";
+  try {
+    makers.value = await invoke("set_makers", { picked: withMaker(makers.value, name, on) });
+  } catch (error) {
+    // Nothing changed; Rust says why.
+    makersNote.value = String(error);
+    await readMakers();
+  } finally {
+    makersBusy.value = false;
+    showKept();
+  }
+  // The models shown follow the makers picked.
+  await checkEngine();
+}
+
+/**
+ * Opens Installers or Settings in place of the chat. Both show the makers, and
+ * Installers shows the outside engines, as Rust keeps them, so each asks Rust
+ * afresh.
+ */
+async function openPage(name) {
+  page.value = name;
+  menuFor.value = "";
+  if (name === "settings") {
+    memoryDraft.value = memory.value;
+    memorySaved.value = "";
+  }
+  nextTick(() => pageTitle.value?.focus());
+  await readMakers();
+  await readOutside();
+}
+
+/** Back to the chat. */
+function closePage() {
+  page.value = "chat";
+  focusComposer();
+}
+
+/** A button in the side bar opens its page, or closes it when it is open. */
+function togglePage(name) {
+  return page.value === name ? closePage() : openPage(name);
 }
 
 /**
@@ -320,10 +607,10 @@ async function openUpdate(part) {
 /**
  * Downloads one model from the app's list, then starts the engine with it.
  * Rust checks every file as it arrives and moves the model into place only
- * when all of it is there.
+ * when all of it is there. Gives back whether the whole model is in place.
  */
 async function download(offer) {
-  if (downloading.value) return;
+  if (downloading.value) return false;
   downloading.value = offer.id;
   progress.value = { done: 0, total: offer.bytes };
   stoppedNote.value = "";
@@ -332,11 +619,13 @@ async function download(offer) {
   channel.onmessage = (update) => {
     progress.value = update;
   };
+  let whole = false;
   try {
     const report = await invoke("download_model", { id: offer.id, onProgress: channel });
     if (report.stopped) stoppedNote.value = `The download of ${offer.name} stopped, and none of it was kept.`;
     // With the model in place, the engine can start with it.
-    if (report.whole) await checkEngine();
+    if (report.whole) await Promise.all([checkEngine(), readMakers()]);
+    whole = report.whole === true;
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -344,6 +633,18 @@ async function download(offer) {
     progress.value = null;
     stopping.value = false;
   }
+  return whole;
+}
+
+/**
+ * "one click from an installers page would be good". Install downloads the
+ * model, then adds its maker if it was not added, so the model shows at the
+ * top of the window. A download that stopped or failed leaves the makers as
+ * they were.
+ */
+async function install(maker, offer) {
+  if (!(await download(offer))) return;
+  if (!pickedMakers(makers.value).includes(maker)) await setMaker(maker, true);
 }
 
 async function cancelDownload() {
@@ -402,7 +703,7 @@ async function persist() {
 function newChat(project = null) {
   if (busy.value) return;
   current.value = blankSession(project);
-  view.value = "chat";
+  page.value = "chat";
   problem.value = "";
   askTrash.value = "";
   menuFor.value = "";
@@ -411,9 +712,10 @@ function newChat(project = null) {
 }
 
 async function openSession(id) {
-  view.value = "chat";
+  if (busy.value) return;
+  page.value = "chat";
   menuFor.value = "";
-  if (busy.value || id === current.value.id) return;
+  if (id === current.value.id) return;
   problem.value = "";
   askTrash.value = "";
   try {
@@ -422,7 +724,7 @@ async function openSession(id) {
     for (const turn of current.value.messages) {
       if (turn.tool && ["asked", "running"].includes(turn.tool.status)) turn.tool.status = "skipped";
     }
-    pickModel(current.value.model);
+    pickModels(chatModels(current.value), picked.value);
     stickToBottom = true;
     scrollDown();
     focusComposer();
@@ -553,14 +855,6 @@ async function saveMemory() {
   }
 }
 
-function openSettings(tab = "memory") {
-  menuFor.value = "";
-  settingsTab.value = tab;
-  memoryDraft.value = memory.value;
-  memorySaved.value = "";
-  view.value = "settings";
-}
-
 /**
  * After a reply, asks the same model whether the person's message holds
  * anything worth remembering, and adds it to the global memory or the
@@ -588,33 +882,45 @@ async function learn(message, chosenId, project) {
   }
 }
 
+/**
+ * Asks each model picked the same question, in the list's order. "if they
+ * can't run asychronos then the models can iterate on the question": the
+ * engine holds one model at a time, so the models here take turns, each
+ * after the one before it, and Rust keeps any two from running at once. Each
+ * model reads the chat with its own earlier answers.
+ */
 async function send() {
   if (!canSend.value) return;
   const text = draft.value.trim();
   const session = current.value;
-  const chosen = model.value;
+  const asked = chosen.value;
   const project = currentProject.value;
   problem.value = "";
   const files = attached.value;
   if (!session.messages.length) session.title = titleFrom(text || files[0]?.name);
-  session.model = chosen.id;
-  session.messages.push(files.length ? { role: "user", content: text, attachments: files } : { role: "user", content: text });
+  session.model = asked[0].id;
+  if (files.length) session.messages.push({ role: "user", content: text, attachments: files });
+  else session.messages.push({ role: "user", content: text });
+  // What each model reads: the chat up to this question, and no other
+  // model's answer to it.
+  const history = session.messages.slice();
   draft.value = "";
   attached.value = [];
   busy.value = true;
-  halted = false;
+  stopAll = false;
   stickToBottom = true;
   resizeComposer();
   scrollDown();
-  // Saved before the model answers, so the question survives a crash.
+  // Saved before the models answer, so the question survives a crash.
   await persist();
   // The engine answers one at a time, so a look for memories still under way
   // finishes first.
   await learning;
 
   let system = systemPrompt(memory.value, project);
+  // A project's folder is worked in by one model at a time.
   let tools = false;
-  if (project?.folder) {
+  if (project?.folder && asked.length === 1) {
     try {
       const overview = await invoke("workspace_overview", { project: project.id });
       system = [system, workspacePrompt(project, overview)].filter(Boolean).join("\n\n");
@@ -623,34 +929,93 @@ async function send() {
       problem.value = String(error);
     }
   }
+  if (system) history.unshift({ role: "system", content: system });
 
-  // In a project with a folder, the model may take steps there: each reply
-  // that ends in a tool block runs that tool, and what it found goes back to
-  // the model, until it answers without one.
-  let answered = false;
-  for (let step = 0; ; step += 1) {
-    const reply = await ask(session, chosen, system);
-    if (!reply || reply.stopped || halted) break;
-    const call = tools ? findToolCall(reply.content, reply.thinking) : null;
-    if (call?.block) reply.content = call.block;
-    if (!call) {
-      answered = true;
-      break;
+  const start = session.messages.length;
+  for (const entry of asked) {
+    session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true, waiting: true });
+  }
+  const replies = session.messages.slice(start);
+  const failed = [];
+  for (const [index, entry] of asked.entries()) {
+    // Stop ends the reply under way, and the models still waiting are not asked.
+    if (stopAll) break;
+    const reply = replies[index];
+    reply.waiting = false;
+    const error = await ask(reply, entry, requestMessages(history, entry.id));
+    // One model failing does not keep the next from answering.
+    if (error) failed.push(`${entry.name}: ${error}`);
+  }
+  for (const reply of replies) {
+    reply.pending = false;
+    reply.waiting = false;
+  }
+  // A reply that never began is not kept.
+  session.messages = session.messages.filter((turn) => !replies.includes(turn) || turn.content || turn.thinking);
+  let answered = !stopAll && !failed.length;
+  // In a project with a folder, the model may take steps there.
+  if (tools && answered && session.messages.includes(replies[0])) {
+    answered = await work(session, asked[0], project, system, replies[0]);
+  }
+  // Once every answer is in, the grader grades them. After Stop, it does not.
+  const judge = grader.value;
+  if (!stopAll && judge) {
+    const round = groups(session.messages).at(-1);
+    if (canGrade(round)) {
+      const error = await grade(session, round, judge);
+      if (error) failed.push(error);
     }
+  }
+  busy.value = false;
+  if (failed.length) {
+    problem.value = failed.join("\n");
+    checkEngine();
+  }
+  await persist();
+  scrollDown();
+  focusComposer();
+  // Memories are looked for on this computer only.
+  if (answered && text && !isOutside(asked[0].id)) learning = learn(text, asked[0].id, project);
+}
+
+/** The chat with what the model is told first, when there is anything to tell. */
+function withSystem(turns, system) {
+  return system ? [{ role: "system", content: system }, ...turns] : turns;
+}
+
+/**
+ * In a project with a folder, the model may take steps there: each reply
+ * that ends in a tool block runs that tool, and what it found goes back to
+ * the model, until it answers without one. Gives back whether it answered.
+ */
+async function work(session, entry, project, system, first) {
+  let reply = first;
+  for (let step = 0; ; step += 1) {
+    if (reply.stopped || stopAll) return false;
+    const call = findToolCall(reply.content, reply.thinking);
+    if (call?.block) reply.content = call.block;
+    if (!call) return true;
     if (step >= TOOL_STEPS) {
       problem.value = `The model took ${TOOL_STEPS} steps without answering, so the app stopped it. Ask it to carry on if you like.`;
-      break;
+      return false;
     }
     const result = await useTool(project, call, reply);
     await persist();
-    if (result === null) break;
+    if (result === null) return false;
     session.messages.push({ role: "user", content: result, toolResult: true });
+    const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id);
+    session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true });
+    reply = session.messages.at(-1);
     await persist();
     scrollDown();
+    const error = await ask(reply, entry, messages);
+    if (error || (!reply.content && !reply.thinking)) {
+      session.messages = session.messages.filter((turn) => turn !== reply);
+      if (error) problem.value = `${entry.name}: ${error}`;
+      return false;
+    }
+    await persist();
   }
-  busy.value = false;
-  focusComposer();
-  if (answered && text) learning = learn(text, chosen.id, project);
 }
 
 /** Reads files into text, to go with the next message. */
@@ -686,7 +1051,7 @@ function detach(index) {
 /** Files dropped on the window are attached, while a chat is open. */
 function onDrop(event) {
   const kind = event.payload?.type;
-  const chatting = view.value !== "settings";
+  const chatting = page.value === "chat";
   if (kind === "enter" || kind === "over") dropping.value = chatting;
   else if (kind === "leave") dropping.value = false;
   else if (kind === "drop") {
@@ -695,11 +1060,8 @@ function onDrop(event) {
   }
 }
 
-/** One reply from the model, streamed into the chat. Null when it failed. */
-async function ask(session, chosen, system) {
-  const messages = requestMessages(session.messages, system);
-  session.messages.push({ role: "assistant", content: "", thinking: "", model: chosen.id, pending: true });
-  const reply = session.messages[session.messages.length - 1];
+/** Streams one model's reply into `reply`. Gives back why it failed, or nothing. */
+async function ask(reply, entry, messages) {
   let finished = false;
   const channel = new Channel();
   channel.onmessage = (event) => {
@@ -713,11 +1075,10 @@ async function ask(session, chosen, system) {
     scrollDown();
   };
   chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  let ok = false;
   try {
     const done = await invoke("chat_stream", {
       chatId,
-      request: { model: chosen.id, messages, maxTokens: null },
+      request: { model: entry.id, messages, maxTokens: null },
       onEvent: channel,
     });
     finished = true;
@@ -728,19 +1089,53 @@ async function ask(session, chosen, system) {
     reply.seconds = done.seconds || undefined;
     reply.stopped = done.stopped;
     reply.cutShort = done.finishReason === "length";
-    ok = true;
+    return "";
   } catch (error) {
     finished = true;
-    problem.value = String(error);
-    checkEngine();
+    return String(error);
   } finally {
     reply.pending = false;
-    if (!reply.content && !reply.thinking) session.messages.pop();
     chatId = "";
-    await persist();
-    scrollDown();
   }
-  return ok && session.messages.includes(reply) ? reply : null;
+}
+
+/**
+ * "The results are graded and summarized by grok after all the results are
+ * in", and "I should be able to pick which engine does the grading". The
+ * grader reads the question and the answers, numbered and without the models'
+ * names, and its grade is kept with them. A grade that failed or was stopped
+ * part way, or one that never began, is not kept. Gives back why it failed,
+ * or nothing.
+ */
+async function grade(session, round, judge) {
+  const answers = gradedAnswers(round).map((turn) => turn.content);
+  const messages = gradeMessages(round.question?.content, answers, judge.context);
+  const at = session.messages.indexOf(round.answers.at(-1)) + 1;
+  session.messages.splice(at, 0, { role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true });
+  const reply = session.messages[at];
+  scrollDown();
+  const error = await ask(reply, judge, messages);
+  if (error || reply.stopped || !reply.content.trim()) {
+    session.messages = session.messages.filter((turn) => turn !== reply);
+  }
+  return error ? `${judge.name} could not grade the answers: ${error}` : "";
+}
+
+/** Grades a round that has none yet, such as one asked before a grader was picked. */
+async function gradeRound(round) {
+  const judge = grader.value;
+  if (busy.value || !judge || !canGrade(round)) return;
+  const session = current.value;
+  problem.value = "";
+  busy.value = true;
+  stopAll = false;
+  const error = await grade(session, round, judge);
+  busy.value = false;
+  if (error) {
+    problem.value = error;
+    checkEngine();
+  }
+  await persist();
 }
 
 /**
@@ -759,7 +1154,7 @@ async function useTool(project, call, reply) {
     scrollDown();
     const yes = await new Promise((resolve) => (approve = resolve));
     approve = null;
-    if (halted) {
+    if (stopAll) {
       reply.tool.status = "skipped";
       return null;
     }
@@ -789,7 +1184,7 @@ function decide(yes) {
 
 function stop() {
   if (!busy.value) return;
-  halted = true;
+  stopAll = true;
   if (chatId) invoke("stop_chat", { chatId });
   approve?.(false);
 }
@@ -853,17 +1248,38 @@ function scrollDown() {
 }
 
 function modelName(id) {
-  return models.value.find((entry) => entry.id === id)?.name ?? "";
+  // A model whose maker was removed is set aside, not offered, but a saved
+  // chat still names the model that wrote it.
+  // So does a chat an outside engine answered after the engine is removed.
+  const known = [...models.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
+  return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
-function replyNote(turn) {
-  const parts = [modelName(turn.model)];
+/** A saved chat's models: "Phi-4", or "Phi-4 and 2 more". */
+function sessionModels(entry) {
+  const ids = entry.models?.length ? entry.models : [entry.model];
+  return moreLine(ids.map(modelName)) || "model not on hand";
+}
+
+/** Under a reply: its model, unless a card above it names it, and its counts. */
+function replyNote(turn, named = true) {
+  const parts = [named ? modelName(turn.model) : ""];
   if (turn.completionTokens) parts.push(`${formatCount(turn.completionTokens)} tokens`);
   const speed = tokensPerSecond(turn);
   if (speed) parts.push(`${formatCount(speed)} a second`);
   if (turn.cutShort) parts.push("reached the length limit");
   else if (turn.stopped) parts.push("stopped");
   return parts.filter(Boolean).join(" · ");
+}
+
+/** The grade an answer got, or null. */
+function gradeOf(round, index) {
+  return gradesFor.value.get(round.key)?.grades[index] ?? null;
+}
+
+/** Under a grade: that it was graded without names, and its counts. */
+function gradeNote(turn) {
+  return ["Graded without the models' names", replyNote(turn, false)].filter(Boolean).join(" · ");
 }
 
 applyTheme();
@@ -874,6 +1290,12 @@ onMounted(async () => {
   window.addEventListener("keydown", onWindowKey);
   window.addEventListener("click", onWindowClick);
   clockTimer = window.setInterval(() => (now.value = Date.now()), 60_000);
+  // While the gate is off, Rust starts no stack and asks for no new version.
+  await readGate();
+  // So is the path to each outside engine's key, and the models found with it.
+  await readOutside();
+  // The makers picked are kept on this computer, so they need no gate.
+  await readMakers();
   // The stack can take minutes, so the page does not wait for it.
   checkStack();
   // So does the check for a new version, which asks GitHub.
@@ -1059,11 +1481,6 @@ onBeforeUnmount(() => {
         </template>
       </nav>
 
-      <button class="settings-link" type="button" :class="{ here: view === 'settings' }" @click="openSettings()">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.settings" /></svg>
-        <span>Settings &amp; memory</span>
-      </button>
-
       <footer class="engine" aria-live="polite">
         <template v-if="!engine">
           <p class="quiet">Looking for the engine...</p>
@@ -1088,13 +1505,44 @@ onBeforeUnmount(() => {
         <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
         <template v-else-if="stack">
           <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-          <button class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
+          <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
+        <button
+          class="wide"
+          type="button"
+          :aria-current="page === 'installers' ? 'page' : undefined"
+          @click="togglePage('installers')"
+        >
+          Installers
+        </button>
+        <button
+          class="wide"
+          type="button"
+          :aria-current="page === 'settings' ? 'page' : undefined"
+          @click="togglePage('settings')"
+        >
+          Settings
+        </button>
         <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
           {{ updateChecking ? "Checking..." : "Check for updates" }}
         </button>
         <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
-        <p class="quiet small">Nothing you type leaves this computer.</p>
+        <div class="gate">
+          <button
+            class="switch"
+            type="button"
+            role="switch"
+            :aria-checked="gate"
+            aria-describedby="gate-line"
+            :disabled="gateBusy"
+            @click="setGate(!gate)"
+          >
+            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+            Outbound gate
+          </button>
+          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
+          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+        </div>
       </footer>
     </aside>
 
@@ -1123,198 +1571,401 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <template v-if="view === 'settings'">
+      <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
         <header class="bar">
           <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
           </button>
-          <button class="back" type="button" @click="view = 'chat'">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.back" /></svg>
-            Back to chat
-          </button>
+          <h2 id="installers-title" ref="pageTitle" tabindex="-1">Installers</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
         </header>
-        <section class="settings">
-          <div class="settings-head">
-            <h2 class="display">Settings</h2>
-            <p class="quiet">What the assistant remembers, which models are on hand, and how the window looks.</p>
-          </div>
-          <div class="settings-body">
-            <nav class="settings-tabs" aria-label="Settings">
-              <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
-              <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
-              <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
-            </nav>
-            <div v-if="settingsTab === 'memory'" class="settings-pane">
-              <h3>Memory</h3>
-              <p class="quiet">
-                What the assistant knows about you in every chat. Write it however you like (Markdown works). The assistant also
-                adds to it as you talk. Project memory lives in each project's settings.
-              </p>
-              <textarea v-model="memoryDraft" class="memory" rows="16" aria-label="Memory" spellcheck="true"></textarea>
-              <div class="settings-actions">
-                <button class="solid" type="button" :disabled="memoryDraft === memory" @click="saveMemory">Save</button>
-                <span v-if="memorySaved" class="quiet small">{{ memorySaved }}</span>
+        <div class="settings-body">
+          <h3>Models to run here</h3>
+          <p class="quiet">
+            Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
+            top of the window. Nothing downloads until you press Install.
+          </p>
+          <p v-if="!gate" class="gate-ask">
+            <span>The outbound gate is off, so nothing can install yet.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          </p>
+          <ul class="makers" aria-label="Models to install">
+            <li v-for="maker in makers" :key="maker.name" class="maker">
+              <div class="maker-head">
+                <span class="maker-name">{{ maker.name }}</span>
+                <span v-if="!maker.picked" class="quiet small">Not added</span>
               </div>
-              <label class="check">
-                <input v-model="learnOn" type="checkbox" />
-                <span>
-                  Learn from my chats
-                  <span class="quiet small block">After each reply, the same model looks for lasting facts in your message and adds them here. It runs on this computer, like everything else.</span>
-                </span>
-              </label>
-            </div>
-            <div v-else-if="settingsTab === 'models'" class="settings-pane">
-              <h3>Models</h3>
-              <p class="quiet">
-                The models this app can run. Each one is a single download from Hugging Face, checked file by file, and runs only on
-                this computer.
-              </p>
-              <ul v-if="shelf.length" class="offers" aria-label="Models">
-                <li v-for="offer in shelf" :key="offer.id" class="offer">
+              <ul class="maker-models">
+                <li v-for="entry in maker.models" :key="entry.name" class="offer">
                   <span class="offer-text">
-                    <span class="offer-name">{{ offer.name }}</span>
-                    <span class="quiet small">by {{ offer.maker }} · {{ formatSize(offer.bytes) }}</span>
+                    <span class="offer-name">{{ entry.name }}</span>
+                    <span class="quiet small">{{ installLine(maker, entry) }}</span>
                   </span>
-                  <span v-if="offer.here" class="have">On this computer</span>
-                  <template v-else-if="downloading === offer.id">
+                  <template v-if="entry.offer && downloading === entry.offer.id">
                     <span class="offer-progress">
                       <progress
                         :value="downloaded(progress)"
                         max="1"
-                        :aria-label="`How much of ${offer.name} has downloaded`"
-                      ></progress>
-                      <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
-                    </span>
-                    <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
-                  </template>
-                  <button v-else type="button" :disabled="Boolean(downloading)" @click="download(offer)">Download</button>
-                </li>
-              </ul>
-              <p v-else class="quiet small">This app downloads models only on a Mac with Apple silicon.</p>
-              <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
-              <p v-if="problem" class="quiet small">{{ problem }}</p>
-            </div>
-            <div v-else class="settings-pane">
-              <h3>Appearance</h3>
-              <p class="quiet">Follow the system, or keep one look.</p>
-              <div class="segmented" role="radiogroup" aria-label="Theme">
-                <button
-                  v-for="choice in ['system', 'light', 'dark']"
-                  :key="choice"
-                  type="button"
-                  role="radio"
-                  :aria-checked="theme === choice"
-                  :class="{ here: theme === choice }"
-                  @click="theme = choice"
-                >
-                  {{ choice[0].toUpperCase() + choice.slice(1) }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-      </template>
-
-      <template v-else>
-        <header class="bar">
-          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
-          </button>
-          <label class="picker">
-            <span class="dot" :class="engineOn ? 'live' : 'off'" aria-hidden="true"></span>
-            <span class="sr-only">Model</span>
-            <select v-model="modelId" :disabled="busy || !models.length">
-              <option v-if="!models.length" value="">None on hand</option>
-              <option v-for="entry in models" :key="entry.id" :value="entry.id">
-                {{ entry.name }} · {{ entry.maker }} · {{ formatWindow(entry.context) }}
-              </option>
-            </select>
-            <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
-          </label>
-          <h2 class="bar-title">
-            <span v-if="currentProject" class="crumb">{{ currentProject.name }} /</span>
-            {{ current.title || "New chat" }}
-          </h2>
-        </header>
-
-        <section ref="thread" class="thread" @scroll="onScroll">
-          <div v-if="!current.messages.length" class="empty">
-            <div v-if="offers.length" class="first-run">
-              <p class="display lead">Pick a model to start.</p>
-              <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
-              <ul class="offers" aria-label="Models to download">
-                <li v-for="offer in offers" :key="offer.id" class="offer">
-                  <span class="offer-text">
-                    <span class="offer-name">{{ offer.name }}</span>
-                    <span class="quiet small">
-                      by {{ offer.maker }} · {{ formatSize(offer.bytes) }}{{ offer.id === quick ? " · quickest to start" : "" }}
-                    </span>
-                  </span>
-                  <template v-if="downloading === offer.id">
-                    <span class="offer-progress">
-                      <progress
-                        :value="downloaded(progress)"
-                        max="1"
-                        :aria-label="`How much of ${offer.name} has downloaded`"
+                        :aria-label="`How much of ${entry.name} has downloaded`"
                       ></progress>
                       <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
                     </span>
                     <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
                   </template>
                   <button
-                    v-else
-                    :class="{ primary: offer.id === quick }"
+                    v-else-if="entry.onDisk && !maker.picked"
                     type="button"
-                    :disabled="Boolean(downloading)"
-                    @click="download(offer)"
+                    :aria-label="`Show ${entry.name}`"
+                    :disabled="makersLocked"
+                    @click="setMaker(maker.name, true)"
                   >
-                    Download
+                    Show
+                  </button>
+                  <button
+                    v-else-if="entry.offer && !entry.onDisk"
+                    type="button"
+                    :aria-label="`Install ${entry.name}`"
+                    :disabled="makersLocked || !gate"
+                    @click="install(maker.name, entry.offer)"
+                  >
+                    Install
                   </button>
                 </li>
               </ul>
-              <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+            </li>
+          </ul>
+          <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+          <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+
+          <h3 class="gap-above">Outside engines</h3>
+          <p class="quiet">
+            Each engine here answers from its maker's computers, not this one. Give the path to a file that holds your
+            key from that maker. Rusty Business™ reads the key from that file when it asks the engine and sends it only
+            to that maker's API, while the gate is on. The key never shows here.
+          </p>
+          <p v-if="!gate" class="gate-ask">
+            <span>The outbound gate is off, so no outside engine can be asked.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          </p>
+          <div
+            v-for="entry in outside"
+            :key="entry.id"
+            class="engine-card"
+            :aria-labelledby="`${entry.id}-name`"
+            role="group"
+          >
+            <div class="maker-head">
+              <span :id="`${entry.id}-name`" class="maker-name">
+                {{ entry.name }} <span class="quiet small">by {{ entry.maker }}</span>
+              </span>
+              <span v-if="entry.added" class="engine-buttons">
+                <button type="button" :disabled="Boolean(outsideBusy) || !gate" @click="refreshOutside(entry.id)">
+                  {{ outsideBusy === `refresh_outside ${entry.id}` ? `Asking ${entry.maker}...` : "Refresh models" }}
+                </button>
+                <button
+                  type="button"
+                  :aria-label="`Remove ${entry.name}`"
+                  :disabled="Boolean(outsideBusy)"
+                  @click="removeOutside(entry.id)"
+                >
+                  Remove
+                </button>
+              </span>
             </div>
-            <div v-else class="hello">
+            <template v-if="entry.added">
+              <p class="small key-file">Key file: <code>{{ entry.keyPath }}</code></p>
+              <p v-if="entry.warning" class="small" role="alert">{{ entry.warning }}</p>
+              <p class="quiet small">{{ outsideModelsLine(entry) }}</p>
+            </template>
+            <form v-else class="key-path" @submit.prevent="addOutside(entry.id)">
+              <label :for="`${entry.id}-key-path`" class="small">Path to your {{ entry.maker }} key file</label>
+              <span class="key-path-row">
+                <input
+                  :id="`${entry.id}-key-path`"
+                  v-model="outsidePaths[entry.id]"
+                  type="text"
+                  :placeholder="`~/.config/${entry.id}/key`"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  :disabled="Boolean(outsideBusy)"
+                />
+                <button
+                  class="primary"
+                  type="submit"
+                  :disabled="Boolean(outsideBusy) || !(outsidePaths[entry.id] ?? '').trim()"
+                >
+                  {{ outsideBusy === `add_outside ${entry.id}` ? "Adding..." : "Add" }}
+                </button>
+              </span>
+            </form>
+            <p v-if="outsideNotes[entry.id]" class="small" role="alert">{{ outsideNotes[entry.id] }}</p>
+          </div>
+          <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+        </div>
+      </section>
+      <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
+        <header class="bar">
+          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
+          </button>
+          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
+        </header>
+        <div class="settings-body">
+          <nav class="settings-tabs" aria-label="Settings">
+            <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
+            <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
+            <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
+          </nav>
+          <div v-if="settingsTab === 'memory'" class="settings-pane">
+            <h3>Memory</h3>
+            <p class="quiet">
+              What the assistant knows about you in every chat. Write it however you like (Markdown works). The assistant also
+              adds to it as you talk. Project memory lives in each project's settings.
+            </p>
+            <textarea v-model="memoryDraft" class="memory" rows="16" aria-label="Memory" spellcheck="true"></textarea>
+            <div class="settings-actions">
+              <button class="solid" type="button" :disabled="memoryDraft === memory" @click="saveMemory">Save</button>
+              <span v-if="memorySaved" class="quiet small">{{ memorySaved }}</span>
+            </div>
+            <label class="check">
+              <input v-model="learnOn" type="checkbox" />
+              <span>
+                Learn from my chats
+                <span class="quiet small block">After each reply from a model on this computer, the same model looks for lasting facts in your message and adds them here.</span>
+              </span>
+            </label>
+          </div>
+          <div v-else-if="settingsTab === 'models'" class="settings-pane">
+            <h3>Model makers</h3>
+            <p class="quiet">
+              The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
+            </p>
+            <p class="quiet small">
+              To install a model or add an outside engine, go to the
+              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            </p>
+            <ul class="makers" aria-label="Model makers">
+              <li v-for="maker in makers" :key="maker.name" class="maker">
+                <div class="maker-head">
+                  <span class="maker-name">{{ maker.name }}</span>
+                  <button
+                    v-if="maker.picked"
+                    type="button"
+                    :aria-label="`Remove ${maker.name}`"
+                    :disabled="makersLocked || !canRemove(makers, maker.name)"
+                    @click="setMaker(maker.name, false)"
+                  >
+                    Remove
+                  </button>
+                  <button
+                    v-else
+                    class="primary"
+                    type="button"
+                    :aria-label="`Add ${maker.name}`"
+                    :disabled="makersLocked"
+                    @click="setMaker(maker.name, true)"
+                  >
+                    Add
+                  </button>
+                </div>
+                <ul class="maker-models">
+                  <li v-for="entry in maker.models" :key="entry.name" class="offer">
+                    <span class="offer-text">
+                      <span class="offer-name">{{ entry.name }}</span>
+                      <span class="quiet small">{{ listedLine(entry) }}</span>
+                    </span>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+            <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
+            <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+
+            <h3 class="gap-above">Grading</h3>
+            <p class="quiet">
+              When several models answer, one model grades each answer from A to F once all are in, and sums them up. It
+              reads the question and the answers, numbered and without the models' names.
+            </p>
+            <div class="grader-pick">
+              <label for="grader" class="small">Grades the answers</label>
+              <select id="grader" v-model="graderChoice" :disabled="busy">
+                <option value="">No grading</option>
+                <option v-for="entry in models" :key="entry.id" :value="entry.id">
+                  {{ entry.name }} · {{ chipDetail(entry) }}
+                </option>
+                <option v-if="graderAway" :value="graderAway" disabled>
+                  {{ modelName(graderAway) || "A model not on hand" }} · not on hand
+                </option>
+              </select>
+            </div>
+            <p v-if="graderPick === null" class="quiet small">
+              Until you pick one, the first outside engine on hand grades, in the order the Installers page lists them.
+            </p>
+            <p v-if="graderAway" class="quiet small">
+              The model picked is not on hand, so the answers are not graded.
+              <template v-if="isOutside(graderAway)">Outside engines are on hand only while the gate is on.</template>
+            </p>
+            <p v-if="grader && isOutside(grader.id)" class="small">
+              {{ grader.name }} grades on {{ grader.maker }}'s computers, so the question and every answer, the answers
+              from this computer too, go to {{ grader.maker }} each time it grades. That happens only while the gate is on.
+            </p>
+          </div>
+          <div v-else class="settings-pane">
+            <h3>Appearance</h3>
+            <p class="quiet">Follow the system, or keep one look.</p>
+            <div class="segmented" role="radiogroup" aria-label="Theme">
+              <button
+                v-for="choice in ['system', 'light', 'dark']"
+                :key="choice"
+                type="button"
+                role="radio"
+                :aria-checked="theme === choice"
+                :class="{ here: theme === choice }"
+                @click="theme = choice"
+              >
+                {{ choice[0].toUpperCase() + choice.slice(1) }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <header v-show="page === 'chat'" class="bar">
+        <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
+        </button>
+        <div class="picks" role="group" aria-label="Models that answer">
+          <span v-if="models.length" class="quiet small picks-label">
+            <span class="dot" :class="engineOn ? 'live' : 'off'" aria-hidden="true"></span>Ask
+          </span>
+          <span v-else class="quiet small">No model on hand</span>
+          <button
+            v-for="entry in models"
+            :key="entry.id"
+            class="chip"
+            type="button"
+            :aria-pressed="picked.includes(entry.id)"
+            :disabled="busy"
+            :title="picked.length === 1 && picked[0] === entry.id ? 'One model always stays picked.' : undefined"
+            @click="togglePick(entry.id)"
+          >
+            <span class="chip-mark" aria-hidden="true">{{ picked.includes(entry.id) ? "✓" : "+" }}</span>
+            {{ entry.name }}
+            <span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>
+          </button>
+        </div>
+        <h2 class="bar-title">
+          <span v-if="currentProject" class="crumb">{{ currentProject.name }} /</span>
+          {{ current.title || "New chat" }}
+        </h2>
+      </header>
+
+      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll">
+        <div v-if="!current.messages.length" class="empty">
+          <div v-if="offers.length" class="first-run">
+            <p class="display lead">Pick a model to start.</p>
+            <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
+            <fieldset class="makers-pick" :disabled="makersLocked">
+              <legend class="quiet small">Show models from</legend>
+              <label v-for="maker in makers" :key="maker.name" class="maker-check">
+                <input
+                  type="checkbox"
+                  :checked="maker.picked"
+                  :disabled="maker.picked && !canRemove(makers, maker.name)"
+                  @change="setMaker(maker.name, $event.target.checked, $event.target)"
+                />
+                {{ maker.name }}
+              </label>
+            </fieldset>
+            <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
+            <p v-if="!gate" class="gate-ask">
+              <span>The outbound gate is off, so nothing can download yet.</span>
+              <button class="primary" type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            </p>
+            <ul class="offers" aria-label="Models to download">
+              <li v-for="offer in offers" :key="offer.id" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ offer.name }}</span>
+                  <span class="quiet small">
+                    by {{ offer.maker }} · {{ offer.license }} · {{ formatSize(offer.bytes) }}{{
+                      offer.id === quick ? " · quickest to start" : ""
+                    }}
+                  </span>
+                </span>
+                <template v-if="downloading === offer.id">
+                  <span class="offer-progress">
+                    <progress
+                      :value="downloaded(progress)"
+                      max="1"
+                      :aria-label="`How much of ${offer.name} has downloaded`"
+                    ></progress>
+                    <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                  </span>
+                  <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                </template>
+                <button
+                  v-else
+                  :class="{ primary: gate && offer.id === quick }"
+                  type="button"
+                  :disabled="Boolean(downloading) || !gate"
+                  @click="download(offer)"
+                >
+                  Download
+                </button>
+              </li>
+            </ul>
+            <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+            <p class="quiet small">
+              More models, and the outside engines, are on the
+              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            </p>
+          </div>
+          <template v-else>
+            <div class="hello">
               <p class="display lead">{{ currentProject ? currentProject.name : hello }}.</p>
-              <p v-if="model" class="sub">
-                {{ currentProject ? "A new chat in this project." : "What are we thinking about?" }}
-              </p>
-              <p v-else-if="starting" class="sub">Starting the engine...</p>
-              <p v-else-if="engine?.reachable" class="sub">The engine has none of this app's models on hand.</p>
-              <div v-if="model && !currentProject" class="pills">
+              <p v-if="chosen.length" class="quiet">{{ answersLine(chosen) }}</p>
+              <p v-else-if="starting" class="quiet">Starting the engine...</p>
+              <p v-else-if="engine?.reachable" class="quiet">The engine has none of this app's models on hand.</p>
+              <p v-if="many && grader" class="quiet">{{ gradesLine(grader) }}</p>
+              <div v-if="chosen.length && !currentProject" class="pills">
                 <button v-for="entry in SUGGESTIONS" :key="entry.verb" class="pill" type="button" @click="suggest(entry)">
                   <strong>{{ entry.verb }}</strong> {{ entry.rest }}
                 </button>
               </div>
             </div>
-          </div>
+          </template>
+        </div>
 
-          <article
-            v-for="(turn, index) in current.messages"
-            v-show="!turn.toolResult"
-            :key="index"
-            class="turn"
-            :class="turn.role"
-          >
-            <template v-if="turn.role === 'user'">
-              <ul v-if="turn.attachments?.length" class="files sent" aria-label="Attached files">
-                <li v-for="(file, at) in turn.attachments" :key="at" class="file" :title="file.name">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
-                  <span class="file-text">
-                    <span class="file-name">{{ file.name }}</span>
-                    <span class="file-line">{{ attachmentLine(file) }}</span>
-                  </span>
-                </li>
-              </ul>
-              <p v-if="turn.content" class="bubble">{{ turn.content }}</p>
-            </template>
-            <template v-else>
+        <article v-for="round in rounds" :key="round.key" class="round">
+          <div v-if="round.question && !round.question.toolResult" class="turn user">
+            <ul v-if="round.question.attachments?.length" class="files sent" aria-label="Attached files">
+              <li v-for="(file, at) in round.question.attachments" :key="at" class="file" :title="file.name">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+                <span class="file-text">
+                  <span class="file-name">{{ file.name }}</span>
+                  <span class="file-line">{{ attachmentLine(file) }}</span>
+                </span>
+              </li>
+            </ul>
+            <p v-if="round.question.content" class="bubble">{{ round.question.content }}</p>
+          </div>
+          <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
+            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
+              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <p v-if="gradeOf(round, index)" class="grade small">
+                <span class="grade-letter"><span class="sr-only">Grade </span>{{ gradeOf(round, index).letter }}</span>
+                <span>{{ gradeOf(round, index).why }}</span>
+              </p>
               <details v-if="turn.thinking" class="thinking">
                 <summary>{{ turn.pending && !turn.content ? "Thinking..." : "Thinking" }}</summary>
                 <p>{{ turn.thinking }}</p>
               </details>
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it escapes raw HTML in the reply -->
               <div v-if="shownReply(turn.content)" class="answer prose" @click="keepLinks" v-html="renderMarkdown(shownReply(turn.content))"></div>
+              <p v-else-if="turn.waiting" class="quiet waiting">Waits its turn.</p>
               <p v-else-if="turn.pending && !turn.thinking" class="quiet waiting">Waiting for the model...</p>
               <div v-if="turn.tool" class="tool" :class="turn.tool.status">
                 <div class="tool-head">
@@ -1342,68 +1993,88 @@ onBeforeUnmount(() => {
                   <pre v-if="turn.tool.output">{{ turn.tool.output }}</pre>
                 </details>
               </div>
-              <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn) }}</p>
-            </template>
-          </article>
-        </section>
-
-        <p v-if="problem" class="problem" role="alert">
-          {{ problem }}
-          <button class="link" type="button" @click="problem = ''">Dismiss</button>
-        </p>
-
-        <footer class="compose">
-          <div class="box">
-            <ul v-if="attached.length || attaching" class="files" aria-label="Files to send">
-              <li v-for="(file, at) in attached" :key="at" class="file" :title="file.name">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
-                <span class="file-text">
-                  <span class="file-name">{{ file.name }}</span>
-                  <span class="file-line">{{ attachmentLine(file) }}</span>
-                </span>
-                <button class="file-x" type="button" :aria-label="`Remove ${file.name}`" @click="detach(at)">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.close" /></svg>
-                </button>
-              </li>
-              <li v-if="attaching" class="file reading quiet small">Reading...</li>
-            </ul>
-            <p v-if="tooBig" class="too-big small">These files may not fit in {{ model.name }}'s window. Try fewer, or a model with a bigger one.</p>
-            <textarea
-              ref="composer"
-              v-model="draft"
-              rows="2"
-              aria-label="Your message"
-              :placeholder="model ? 'Ask anything...' : 'No model on hand'"
-              :disabled="!model"
-              @input="resizeComposer"
-              @keydown="onKeydown"
-            ></textarea>
-            <div class="box-row">
-              <button class="icon attach" type="button" aria-label="Attach files" title="Attach files" :disabled="busy" @click="pickFiles">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.clip" /></svg>
-              </button>
-              <span class="quiet small model-note">{{ model ? model.name : "" }}</span>
-              <button v-if="busy" class="send stop" type="button" aria-label="Stop" title="Stop" @click="stop">
-                <span class="stop-square" aria-hidden="true"></span>
-              </button>
-              <button v-else class="send" type="button" :disabled="!canSend" aria-label="Send" title="Send" @click="send">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.up" /></svg>
-              </button>
-            </div>
+              <p v-if="!turn.pending" class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
+            </section>
           </div>
-          <div class="meter">
-            <span v-if="learnedNote" class="learned small">{{ learnedNote }}</span>
-            <template v-else-if="model && used">
-              <progress :value="full" max="1" :class="{ near: full >= 0.8 }" aria-label="How full the model's window is"></progress>
-              <span class="quiet small">
-                {{ formatCount(used) }} of {{ formatCount(model.context) }} tokens
-                <template v-if="full >= 0.8"> · nearly full, start a new chat soon</template>
+          <section v-if="round.grade" class="grade-card">
+            <h3 class="card-head">Summary, by {{ modelName(round.grade.model) || "a model not on hand" }}</h3>
+            <details v-if="round.grade.thinking" class="thinking">
+              <summary>{{ round.grade.pending && !round.grade.content ? "Thinking..." : "Thinking" }}</summary>
+              <p>{{ round.grade.thinking }}</p>
+            </details>
+            <!-- eslint-disable-next-line vue/no-v-html -- markdown-it escapes raw HTML in the reply -->
+            <div v-if="gradesFor.get(round.key)?.summary" class="answer prose" @click="keepLinks" v-html="renderMarkdown(gradesFor.get(round.key).summary)"></div>
+            <p v-else-if="round.grade.pending" class="quiet waiting">Grading the answers...</p>
+            <p v-if="!round.grade.pending" class="quiet small note">{{ gradeNote(round.grade) }}</p>
+          </section>
+          <p v-else-if="!busy && grader && canGrade(round)" class="grade-ask">
+            <button type="button" @click="gradeRound(round)">Grade with {{ grader.name }}</button>
+          </p>
+        </article>
+      </section>
+
+      <!-- Shown on the Installers page too, where a download can fail. -->
+      <p v-if="problem" class="problem" role="alert">
+        {{ problem }}
+        <button class="link" type="button" @click="problem = ''">Dismiss</button>
+      </p>
+
+      <footer v-show="page === 'chat'" class="compose">
+        <div class="box">
+          <ul v-if="attached.length || attaching" class="files" aria-label="Files to send">
+            <li v-for="(file, at) in attached" :key="at" class="file" :title="file.name">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+              <span class="file-text">
+                <span class="file-name">{{ file.name }}</span>
+                <span class="file-line">{{ attachmentLine(file) }}</span>
               </span>
-            </template>
-            <span v-else class="quiet small">Can make mistakes. Check what matters.</span>
+              <button class="file-x" type="button" :aria-label="`Remove ${file.name}`" @click="detach(at)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.close" /></svg>
+              </button>
+            </li>
+            <li v-if="attaching" class="file reading quiet small">Reading...</li>
+          </ul>
+          <p v-if="tooBig" class="too-big small">These files may not fit in {{ tightest.name }}'s window. Try fewer, or a model with a bigger one.</p>
+          <textarea
+            ref="composer"
+            v-model="draft"
+            rows="2"
+            aria-label="Your message"
+            :placeholder="chosen.length ? `Message ${namesLine(chosen.map((entry) => entry.name))}` : 'No model on hand'"
+            :disabled="!chosen.length"
+            @input="resizeComposer"
+            @keydown="onKeydown"
+          ></textarea>
+          <div class="box-row">
+            <button class="icon attach" type="button" aria-label="Attach files" title="Attach files" :disabled="busy" @click="pickFiles">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.clip" /></svg>
+            </button>
+            <span class="quiet small model-note">{{ namesLine(chosen.map((entry) => entry.name)) }}</span>
+            <button v-if="busy" class="send stop" type="button" aria-label="Stop" title="Stop" @click="stop">
+              <span class="stop-square" aria-hidden="true"></span>
+            </button>
+            <button v-else class="send" type="button" :disabled="!canSend" aria-label="Send" title="Send" @click="send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.up" /></svg>
+            </button>
           </div>
-        </footer>
-      </template>
+        </div>
+        <div class="meter">
+          <span v-if="learnedNote" class="learned small">{{ learnedNote }}</span>
+          <template v-else-if="top">
+            <progress
+              :value="top.full"
+              max="1"
+              :class="{ near: top.full >= 0.8 }"
+              :aria-label="many ? 'How full the fullest window is' : 'How full the model\'s window is'"
+            ></progress>
+            <span class="quiet small">
+              {{ meterLine(top, many) }}
+              <template v-if="top.full >= 0.8"> · nearly full, start a new chat soon</template>
+            </span>
+          </template>
+          <span v-else class="quiet small">Can make mistakes. Check what matters.</span>
+        </div>
+      </footer>
     </main>
 
     <dialog ref="projectDialog" class="dialog" @close="editing = null">
@@ -1673,6 +2344,11 @@ svg {
   stroke-width: 3;
 }
 
+/* A link inside a sentence sits in it like a word. */
+button.link.in-text {
+  padding: 0;
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1823,9 +2499,11 @@ kbd {
   filter: grayscale(1);
 }
 
+/* The saved chats keep room for one and a half chats, however tall the
+   footer under them grows. */
 .sessions {
   flex: 1;
-  min-height: 0;
+  min-height: 5rem;
   overflow-y: auto;
   padding: 0 0.5rem 0.75rem;
 }
@@ -1992,25 +2670,13 @@ kbd {
   font-size: 0.88rem;
 }
 
-.settings-link {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin: 0 0.5rem 0.4rem;
-  padding: 0.5rem 0.75rem;
-  border: 0;
-  text-align: left;
-  color: var(--quiet);
-}
-
-.settings-link.here,
-.settings-link:hover {
-  color: var(--ink);
-}
-
+/* On a short window the footer scrolls, so the gate's switch at its foot can
+   always be reached. */
 .engine {
   display: grid;
   gap: 0.35rem;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0.8rem 1rem 0.9rem;
   border-top: 1px solid var(--line);
   font-size: 0.82rem;
@@ -2051,6 +2717,71 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* The outbound gate: a switch, off until the person turns it on. */
+.gate {
+  display: grid;
+  gap: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+button.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.3rem 0;
+  border: 0;
+  background: none;
+  font-weight: 600;
+  text-align: left;
+}
+
+.track {
+  position: relative;
+  flex: none;
+  width: 2.2rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color 0.15s;
+}
+
+.knob {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition: transform 0.15s;
+}
+
+.switch[aria-checked="true"] .track {
+  background: var(--good);
+}
+
+.switch[aria-checked="true"] .knob {
+  transform: translateX(0.95rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track,
+  .knob {
+    transition: none;
+  }
+}
+
+.gate-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0;
+}
+
 .hint {
   display: block;
   padding: 0.4rem 0.5rem;
@@ -2073,8 +2804,9 @@ kbd {
 
 .bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   min-height: 3.6rem;
   padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--line);
@@ -2139,49 +2871,36 @@ kbd {
   color: var(--bad);
 }
 
-.picker {
+/* The models a question goes to: one click picks one or lets it go. */
+.picks {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  flex-shrink: 0;
+  justify-content: flex-start;
+  gap: 0.35rem;
   min-width: 0;
 }
 
-.picker .chevron {
-  width: 0.85rem;
-  height: 0.85rem;
-  margin-left: -1.35rem;
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.chip-mark {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chip[aria-pressed="false"] .chip-mark {
   color: var(--quiet);
-  pointer-events: none;
-}
-
-.picker .dot {
-  margin-right: 0.6rem;
-}
-
-select {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  background: transparent;
-  border-radius: 8px;
-  padding: 0.35rem 1.6rem 0.35rem 0.35rem;
-  max-width: 24rem;
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-select:hover:not(:disabled) {
-  background-color: var(--hover);
-}
-
-option {
-  background: var(--raised);
-  color: var(--ink);
-  text-transform: none;
-  letter-spacing: 0;
 }
 
 .thread {
@@ -2290,6 +3009,157 @@ option {
   justify-items: end;
 }
 
+/* Settings, in place of the chat. */
+.settings {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.settings h2:focus {
+  outline: none;
+}
+
+.settings .bar {
+  justify-content: space-between;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 0.6rem;
+  width: min(44rem, 100%);
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+/* Settings: its tabs down the side, and the open one beside them. */
+.settings-body:has(> .settings-tabs) {
+  width: min(60rem, 100%);
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 2.5rem;
+}
+
+.settings-body h3,
+.settings-body p {
+  margin: 0;
+}
+
+.makers,
+.maker-models {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.makers {
+  gap: 1rem;
+  margin-top: 0.4rem;
+}
+
+.maker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.maker-name {
+  font-weight: 600;
+}
+
+.settings-body .gap-above {
+  margin-top: 1rem;
+}
+
+.engine-card {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.engine-card .maker-head {
+  margin-bottom: 0;
+}
+
+.engine-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.key-file code {
+  overflow-wrap: anywhere;
+}
+
+.key-path {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.key-path-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.grader-pick {
+  display: grid;
+  gap: 0.3rem;
+  max-width: 26rem;
+}
+
+.grader-pick select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  padding: 0.4rem 0.6rem;
+}
+
+.key-path input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  padding: 0.4rem 0.6rem;
+}
+
+.makers-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.makers-pick legend {
+  float: left;
+  margin-right: 0.25rem;
+}
+
+.maker-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.maker-check input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
 .turn {
   max-width: 46rem;
   margin: 0 auto 1.6rem;
@@ -2301,6 +3171,90 @@ option {
 
 .turn.user {
   justify-items: end;
+}
+
+.answers {
+  max-width: 46rem;
+  margin: 0 auto 1.1rem;
+}
+
+.answers > .turn {
+  margin: 0;
+  max-width: none;
+}
+
+/* Several models' answers to one question, side by side. */
+.answers.many {
+  max-width: 72rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.answers.many > .turn {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  background: var(--page);
+}
+
+.card-head {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* An answer's grade, under its model's name. */
+.grade {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.grade-letter {
+  flex: none;
+  min-width: 1.7rem;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The grader's summary, under the answers it graded. */
+.grade-card {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 72rem;
+  margin: 0 auto 1.1rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.grade-card .note {
+  margin: 0;
+}
+
+.grade-ask {
+  max-width: 72rem;
+  margin: -0.4rem auto 1.1rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .bubble,
@@ -2366,6 +3320,7 @@ option {
   border-radius: 10px;
   color: var(--bad);
   overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .compose {
@@ -2494,34 +3449,6 @@ progress.near {
 }
 
 /* Settings. */
-.settings {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 2.5rem 2rem 3rem;
-}
-
-.settings-head {
-  max-width: 60rem;
-  margin: 0 auto 2rem;
-  display: grid;
-  gap: 0.3rem;
-}
-
-.settings-head h2 {
-  font-size: 3rem;
-  line-height: 1;
-  white-space: normal;
-}
-
-.settings-body {
-  max-width: 60rem;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: 12rem minmax(0, 1fr);
-  gap: 2.5rem;
-}
-
 .settings-tabs {
   display: grid;
   align-content: start;
@@ -2664,11 +3591,14 @@ textarea.memory:focus,
     grid-template-columns: 14rem minmax(0, 1fr);
   }
 
-  .bar-title {
+  .bar-title,
+  .picks-label,
+  .chip-detail {
     display: none;
   }
 
-  .settings-body {
+  .settings-body,
+  .settings-body:has(> .settings-tabs) {
     grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
   }

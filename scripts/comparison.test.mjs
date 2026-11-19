@@ -21,6 +21,9 @@ const SESSIONS = 'apps/desktop/src-tauri/src/sessions.rs';
 const DOWNLOADS = 'apps/desktop/src-tauri/src/downloads.rs';
 const STARTER = 'apps/desktop/src-tauri/src/starter.rs';
 const UPDATE = 'apps/desktop/src-tauri/src/update.rs';
+const GATE = 'apps/desktop/src-tauri/src/gate.rs';
+const STACK = 'apps/desktop/src-tauri/src/stack.rs';
+const OUTSIDE = 'apps/desktop/src-tauri/src/outside.rs';
 const TAURI = 'apps/desktop/src-tauri/tauri.conf.json';
 const PAGE = 'apps/desktop/src';
 const OLLAMA = 'https://ollama.com';
@@ -44,6 +47,16 @@ const KEPT_BY = [
   { file: UPDATE, test: 'the_check_asks_only_githubs_api_for_this_repositorys_newest_release' },
   { file: UPDATE, test: 'a_redirect_is_never_followed' },
   { file: UPDATE, test: 'only_this_repositorys_releases_are_opened' },
+  { file: GATE, test: 'the_gate_is_off_by_default' },
+  { file: GATE, test: 'a_closed_gate_makes_no_connection' },
+  { file: GATE, test: 'every_connection_past_this_computer_goes_through_the_gate' },
+  { file: UPDATE, test: 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on' },
+  { file: DOWNLOADS, test: 'with_the_gate_off_nothing_is_downloaded' },
+  { file: STACK, test: 'with_the_gate_off_the_stack_is_not_started' },
+  { file: OUTSIDE, test: 'the_key_never_leaves_rust' },
+  { file: OUTSIDE, test: 'with_the_gate_off_grok_is_not_asked_and_the_key_is_not_read' },
+  { file: OUTSIDE, test: 'grok_is_asked_at_xais_api_alone_over_https' },
+  { file: OUTSIDE, test: 'turning_the_gate_off_stops_grok_part_way_through' },
 ];
 
 function read(file) {
@@ -204,7 +217,10 @@ test('what the comparison says of Rusty Business™ is kept by a test in the Rus
   }
 });
 
-test('the chat window cannot reach past this computer', () => {
+// Brad, 2026-11-17: "it's no longer "local" only, but it's "local" first."
+// And: "there is a hard switch / circuit breaker to hard stop all outbound
+// communication, user can turn it on to use their inference."
+test('the page cannot reach past this computer, and Rust does only through the gate', () => {
   const security = JSON.parse(read(TAURI)).app.security;
   for (const name of ['csp', 'devCsp']) {
     const sources = connectSources(security[name] ?? '');
@@ -227,6 +243,31 @@ test('the chat window cannot reach past this computer', () => {
   const update = read(UPDATE);
   assert.ok(update.includes('.no_proxy()'), `${UPDATE} may now send its check through a proxy`);
   assert.ok(update.includes('redirect::Policy::none()'), `${UPDATE} may now follow a redirect somewhere else`);
+
+  const outside = read(OUTSIDE);
+  assert.ok(outside.includes('.no_proxy()'), `${OUTSIDE} may now send an outside engine's calls through a proxy`);
+  assert.ok(outside.includes('redirect::Policy::none()'), `${OUTSIDE} may now follow a redirect away from a maker's API`);
+
+  // Every client that reaches past this computer is made by the gate, which
+  // refuses while it is off and holds each one to https with no proxy.
+  const gate = read(GATE);
+  assert.ok(gate.includes('if !self.is_open() {\n            return Err(refused.to_string());'), `${GATE} no longer refuses while it is off`);
+  for (const rule of ['.https_only(true)', '.no_proxy()']) {
+    assert.ok(gate.includes(rule), `${GATE} no longer holds its clients to ${rule}`);
+  }
+  for (const file of [UPDATE, DOWNLOADS]) {
+    assert.match(read(file), /fn client\(gate: &Gate\)[^{]*\{\s+gate\.client\(GATE_OFF,/, `${file} makes a client that does not go through the gate`);
+  }
+  // The outside engines' client says which engine waits for the gate.
+  assert.match(read(OUTSIDE), /fn client\(engine: Engine, gate: &Gate\)[^{]*\{\s+gate\.client\(&engine\.gate_off\(\),/, `${OUTSIDE} makes a client that does not go through the gate`);
+
+  // The README says so, in the reason to choose Rusty Business™.
+  const why = (ours[0]?.body ?? '').replace(/\s+/g, ' ');
+  assert.ok(why.includes('- **Local first, behind a gate.** A chat needs nothing outside your computer.'), 'the comparison no longer says the app is local first');
+  assert.ok(
+    why.includes('the outbound gate, a switch at the foot of the window that is off until you turn it on; turning it off stops what is under way.'),
+    'the comparison no longer says the gate is off until it is turned on',
+  );
 
   const files = readdirSync(path.join(REPO, PAGE)).filter((file) => /\.(?:js|vue)$/.test(file) && !file.includes('.test.'));
   assert.ok(files.length > 0, `${PAGE} holds no page source`);

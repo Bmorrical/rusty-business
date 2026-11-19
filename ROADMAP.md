@@ -10,10 +10,19 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 1. **Signed installers.** The installers ship unsigned at first, so macOS
    and Windows both warn before they open one. Signing and notarizing
    the macOS app with an Apple Developer ID, then signing the Windows
-   installer, takes the warnings away.
+   installer, takes the warnings away. Each system's signing goes behind a
+   switch of its own, off to start: the Mac's is being built first, and
+   Windows's follows. Until its switch is on, a download ships as it does
+   today, unsigned.
 
 ## Next
 
+- **An engine for Windows and Linux.** The Windows installer and the Linux
+  packages carry llama.cpp's `llama-server` inside the download, so nothing
+  else has to be installed first: the Vulkan build from llama.cpp's own
+  releases, pinned to one release and checked by its SHA-256. The Linux
+  packages ask for the Vulkan loader. Until then, the app starts
+  `llama-server` when it is installed on the computer.
 - **Reading images.** Images dropped on a message, and scanned PDFs, are
   read by a model that can see. That means mlx-vlm in the engine and a
   vision model on the Models list, such as Qwen2.5-VL 7B at about 5 GB.
@@ -27,8 +36,15 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   such as web coding, UI design, or project planning, so switching costs
   next to nothing. It ships first with the general model alone, noting what
   it would have picked, so real use shows which specialists to train.
-- **An engine for Windows and Linux.** MLX runs on Apple silicon only, so
-  Windows and Linux need an engine of their own. It is not chosen yet.
+- **Grok through xAI's newer API.** The app asks Grok through the chat API
+  that xAI now calls legacy. Its Responses API is the one to move to, with
+  the same key and the same rules.
+- **A look at the desktop.** Select text, or point at the screen, and ask
+  about what is there.
+- **Skills.** Tell the app how you like its answers, such as short unless
+  you ask for more, and it keeps that.
+- **Learning on this computer.** The app learns from how you use it, here,
+  and reaches outside sparingly, only when you say so.
 
 ## Done
 
@@ -72,6 +88,55 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
   GitHub when the window opens, once a day, and when you click Check for
   updates. It installs nothing itself.
+- **The outbound gate.** A switch at the foot of the window, off until you
+  turn it on. While it is off, nothing leaves the computer: no check for a
+  new version, no download, and no start of the stack. Turning it off stops
+  what is under way. A chat with a model here works either way.
+- **Model makers you choose.** On a first run, you tick one maker or more,
+  with Microsoft ticked to start. Settings adds or removes a maker with one
+  click, and Install or Show on the Installers page adds one. The list now
+  holds five models, Google's Gemma 4 26B and Meta's Llama 3.1 8B among
+  them. Removing a maker hides its models and deletes nothing, and saved
+  chats still name them.
+- **One question, many models.** Pick one model or several at the top of
+  the window, and each answers the same question, side by side. The models
+  on this computer take turns, since the engine holds one at a time, and
+  Stop asks no more of them.
+- **Grok, the first engine outside this computer.** On the Installers page,
+  you give the path to a file that holds your own xAI key. The app reads
+  the key there when it asks Grok, never shows it to the page, and sends it
+  over https only to xAI's API, and only while the outbound gate is on.
+  Grok answers alone or as one of several, and a chip at the top says it is
+  asked online.
+- **GPT, by OpenAI, beside Grok.** GPT is added on the Installers page the
+  same way, with the path to your own OpenAI key, which goes only to
+  OpenAI's API. Each engine keeps its own key path and models, and removing
+  one leaves the other as it was.
+- **Claude, by Anthropic, beside them.** Claude is added on the Installers
+  page the same way, with the path to your own Anthropic key, which goes
+  only to Anthropic's API. Claude answers alone or among several, and can
+  grade.
+- **Gemini, by Google, beside them.** Gemini is added on the Installers
+  page the same way, with the path to your own Google key, which goes only
+  to Google's API, in a header and never in an address. Gemini answers
+  alone or among several, and can grade.
+- **Grading and a summary.** Once every answer is in, one model grades each
+  from A to F and sums them up, reading the question and the answers,
+  numbered and without the models' names. An outside engine grades, Grok
+  first, then GPT, then Claude, then Gemini, until another model is picked
+  in Settings, where No grading turns it off. A round not graded yet has a
+  button to grade it.
+- **An installers page.** Every model on the list, from every maker, is one
+  Install away, with its license and download size. Install downloads it,
+  with the outbound gate on, then adds its maker, so it shows at the top of
+  the window. A model already here whose maker is not added has a Show
+  button instead. Grok, GPT, Claude, and Gemini are added there too.
+- **The app starts llama.cpp on Windows and Linux.** MLX runs on Apple
+  silicon only, so on Windows and Linux the app starts llama.cpp's
+  `llama-server` by itself when it is installed, the way the Mac's engine
+  starts: on 127.0.0.1, offline, one model at a time. The five models come
+  as GGUF files, from the maker's own copy first, then ggml-org's, each file
+  checked against its pinned size and checksum.
 - **Projects, memory, and search.** Chats group into projects, each with
   its own instructions and memory; a global memory goes with every chat and
   grows as you talk. Chats can be pinned and searched.
