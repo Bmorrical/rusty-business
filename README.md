@@ -463,10 +463,12 @@ checks every part of the stack from outside: the front door, the API, the
 database migration, a job travelling from the queue to the worker, file
 storage, and mail.
 
-On GitHub, the gate runs all of the above once on each push to `main`. Nothing
-is released or deployed unless the gate is green. The gate does not run on
-pull requests, so run `make test` and `make e2e` before you push. More in
-[.github/workflows](.github/workflows).
+On GitHub, the gate runs all of the above on every pull request and once on
+each push to `main`. A pull request merges only when the gate is green on it,
+and nothing is released or deployed unless it is green on `main`. Run
+`make test` and `make e2e` before you push. More in
+[.github/workflows](.github/workflows), and how a change gets in, in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 `make` alone lists every command.
 
