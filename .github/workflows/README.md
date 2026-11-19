@@ -4,7 +4,7 @@ What GitHub runs for this repository.
 
 | File          | When it runs                                                        | What it does                                             |
 | ------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
-| `gate.yml`    | Once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
+| `gate.yml`    | On every pull request, once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
 | `deploy.yml`  | Only on request, only from `main`                                   | Runs the gate, then puts the API and worker images on GitHub's container registry |
 | `release.yml` | Only on request, only from `main`                                   | Runs the gate, then builds the Mac app on a Mac, the Windows installer on Windows, and the Linux packages on Linux, and puts them all on a GitHub release, where the README's download links find them |
 
@@ -110,7 +110,10 @@ released by a test.
 
 ## Pull requests
 
-The gate does not run on pull request pushes. Before you push, run:
+The gate runs on every pull request, and a pull request merges only when it
+is green there. A pull request from a fork runs it with read access alone and
+no secret. [CONTRIBUTING.md](../../CONTRIBUTING.md) has the rest of the
+rules. Before you push, run:
 
 ```bash
 make test

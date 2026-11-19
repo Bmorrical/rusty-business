@@ -303,18 +303,24 @@ test('Deploy builds each kind of image on its own kind of computer, then joins t
   );
 });
 
-test('no workflow runs on a pull request', () => {
+// Brad, 2026-11-19, for CONTRIBUTING.md: "all checks pass pr's before
+// merge". So the gate runs on every pull request, and only the gate does: a
+// pull request from a fork gets read access and no secret, and nothing on a
+// pull request deploys or releases.
+test('only the gate runs on a pull request, and never with the base branch\'s rights', () => {
   for (const { name, text } of workflows) {
     for (const trigger of triggersOf(text)) {
-      assert.doesNotMatch(trigger, /^pull_request/, `${name} runs on ${trigger}`);
+      assert.notEqual(trigger, 'pull_request_target', `${name} runs on ${trigger}`);
+      if (trigger.startsWith('pull_request')) assert.equal(name, 'gate.yml', `${name} runs on ${trigger}`);
     }
   }
 });
 
-test('the gate runs on each push to main, on request, and when called', () => {
-  const text = workflow('gate.yml');
-  assert.deepEqual(triggersOf(text), ['push', 'workflow_call', 'workflow_dispatch']);
-  assert.match(withoutComments(text), /^ {2}push:\n {4}branches: \[main\]\n/m);
+test('the gate runs on every pull request, on each push to main, on request, and when called', () => {
+  const text = withoutComments(workflow('gate.yml'));
+  assert.deepEqual(triggersOf(text), ['pull_request', 'push', 'workflow_call', 'workflow_dispatch']);
+  assert.match(text, /^ {2}pull_request:\n {2}push:\n/m, 'the gate runs on only some pull requests');
+  assert.match(text, /^ {2}push:\n {4}branches: \[main\]\n/m);
 });
 
 test('the gate is green only when every other job is green', () => {
