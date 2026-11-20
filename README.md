@@ -36,11 +36,11 @@
    model engine on the computer.
 
 A desktop window for chatting with models on your own computer or
-a private-network llama-server you configure. Chat with either engine works
-with the outbound gate off. With the gate on, you can also ask Grok, GPT,
-Claude, and Gemini with your own keys.
+a private-network llama-server you configure. Turn on the LAN gate to use
+that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
+Gemini with your own keys.
 
-**Status:** version 0.8.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.1, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -88,11 +88,12 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 - **Local first, behind a gate.** Chat uses the engine on your computer by
   default. You can also point the app at a [llama-server on your private
   network](apps/desktop/README.md#install-models-on-a-lan-server). Engines
-  started by the app listen on loopback and run offline. Internet features wait
-  for the outbound gate at the foot of the window, which is off by default.
-  With the gate on, Download or Install fetches the model from Hugging Face. If a LAN server
-  is configured, that server fetches and stores the model. The first time
-  the app starts the stack, Docker downloads the stack's
+  started by the app listen on loopback and run offline. The LAN and WAN
+  gates at the foot of the window are off by default and work independently.
+  LAN allows discovery, chat, and install requests to the configured server,
+  which fetches and stores its own models. WAN allows the app to download
+  models from Hugging Face and start the stack. On its first start, Docker
+  downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
   out. Install and restart downloads it from GitHub only when you click it.
@@ -232,9 +233,10 @@ for checking the download first. To build the same app yourself, see
 
 On a first run, with none of its models on the computer, the app lists the
 models of the makers you tick, Microsoft to begin with, with their download
-sizes. Turn on the outbound gate, at the foot of the window, and Download
+sizes. Turn on the WAN gate, at the foot of the window, and Download
 brings the one you pick from Hugging Face; the app then starts the engine
-with it. The gate stays as you leave it, and a chat works with it on or off.
+with it. Both gates stay as you leave them. An on-device chat works with
+both gates off.
 
 To ask Grok, by xAI, put your xAI key alone in a file, such as
 `~/.config/xai/key`, readable only by you. On the Installers page, under
@@ -256,9 +258,11 @@ question and every answer, so a grade by a model on this computer keeps it all
 here.
 
 The Installers page, at the foot of the window above Settings, lists every
-model on the app's list, whoever made it. With the gate on, Install brings
-the one you pick from Hugging Face and adds its maker, so the model shows at
-the top of the window. A model already on the computer whose maker is not
+model on the app's list, whoever made it. With the WAN gate on, Install
+brings a model from Hugging Face onto this computer. For a configured
+private-network engine, Install uses the LAN gate and asks the server to
+fetch the model. In either case Install adds its maker so the model shows
+at the top of the window. A model already on the computer whose maker is not
 added has a Show button instead. Settings adds or removes a maker with one
 click. Removing a maker hides its models and deletes nothing: they stay on
 the computer, and saved chats still name them. One maker always stays

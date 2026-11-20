@@ -1,9 +1,10 @@
 # Security
 
 Rusty Business™ uses the engine on your computer by default. It can also
-send chat to a server you configure on your private network. The outbound
-gate controls the app’s internet features. If you find a way around that, or
-any other security problem, I want to hear about it.
+send chat to a server you configure on your private network. The LAN gate
+controls access to that server. The WAN gate controls the app’s internet
+features. If you find a way around those controls or any other security
+problem, I want to hear about it.
 
 ## Reporting a problem
 
@@ -24,7 +25,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.8.0. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.8.1. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -39,10 +40,13 @@ These are the promises that matter most. A way to break one is exactly what
 I want to hear about:
 
 - The page has no way to call out.
-- The outbound gate starts off. Model downloads, update checks, stack
-  startup, and provider requests wait for it. Turning it off stops those
-  actions and asks the LAN server to pause the download the app is tracking.
-  Discovery and chat on the configured private network work with the gate off.
+- Both gates start off and can be turned on independently. Local model
+  downloads, update checks and installs, stack startup, and provider
+  requests wait for the WAN gate. Turning WAN off stops those actions.
+- Discovery, chat, and install, pause, and resume requests to the configured
+  private-network server wait for the LAN gate. Turning LAN off closes those
+  app connections. A download already delegated to the server may continue
+  there. The server operator controls the server's internet access.
 - Your xAI, OpenAI, Anthropic, and Google keys stay in the files you name. The app
   keeps only each file's path, reads the key from it when it asks that
   engine, and sends the key only to its maker's API, over https, following

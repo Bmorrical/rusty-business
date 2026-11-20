@@ -2,9 +2,9 @@
 
 A window for chatting with models on your own computer or a configured
 llama-server on your private network. The shell is Rust (Tauri 2), and the
-page is Vue 3. The outbound gate controls internet features.
-With it on, Grok, GPT, Claude, and Gemini can answer too, each with your
-own key.
+page is Vue 3. The LAN gate controls access to your private-network engine.
+The WAN gate controls the app's internet features, including Grok, GPT,
+Claude, and Gemini with your own keys.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
@@ -13,10 +13,12 @@ Select the picture to open it full size. The rest of the set is in
 
 ## What it does
 
-- **The outbound gate**, a switch at the foot of the window. It is off until
-  you turn it on, and it stays as you leave it. Turning it off stops active
-  internet requests and asks the LAN server to pause a download the app is
-  tracking. Discovery and chat work with the configured engine either way.
+- **The LAN and WAN gates**, two switches at the foot of the window. Both
+  start off and keep their settings independently. LAN controls discovery,
+  chat, and model install, pause, and resume requests to the configured
+  server. WAN controls direct downloads onto this computer, updates, stack
+  startup, and outside providers. Turning either gate off stops the app's
+  work through that gate. On-device chat works with both gates off.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **One model or several.** The models sit at the top of the window, one
@@ -117,23 +119,17 @@ Select the picture to open it full size. The rest of the set is in
 ## How it is put together
 
 ```
-page (Vue)  --IPC-->  Rust  --http, loopback or configured private address-->  engine
-                      Rust  --gate--https, on Download only-->   Hugging Face
-                      Rust  --gate--Docker, when the stack is not answering-->  the stack
-                      Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
-                      Rust  --gate--https, on Install and restart only-->  this repository's releases on GitHub
-                      Rust  --gate--https, with the key from your file-->  xAI's API (Grok)
-                      Rust  --gate--https, with the key from your file-->  OpenAI's API (GPT)
-                      Rust  --gate--https, with the key from your file-->  Anthropic's API (Claude)
-                      Rust  --gate--https, with the key from your file-->  Google's API (Gemini)
+page (Vue)  --IPC-->  Rust  --HTTP, loopback-->  on-device engine
+                      Rust  --LAN gate--HTTP, configured private address-->  LAN engine
+                      Rust  --WAN gate--HTTPS, on model download-->  Hugging Face
+                      Rust  --WAN gate--Docker, when the stack is not answering-->  the stack
+                      Rust  --WAN gate--HTTPS, on update checks and installs-->  GitHub
+                      Rust  --WAN gate--HTTPS, with the key from your file-->  xAI, OpenAI, Anthropic, or Google
 ```
 
-The page reaches the configured engine through Rust. Rust gates internet
-features, including model downloads delegated to a private-network engine.
-
-- [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
-  keeps the switch and provides HTTPS clients for online services. Remote
-  installs check it before asking a LAN server to download a model.
+- [src-tauri/src/gate.rs](src-tauri/src/gate.rs) keeps both switches, provides
+  HTTPS clients for WAN requests, and cancels LAN requests when LAN is
+  turned off.
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
@@ -238,16 +234,19 @@ RUSTY_ENGINE_URL=http://192.168.1.50:8080/v1 \
   /Applications/Rusty\ Business.app/Contents/MacOS/rusty-business
 ```
 
-Open **Installers**, turn on the outbound gate, and select **Install**.
+Open **Installers**, turn on the **LAN gate**, and select **Install**.
 llama-server fetches the selected GGUF into its own cache. The app shows
 its progress and refreshes the picker when the server lists the model.
 **Pause** requests a pause on the server, and **Install** resumes any partial
-download the server retained. A server-side download can continue if the
-app closes or loses its connection. Chat with the configured LAN server
-works with the gate off.
+download the server retained. Use **Pause** before turning off LAN if you
+want the server to pause. A server-side download can continue when the app
+closes, loses its connection, or turns the LAN gate off. Discovery, chat,
+and installs through the server work with the WAN gate off.
 
 The server chooses the file from the catalog's Hugging Face repository and
 filename tag. It controls the cache, network access, and download validation.
+To keep inference offline, give the inference process no internet access and
+run a separate downloader with internet access and a shared model cache.
 If your server supports chat only, you can install a catalog GGUF on the
 server and refresh the app after llama-server lists it. Use this HTTP
 connection on a trusted private network.

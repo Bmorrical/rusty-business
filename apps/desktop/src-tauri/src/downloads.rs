@@ -38,7 +38,7 @@ use sha2::{Digest, Sha256};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
-use crate::gate::Gate;
+use crate::gate::{Gate, LanGate};
 use crate::{engine, models, remote};
 
 /// Where the app downloads from.
@@ -426,10 +426,10 @@ fn redirect_policy() -> reqwest::redirect::Policy {
 }
 
 /// What Download says while the outbound gate is off.
-const GATE_OFF: &str = "The gate is off. Turn it on to download a model.";
+const GATE_OFF: &str = "The WAN gate is off. Turn it on to download a model.";
 
 /// What a download says when the gate is turned off part way.
-const GATE_TURNED_OFF: &str = "The gate was turned off, so the download stopped.";
+const GATE_TURNED_OFF: &str = "The WAN gate was turned off, so the download stopped.";
 
 /// The one client downloads use, through the outbound gate. It sends no
 /// account, token, or cookie: no such thing is ever added to a request here,
@@ -704,7 +704,12 @@ pub struct Downloads {
     /// The app's own folder for downloads still being put together.
     staging: PathBuf,
     /// The running download's Cancel, when one is running.
-    running: Mutex<Option<watch::Sender<bool>>>,
+    running: Mutex<Option<ActiveDownload>>,
+}
+
+struct ActiveDownload {
+    cancel: watch::Sender<bool>,
+    remote: bool,
 }
 
 /// Frees the slot when a download ends, however it ends.
@@ -724,7 +729,7 @@ impl Downloads {
         }
     }
 
-    fn slot(&self) -> MutexGuard<'_, Option<watch::Sender<bool>>> {
+    fn slot(&self) -> MutexGuard<'_, Option<ActiveDownload>> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -735,33 +740,44 @@ impl Downloads {
 
     /// Stops the download that is running, if one is.
     pub fn stop(&self) {
-        if let Some(cancel) = self.slot().as_ref() {
-            let _ = cancel.send(true);
+        if let Some(active) = self.slot().as_ref() {
+            let _ = active.cancel.send(true);
+        }
+    }
+
+    /// The WAN gate can stop a local transfer without affecting a LAN install.
+    pub fn stop_local(&self) {
+        if let Some(active) = self.slot().as_ref().filter(|active| !active.remote) {
+            let _ = active.cancel.send(true);
         }
     }
 
     async fn download_remote(
         &self,
-        gate: &Gate,
+        lan: &LanGate,
         base: &str,
         id: &str,
         report: impl FnMut(Progress),
     ) -> Result<DownloadReport, String> {
-        let model = remote_model(id).ok_or_else(|| sentence(Why::NotListed, &name_of(id), 0))?;
-        let mut cancel = {
-            let mut slot = self.slot();
-            if !gate.is_open() {
-                return Err(GATE_OFF.to_string());
-            }
-            if slot.is_some() {
-                return Err(sentence(Why::Busy, &name_of(id), 0));
-            }
-            let (sender, receiver) = watch::channel(false);
-            *slot = Some(sender);
-            receiver
-        };
-        let _running = Running(self);
-        remote::download(base, &model, gate, &mut cancel, report).await
+        lan.run(async {
+            let model =
+                remote_model(id).ok_or_else(|| sentence(Why::NotListed, &name_of(id), 0))?;
+            let mut cancel = {
+                let mut slot = self.slot();
+                if slot.is_some() {
+                    return Err(sentence(Why::Busy, &name_of(id), 0));
+                }
+                let (sender, receiver) = watch::channel(false);
+                *slot = Some(ActiveDownload {
+                    cancel: sender,
+                    remote: true,
+                });
+                receiver
+            };
+            let _running = Running(self);
+            remote::download(base, &model, &mut cancel, report).await
+        })
+        .await
     }
 
     /// Throws away what downloads left in the app's own folder: a download
@@ -807,7 +823,10 @@ impl Downloads {
                 Step::Fetch => {}
             }
             let (sender, receiver) = watch::channel(false);
-            *slot = Some(sender);
+            *slot = Some(ActiveDownload {
+                cancel: sender,
+                remote: false,
+            });
             receiver
         };
         let _running = Running(self);
@@ -876,6 +895,7 @@ async fn download_through(
 pub async fn download_model(
     downloads: tauri::State<'_, Downloads>,
     gate: tauri::State<'_, Gate>,
+    lan: tauri::State<'_, LanGate>,
     id: String,
     on_progress: Channel<Progress>,
 ) -> Result<DownloadReport, String> {
@@ -884,7 +904,7 @@ pub async fn download_model(
         let _ = on_progress.send(progress);
     };
     if engine::is_remote(&base) {
-        return downloads.download_remote(&gate, &base, &id, report).await;
+        return downloads.download_remote(&lan, &base, &id, report).await;
     }
     let hub = models::models_folder();
     let client = client(&gate)?;
@@ -937,6 +957,38 @@ mod tests {
     use std::thread;
 
     use tauri::async_runtime::block_on;
+
+    #[test]
+    fn a_closed_lan_gate_never_starts_a_server_download() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let downloads = Downloads::new(PathBuf::new());
+        let lan = LanGate::new(PathBuf::new());
+        assert!(
+            block_on(downloads.download_remote(&lan, &base, "microsoft/phi-4-gguf", |_| {}))
+                .unwrap_err()
+                .contains("The LAN gate is off")
+        );
+        listener.set_nonblocking(true).unwrap();
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert!(!downloads.running());
+    }
+
+    #[test]
+    fn wan_shutdown_only_cancels_downloads_onto_this_computer() {
+        let downloads = Downloads::new(PathBuf::new());
+        for remote in [false, true] {
+            let (cancel, signal) = watch::channel(false);
+            *downloads.slot() = Some(ActiveDownload { cancel, remote });
+            downloads.stop_local();
+            assert_eq!(*signal.borrow(), !remote);
+            downloads.stop();
+            assert!(*signal.borrow());
+        }
+    }
 
     const PHI: &str = "mlx-community/phi-4-4bit";
     const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -2211,7 +2263,10 @@ mod tests {
             |_| {},
         ))
         .unwrap_err();
-        assert_eq!(error, "The gate is off. Turn it on to download a model.");
+        assert_eq!(
+            error,
+            "The WAN gate is off. Turn it on to download a model."
+        );
         assert_eq!(client(&Gate::at(false)).unwrap_err(), GATE_OFF);
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&place.hub).is_empty());
@@ -2298,7 +2353,10 @@ mod tests {
         let place = place();
         let files = files();
         let pins = vec![pin_for(PHI, &files)];
-        *place.downloads.slot() = Some(watch::channel(false).0);
+        *place.downloads.slot() = Some(ActiveDownload {
+            cancel: watch::channel(false).0,
+            remote: false,
+        });
         let (asked, open) = never_asked();
         let error = block_on(place.downloads.download(
             PHI,

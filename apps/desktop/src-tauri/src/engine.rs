@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
-use crate::gate::Gate;
+use crate::gate::{Gate, LanGate};
 use crate::makers::Makers;
 use crate::outside::{self, Outside};
 
@@ -362,13 +362,16 @@ fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
 }
 
 #[tauri::command]
-pub async fn engine_status(makers: tauri::State<'_, Makers>) -> Result<EngineStatus, String> {
-    Ok(for_makers(status_now().await, &makers))
+pub async fn engine_status(
+    makers: tauri::State<'_, Makers>,
+    lan: tauri::State<'_, LanGate>,
+) -> Result<EngineStatus, String> {
+    Ok(for_makers(status_at(base_url(), &lan).await, &makers))
 }
 
-async fn status_now() -> EngineStatus {
+async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus {
     let mut status = first_status();
-    let base = match base_url() {
+    let base = match base {
         Ok(base) => base,
         Err(error) => {
             status.error = Some(error);
@@ -383,16 +386,21 @@ async fn status_now() -> EngineStatus {
         status.on_disk.clear();
         status.offers = crate::downloads::remote_offers();
     }
-    match fetch_model_ids(&base).await {
+    let result = if status.remote {
+        lan.run(async {
+            fetch_model_ids(&base).await.map_err(|error| {
+                format!("The LAN server at {base} did not return a model list. {error}")
+            })
+        })
+        .await
+    } else {
+        fetch_model_ids(&base).await
+    };
+    match result {
         Ok(ids) => {
             status.reachable = true;
             status.models = allowed_models(&ids);
             status.hidden = ids.len().saturating_sub(status.models.len());
-        }
-        Err(error) if status.remote => {
-            status.error = Some(format!(
-                "The LAN server at {base} did not return a model list. {error}"
-            ));
         }
         Err(error) => status.error = Some(error),
     }
@@ -704,13 +712,13 @@ pub(crate) fn checked_messages(messages: &[ChatMessage]) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn run_chat(
+async fn run_chat(
+    base: &str,
     request: &ChatRequest,
     cancel: &mut watch::Receiver<bool>,
     emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
     checked_request(request)?;
-    let base = base_url()?;
     let body = serde_json::json!({
         "model": request.model,
         "messages": request.messages,
@@ -747,6 +755,31 @@ pub async fn run_chat(
         "The engine stopped answering part way through.",
     )
     .await
+}
+
+async fn chat_on_engine(
+    base: &str,
+    lan: &LanGate,
+    chats: &Chats,
+    request: &ChatRequest,
+    stopped: &mut watch::Receiver<bool>,
+    emit: impl FnMut(ChatEvent),
+) -> Result<ChatDone, String> {
+    let chat = async {
+        // Keep the turn until the answer or the LAN connection ends.
+        let Some(_turn) = wait_for_turn(&chats.turn, stopped).await else {
+            return Ok(ChatDone {
+                stopped: true,
+                ..ChatDone::default()
+            });
+        };
+        run_chat(base, request, stopped, emit).await
+    };
+    if is_remote(base) {
+        lan.run(chat).await
+    } else {
+        chat.await
+    }
 }
 
 /// Reads a streamed answer into thinking and answer pieces, for the engine on
@@ -854,6 +887,7 @@ pub(crate) async fn read_stream<B: AsRef<[u8]>, E>(
 pub async fn chat_stream(
     chats: tauri::State<'_, Chats>,
     gate: tauri::State<'_, Gate>,
+    lan: tauri::State<'_, LanGate>,
     outside: tauri::State<'_, Outside>,
     chat_id: String,
     request: ChatRequest,
@@ -872,18 +906,14 @@ pub async fn chat_stream(
         })
         .await
     } else {
-        // `_turn` keeps the turn until the answer ends; `_` would let it go at once.
-        match wait_for_turn(&chats.turn, &mut stopped).await {
-            None => Ok(ChatDone {
-                stopped: true,
-                ..ChatDone::default()
-            }),
-            Some(_turn) => {
-                run_chat(&request, &mut stopped, |event| {
+        match base_url() {
+            Ok(base) => {
+                chat_on_engine(&base, &lan, &chats, &request, &mut stopped, |event| {
                     let _ = on_event.send(event);
                 })
                 .await
             }
+            Err(error) => Err(error),
         }
     };
     if let Ok(mut map) = chats.stops.lock() {
@@ -904,6 +934,35 @@ pub fn stop_chat(chats: tauri::State<'_, Chats>, chat_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_closed_lan_gate_hides_models_and_refuses_chat() {
+        tauri::async_runtime::block_on(async {
+            let lan = LanGate::new(std::path::PathBuf::new());
+            // The test passes a non-loopback documentation address to the
+            // engine worker. Production passes only validated addresses.
+            let base = "http://192.0.2.1:1/v1";
+            let status = status_at(Ok(base.to_string()), &lan).await;
+            assert!(status.remote);
+            assert!(!status.reachable);
+            assert!(status.models.is_empty());
+            let error = status.error.unwrap();
+            assert!(error.contains("The LAN gate is off"));
+
+            let chats = Chats::default();
+            let (_stop, mut stopped) = watch::channel(false);
+            let request = ChatRequest {
+                model: "microsoft/phi-4-gguf:Q4_K".to_string(),
+                messages: vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: "Hello".to_string(),
+                }],
+                max_tokens: Some(8),
+            };
+            let result = chat_on_engine(base, &lan, &chats, &request, &mut stopped, |_| {}).await;
+            assert_eq!(result.unwrap_err(), error);
+        });
+    }
 
     // What gpt-oss really sent for "What is 2+2? One short sentence."
     const GPT_OSS_REPLY: &str = "<|channel|>analysis<|message|>The user asks: \"What is 2+2?\" So answer: \"2+2 equals 4.\"<|end|><|start|>assistant<|channel|>final<|message|>2\u{202f}+\u{202f}2 equals 4.";
@@ -1316,7 +1375,8 @@ mod tests {
     #[test]
     #[ignore]
     fn live_two_plus_two() {
-        let ids = tauri::async_runtime::block_on(fetch_model_ids(&base_url().unwrap()))
+        let base = base_url().unwrap();
+        let ids = tauri::async_runtime::block_on(fetch_model_ids(&base))
             .expect("the engine is not answering");
         let model = allowed_models(&ids)
             .into_iter()
@@ -1332,10 +1392,11 @@ mod tests {
         };
         let (_stop, mut stopped) = watch::channel(false);
         let mut events = Vec::new();
-        let done = tauri::async_runtime::block_on(run_chat(&request, &mut stopped, |event| {
-            events.push(event)
-        }))
-        .unwrap();
+        let done =
+            tauri::async_runtime::block_on(run_chat(&base, &request, &mut stopped, |event| {
+                events.push(event)
+            }))
+            .unwrap();
         assert!(done.answer.contains('4'), "answer was {:?}", done.answer);
         assert!(!done.answer.contains("<|"));
         assert_eq!(rebuilt(&events).answer.trim(), done.answer);

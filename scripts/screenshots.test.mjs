@@ -461,7 +461,7 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   // model is whole.
   const page = read('apps/desktop/src/App.vue');
   const download = page.match(/\nasync function download\(offer\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
-  assert.match(download, /^\s*if \(downloading\.value\) return false;/, 'download() does nothing while one is running');
+  assert.match(download, /^\s*if \(downloading\.value \|\| !canDownload\.value\) return false;/, 'download() does nothing while one is running or its gate is off');
   assert.match(download, /invoke\("download_model", \{ id: offer\.id, onProgress: channel \}\)/, 'Rust is told which model, and reports its progress');
   assert.match(download, /if \(report\.stopped\) \{[\s\S]*?stoppedNote\.value = lanEngine\.value[\s\S]*?paused[\s\S]*?stopped, and none of it was kept/, 'the download reports a pause or cancellation');
   assert.match(
@@ -491,7 +491,7 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   assert.match(listed, /<button type="button" :disabled="stopping" @click="cancelDownload">\{\{ lanEngine \? "Pause" : "Cancel" \}\}<\/button>/, 'Cancel stops it there too');
   assert.match(
     page,
-    /<p v-if="!gate" class="gate-ask">\s*<span>The outbound gate is off, so nothing can download yet\.<\/span>\s*<button class="primary" type="button" :disabled="gateBusy" @click="setGate\(true\)">Turn on the gate<\/button>\s*<\/p>/,
+    /<p v-if="!installGateOpen" class="gate-ask">\s*<span>Turn on the \{\{ installGateName \}\} to download a model\.<\/span>\s*<button class="primary" type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the \{\{ installGateName \}\}<\/button>\s*<\/p>/,
     'the first-run picker offers to turn the gate on',
   );
   assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
@@ -711,8 +711,9 @@ test('the stand-in answers the ten calls the pictures need, and refuses the rest
   // Asked to start the stack, it starts nothing and says the stack runs.
   assert.deepEqual(plain(await invoke('start_stack')), STACK_RUNNING);
 
-  // The outbound gate is off, as on a first run, and the pictures leave it so.
+  // Both gates are off, as on a first run.
   assert.equal(await invoke('gate_status'), false);
+  assert.equal(await invoke('lan_gate_status'), false);
 
   // No model is switched off, and Uninstall would move one to the Trash, as on a Mac.
   assert.deepEqual(plain(await invoke('deactivated_models')), []);

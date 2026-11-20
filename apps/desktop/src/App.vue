@@ -138,6 +138,9 @@ const updateInstalling = ref(false);
 const gate = ref(false);
 const gateBusy = ref(false);
 const gateNote = ref("");
+const lanGate = ref(false);
+const lanGateBusy = ref(false);
+const lanGateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
@@ -216,8 +219,10 @@ function blankSession(project = null) {
 // engine is added.
 const outsideListed = computed(() => outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []));
 const outsideModels = computed(() => (gate.value ? outsideListed.value : []));
+const lanEngine = computed(() => engine.value?.remote === true);
+const engineModels = computed(() => (lanEngine.value && !lanGate.value ? [] : engine.value?.models ?? []));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
+const onHand = computed(() => [...engineModels.value, ...outsideModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -270,11 +275,13 @@ const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
 const makersLocked = computed(() => makersBusy.value || Boolean(downloading.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
-const lanEngine = computed(() => engine.value?.remote === true);
-const canDownload = computed(() => gate.value && (!lanEngine.value || engine.value.reachable));
+const installGateOpen = computed(() => (lanEngine.value ? lanGate.value : gate.value));
+const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : gateBusy.value));
+const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
+const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
 const displayMakers = computed(() => {
   if (!lanEngine.value) return makers.value;
-  const installed = [...engine.value.models, ...(engine.value.setAside ?? [])];
+  const installed = lanGate.value ? [...engine.value.models, ...(engine.value.setAside ?? [])] : [];
   return makers.value.map((maker) => ({
     ...maker,
     models: maker.models.map((entry) => {
@@ -287,7 +294,7 @@ const side = computed(() => arrangeSessions(sessions.value, projects.value, now.
 const searching = computed(() => Boolean(query.value.trim()));
 const currentProject = computed(() => projects.value.find((project) => project.id === current.value.project) ?? null);
 const hello = computed(() => greeting(new Date(now.value).getHours()));
-const engineOn = computed(() => Boolean(engine.value?.reachable));
+const engineOn = computed(() => Boolean(engine.value?.reachable) && (!lanEngine.value || lanGate.value));
 
 function stored(key, fallback) {
   try {
@@ -415,18 +422,43 @@ async function checkEngine() {
   }
 }
 
-/**
- * "there is a hard switch / circuit breaker to hard stop all outbound
- * communication, user can turn it on to use their inference", and "off by
- * default, everything stops". Rust keeps the gate and controls access to
- * online services and model downloads.
- */
+/** Rust keeps the WAN setting and controls access to internet services. */
 async function readGate() {
   try {
     gate.value = (await invoke("gate_status")) === true;
   } catch {
     gate.value = false;
   }
+}
+
+async function readLanGate() {
+  try {
+    lanGate.value = (await invoke("lan_gate_status")) === true;
+  } catch {
+    lanGate.value = false;
+  }
+}
+
+async function setLanGate(open) {
+  if (lanGateBusy.value) return;
+  lanGateBusy.value = true;
+  lanGateNote.value = "";
+  try {
+    lanGate.value = (await invoke("set_lan_gate", { open })) === true;
+  } catch (error) {
+    lanGateNote.value = String(error);
+    await readLanGate();
+  } finally {
+    lanGateBusy.value = false;
+  }
+  if (lanEngine.value) {
+    pickModels(picked.value);
+    await checkEngine();
+  }
+}
+
+function turnOnInstallGate() {
+  return lanEngine.value ? setLanGate(true) : setGate(true);
 }
 
 async function setGate(open) {
@@ -753,7 +785,7 @@ async function freeMemory() {
  * model picker. Gives back whether the whole model is in place.
  */
 async function download(offer) {
-  if (downloading.value) return false;
+  if (downloading.value || !canDownload.value) return false;
   downloading.value = offer.id;
   progress.value = { done: 0, total: lanEngine.value ? 0 : offer.bytes };
   stoppedNote.value = "";
@@ -1501,7 +1533,7 @@ onMounted(async () => {
   window.addEventListener("click", onWindowClick);
   clockTimer = window.setInterval(() => (now.value = Date.now()), 60_000);
   // While the gate is off, Rust starts no stack and asks for no new version.
-  await readGate();
+  await Promise.all([readGate(), readLanGate()]);
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   // The makers picked are kept on this computer, so they need no gate.
@@ -1702,6 +1734,7 @@ onBeforeUnmount(() => {
         <template v-if="!engine">
           <p class="quiet">Looking for the engine...</p>
         </template>
+        <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
           <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
           <p v-if="engine.hidden" class="quiet small">
@@ -1764,10 +1797,26 @@ onBeforeUnmount(() => {
             @click="setGate(!gate)"
           >
             <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            Outbound gate
+            WAN gate
           </button>
-          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}<template v-if="lanEngine && !gate"> Chat can still use your LAN server.</template></p>
+          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
           <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+        </div>
+        <div class="gate">
+          <button
+            class="switch"
+            type="button"
+            role="switch"
+            :aria-checked="lanGate"
+            aria-describedby="lan-gate-line"
+            :disabled="lanGateBusy"
+            @click="setLanGate(!lanGate)"
+          >
+            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+            LAN gate
+          </button>
+          <p id="lan-gate-line" class="quiet small">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</p>
+          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
         </div>
       </footer>
     </aside>
@@ -1817,9 +1866,9 @@ onBeforeUnmount(() => {
             Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
             top of the window. Nothing downloads until you press Install.
           </p>
-          <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so nothing can install yet.</span>
-            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          <p v-if="!installGateOpen" class="gate-ask">
+            <span>Turn on the {{ installGateName }} to install a model.</span>
+            <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
           </p>
           <ul class="makers" aria-label="Models to install">
             <li v-for="maker in displayMakers" :key="maker.name" class="maker">
@@ -1876,8 +1925,8 @@ onBeforeUnmount(() => {
             to that maker's API, while the gate is on. The key never shows here.
           </p>
           <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so no outside engine can be asked.</span>
-            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            <span>The WAN gate is off, so no outside engine can be asked.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the WAN gate</button>
           </p>
           <div
             v-for="entry in outside"
@@ -2228,9 +2277,9 @@ onBeforeUnmount(() => {
               </label>
             </fieldset>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
-            <p v-if="!gate" class="gate-ask">
-              <span>The outbound gate is off, so nothing can download yet.</span>
-              <button class="primary" type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to download a model.</span>
+              <button class="primary" type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
             </p>
             <ul class="offers" aria-label="Models to download">
               <li v-for="offer in offers" :key="offer.id" class="offer">
@@ -2255,7 +2304,7 @@ onBeforeUnmount(() => {
                 </template>
                 <button
                   v-else
-                  :class="{ primary: gate && offer.id === quick }"
+                  :class="{ primary: installGateOpen && offer.id === quick }"
                   type="button"
                   :disabled="Boolean(downloading) || !canDownload"
                   @click="download(offer)"

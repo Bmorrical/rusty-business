@@ -9,7 +9,6 @@ use tokio::sync::watch;
 
 use crate::downloads::{DownloadReport, Progress, cancelled};
 use crate::engine::{self, ModelList, ModelRow};
-use crate::gate::Gate;
 
 const POLL: Duration = Duration::from_secs(2);
 const REQUEST_WAIT: Duration = Duration::from_secs(15);
@@ -114,7 +113,6 @@ fn progress(row: &ModelRow) -> Progress {
 pub(crate) async fn download(
     base: &str,
     model: &str,
-    gate: &Gate,
     cancel: &mut watch::Receiver<bool>,
     mut report: impl FnMut(Progress),
 ) -> Result<DownloadReport, String> {
@@ -134,7 +132,7 @@ pub(crate) async fn download(
     if current.is_some_and(ModelRow::available) {
         return Ok(whole);
     }
-    if !gate.is_open() || *cancel.borrow() {
+    if *cancel.borrow() {
         return Ok(stopped);
     }
     if current.is_none_or(|row| row.status() != "downloading") {
@@ -270,14 +268,11 @@ mod tests {
         ]);
         let (_stop, mut cancel) = watch::channel(false);
         let mut updates = Vec::new();
-        let result = tauri::async_runtime::block_on(download(
-            &base,
-            MODEL,
-            &Gate::at(true),
-            &mut cancel,
-            |progress| updates.push(progress),
-        ))
-        .unwrap();
+        let result =
+            tauri::async_runtime::block_on(download(&base, MODEL, &mut cancel, |progress| {
+                updates.push(progress)
+            }))
+            .unwrap();
         assert!(result.whole);
         assert_eq!(
             updates,
@@ -293,13 +288,7 @@ mod tests {
     fn a_chat_only_server_explains_how_to_install() {
         let (base, thread) = router(vec![list("GET /models", ""), start(404)]);
         let (_stop, mut cancel) = watch::channel(false);
-        let result = tauri::async_runtime::block_on(download(
-            &base,
-            MODEL,
-            &Gate::at(true),
-            &mut cancel,
-            |_| {},
-        ));
+        let result = tauri::async_runtime::block_on(download(&base, MODEL, &mut cancel, |_| {}));
         assert_eq!(result.unwrap_err(), UNSUPPORTED);
         thread.join().unwrap();
     }
@@ -318,15 +307,9 @@ mod tests {
             },
         ]);
         let (stop, mut cancel) = watch::channel(false);
-        let result = tauri::async_runtime::block_on(download(
-            &base,
-            MODEL,
-            &Gate::at(true),
-            &mut cancel,
-            |_| {
-                stop.send(true).unwrap();
-            },
-        ))
+        let result = tauri::async_runtime::block_on(download(&base, MODEL, &mut cancel, |_| {
+            stop.send(true).unwrap();
+        }))
         .unwrap();
         assert!(result.stopped);
         thread.join().unwrap();

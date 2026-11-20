@@ -50,6 +50,10 @@ const KEPT_BY = [
   { file: GATE, test: 'the_gate_is_off_by_default' },
   { file: GATE, test: 'a_closed_gate_makes_no_connection' },
   { file: GATE, test: 'every_connection_past_this_computer_goes_through_the_gate' },
+  { file: GATE, test: 'lan_and_wan_keep_independent_preferences' },
+  { file: GATE, test: 'lan_closure_cancels_an_in_flight_request_even_if_reopened' },
+  { file: DOWNLOADS, test: 'a_closed_lan_gate_never_starts_a_server_download' },
+  { file: DOWNLOADS, test: 'wan_shutdown_only_cancels_downloads_onto_this_computer' },
   { file: UPDATE, test: 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on' },
   { file: DOWNLOADS, test: 'with_the_gate_off_nothing_is_downloaded' },
   { file: STACK, test: 'with_the_gate_off_the_stack_is_not_started' },
@@ -265,8 +269,8 @@ test('the page stays local, and Rust gates online requests', () => {
   const why = (ours[0]?.body ?? '').replace(/\s+/g, ' ');
   assert.ok(why.includes('- **Local first, behind a gate.** Chat uses the engine on your computer by default.'), 'the comparison no longer says the app is local first');
   assert.ok(
-    why.includes('the outbound gate at the foot of the window, which is off by default.'),
-    'the comparison no longer says the gate is off until it is turned on',
+    why.includes('The LAN and WAN gates at the foot of the window are off by default and work independently.'),
+    'the comparison no longer says both gates are off by default and work independently',
   );
 
   const files = readdirSync(path.join(REPO, PAGE)).filter((file) => /\.(?:js|vue)$/.test(file) && !file.includes('.test.'));

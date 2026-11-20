@@ -723,10 +723,7 @@ export function attachmentLine(file) {
   return `${file?.kind ?? "File"} · ${amount}${file?.cut ? ", cut short" : ""}`;
 }
 
-/**
- * The line under the outbound gate's switch. Chat with the configured
- * local or private-network engine works either way.
- */
+/** The line under the WAN gate's switch. */
 export function gateLine(open) {
   return open
     ? "Gate on. The app may go online to check for updates, download models, start the stack, and ask the outside engines you add."

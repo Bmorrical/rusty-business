@@ -53,8 +53,10 @@ test('every change is offline first, brings its tests, passes every check, answe
   const rules = section(page, 'The rules for every change');
   assert.ok(rules, 'the rules are missing');
   for (const words of [
-    '**Offline first.** The app works with nothing leaving the computer.',
-    'waits for the outbound gate, which is off until the user turns it on',
+    '**Offline first.** On-device chat works with both network gates off.',
+    'LAN gate allows model discovery, chat, and model install, pause, and resume requests to the configured private-network engine.',
+    'WAN gate allows direct internet features, which use each service\'s own fixed hosts.',
+    'Both gates start off and can be enabled independently.',
     '**Tests come with the work.** Every change brings tests that cover it, in the backend and end to end. Coverage never slips.',
     '**All checks pass before a pull request merges.** The gate runs on every pull request',
     'When Copilot has credits, it reviews each pull request.',

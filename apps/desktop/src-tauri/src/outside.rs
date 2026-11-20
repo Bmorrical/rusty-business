@@ -282,7 +282,7 @@ impl Engine {
 
     /// What an engine says while the outbound gate is off.
     fn gate_off(self) -> String {
-        format!("The gate is off. Turn it on to ask {}.", self.name())
+        format!("The WAN gate is off. Turn it on to ask {}.", self.name())
     }
 
     /// What adding an engine says while the outbound gate is off.
@@ -1806,14 +1806,17 @@ mod tests {
                     .starts_with("There is no key file")
             );
         }
-        assert_eq!(OPENAI.gate_off(), "The gate is off. Turn it on to ask GPT.");
+        assert_eq!(
+            OPENAI.gate_off(),
+            "The WAN gate is off. Turn it on to ask GPT."
+        );
         assert_eq!(
             ANTHROPIC.gate_off(),
-            "The gate is off. Turn it on to ask Claude."
+            "The WAN gate is off. Turn it on to ask Claude."
         );
         assert_eq!(
             GOOGLE.gate_off(),
-            "The gate is off. Turn it on to ask Gemini."
+            "The WAN gate is off. Turn it on to ask Gemini."
         );
         fs::remove_dir_all(&place).unwrap();
     }

@@ -74,7 +74,7 @@ test('the Installers page lists every maker, and installs any model in one click
     '<button type="button" @click="closePage">Back to the chat</button>',
     '<h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>',
     'Nothing downloads until you press Install.',
-    '<span>The outbound gate is off, so nothing can install yet.</span>',
+    '<span>Turn on the {{ installGateName }} to install a model.</span>',
     '<li v-for="maker in displayMakers" :key="maker.name" class="maker">',
     '<span v-if="!maker.picked" class="quiet small">Not added</span>',
     '<li v-for="entry in maker.models" :key="entry.name" class="offer">',
@@ -108,7 +108,7 @@ test('Install adds the maker only once the whole model is here', () => {
   const install = functionOf(app, 'install');
   assert.match(install, /^\nasync function install\(maker, offer\) \{\n {2}if \(!\(await download\(offer\)\)\) return;\n {2}if \(!pickedMakers\(makers\.value\)\.includes\(maker\)\) await setMaker\(maker, true\);\n\}/, 'Install adds the maker for a download that stopped or failed, or adds one already added');
   const download = functionOf(app, 'download');
-  assert.match(download, /if \(downloading\.value\) return false;/, 'a second download while one runs is taken as whole');
+  assert.match(download, /if \(downloading\.value \|\| !canDownload\.value\) return false;/, 'a second or blocked download is taken as whole');
   assert.match(download, /let whole = false;/, 'a failed download is taken as whole');
   assert.match(download, /whole = report\.whole === true;/, 'a stopped download is taken as whole');
   assert.match(download, /\n {2}return whole;\n\}/, 'download() no longer says whether the model is whole');
@@ -127,7 +127,7 @@ test('the outside engines are added on the Installers page, and nowhere else', (
     '{{ entry.name }} <span class="quiet small">by {{ entry.maker }}</span>',
     '{{ outsideNotes[entry.id] }}',
     '{{ outsideNote }}',
-    '<span>The outbound gate is off, so no outside engine can be asked.</span>',
+    '<span>The WAN gate is off, so no outside engine can be asked.</span>',
   ]) {
     assert.ok(page.includes(part), `the Installers page has lost ${part}`);
   }

@@ -1,24 +1,8 @@
-//! The outbound gate.
-//!
-//! It answers two asks: "there is a hard switch / circuit breaker to hard stop
-//! all outbound communication, user can turn it on to use their inference",
-//! and "off by default, everything stops". The app is local first: a chat
-//! with a model on this computer needs nothing outside it, so it works with
-//! the gate off. Chat with a configured private-network engine also works
-//! with the gate off. Model downloads and internet services wait for it.
-//!
-//! The rules, each with a test:
-//!
-//! - The gate is off until the person turns it on, and it stays as they left
-//!   it the next time the app opens. Anything but a kept "on" reads as off.
-//! - Direct online connections are made here over HTTPS with no proxy.
-//!   A LAN model install asks the configured server to start a download
-//!   while the gate is on.
-//! - Turning the gate off stops what is under way: the check for a new
-//!   version, a model download, a start of the stack, and an outside
-//!   engine's answer.
+//! Independent gates for internet services and the configured LAN engine.
+//! Both default to off and keep their settings separately.
 
 use std::fs;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,12 +10,23 @@ use tokio::sync::watch;
 
 use crate::downloads::Downloads;
 
-/// Whether the app may reach past this computer, kept in the app's own folder.
+/// The WAN gate, kept in the app's own folder.
 #[derive(Clone)]
 pub struct Gate {
     file: PathBuf,
-    open: Arc<watch::Sender<bool>>,
+    state: Arc<watch::Sender<GateState>>,
 }
+
+#[derive(Clone, Copy)]
+struct GateState {
+    open: bool,
+    closures: u64,
+}
+
+pub struct LanGate(Gate);
+
+const LAN_OFF: &str = "The LAN gate is off. Turn it on to use your LAN server.";
+const LAN_CLOSED: &str = "The LAN gate was turned off. The connection to your LAN server stopped.";
 
 /// The words the gate's file holds while it is on.
 const ON: &str = "on";
@@ -48,25 +43,33 @@ impl Gate {
         let open = fs::read_to_string(&file).is_ok_and(|text| text.trim() == ON);
         Self {
             file,
-            open: Arc::new(watch::Sender::new(open)),
+            state: Arc::new(watch::Sender::new(GateState { open, closures: 0 })),
         }
     }
 
     pub fn is_open(&self) -> bool {
-        *self.open.borrow()
+        self.state.borrow().open
     }
 
     /// Waits until the gate is off. It is ready at once when the gate is
     /// already off.
     pub async fn closed(&self) {
-        let mut open = self.open.subscribe();
-        let _ = open.wait_for(|open| !*open).await;
+        let mut state = self.state.subscribe();
+        let closures = state.borrow().closures;
+        let _ = state
+            .wait_for(|state| !state.open || state.closures != closures)
+            .await;
     }
 
     /// Turns the gate on or off, and keeps that for the next time the app
     /// opens. The gate changes even when it cannot be kept.
     pub fn set(&self, open: bool) -> Result<bool, String> {
-        self.open.send_replace(open);
+        self.state.send_modify(|state| {
+            if state.open && !open {
+                state.closures = state.closures.wrapping_add(1);
+            }
+            state.open = open;
+        });
         let kept = match self.file.parent() {
             Some(folder) => fs::create_dir_all(folder),
             None => Ok(()),
@@ -104,7 +107,30 @@ impl Gate {
     pub fn at(open: bool) -> Self {
         Self {
             file: PathBuf::from("/nowhere/gate"),
-            open: Arc::new(watch::Sender::new(open)),
+            state: Arc::new(watch::Sender::new(GateState { open, closures: 0 })),
+        }
+    }
+}
+
+impl LanGate {
+    pub fn new(file: PathBuf) -> Self {
+        Self(Gate::new(file))
+    }
+
+    /// Drop the entire request or stream when LAN access is withdrawn.
+    pub async fn run<T>(
+        &self,
+        request: impl Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        let mut state = self.0.state.subscribe();
+        let initial = *state.borrow_and_update();
+        if !initial.open {
+            return Err(LAN_OFF.to_string());
+        }
+        tokio::select! {
+            biased;
+            _ = state.wait_for(|state| state.closures != initial.closures) => Err(LAN_CLOSED.to_string()),
+            result = request => result,
         }
     }
 }
@@ -126,9 +152,19 @@ pub fn set_gate(
 ) -> Result<bool, String> {
     let set = gate.set(open);
     if !open {
-        downloads.stop();
+        downloads.stop_local();
     }
     set
+}
+
+#[tauri::command]
+pub fn lan_gate_status(gate: tauri::State<'_, LanGate>) -> bool {
+    gate.0.is_open()
+}
+
+#[tauri::command]
+pub fn set_lan_gate(open: bool, gate: tauri::State<'_, LanGate>) -> Result<bool, String> {
+    gate.0.set(open)
 }
 
 #[cfg(test)]
@@ -181,6 +217,45 @@ mod tests {
             "off was not kept"
         );
         fs::remove_dir_all(&place).unwrap();
+    }
+
+    #[test]
+    fn lan_and_wan_keep_independent_preferences() {
+        let place = folder("independent");
+        let wan_file = place.join("gate");
+        let lan_file = place.join("lan-gate");
+        let wan = Gate::new(wan_file.clone());
+        let lan = LanGate::new(lan_file.clone());
+        assert!(!wan.is_open());
+        assert!(!lan.0.is_open());
+
+        wan.set(true).unwrap();
+        assert!(Gate::new(wan_file).is_open());
+        assert!(!LanGate::new(lan_file.clone()).0.is_open());
+        assert_eq!(block_on(lan.run(async { Ok(()) })).unwrap_err(), LAN_OFF);
+
+        wan.set(false).unwrap();
+        lan.0.set(true).unwrap();
+        assert!(!wan.is_open());
+        assert!(LanGate::new(lan_file).0.is_open());
+        assert_eq!(block_on(lan.run(async { Ok(42) })), Ok(42));
+        fs::remove_dir_all(place).unwrap();
+    }
+
+    #[test]
+    fn lan_closure_cancels_an_in_flight_request_even_if_reopened() {
+        let place = folder("lan-closure");
+        let lan = LanGate::new(place.join("lan-gate"));
+        lan.0.set(true).unwrap();
+        let result = block_on(lan.run(async {
+            lan.0.set(false).unwrap();
+            lan.0.set(true).unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(())
+        }));
+        assert_eq!(result.unwrap_err(), LAN_CLOSED);
+        assert_eq!(block_on(lan.run(async { Ok(()) })), Ok(()));
+        fs::remove_dir_all(place).unwrap();
     }
 
     #[test]
@@ -284,12 +359,13 @@ mod tests {
             }
         }
         builders.sort();
-        // The engine's client speaks to the engine on this computer only.
+        // The engine adapter validates addresses and gates private ones.
         assert_eq!(builders, ["engine.rs", "gate.rs"]);
         let engine = fs::read_to_string(folder.join("engine.rs")).unwrap();
         assert!(
             engine.contains("ip.is_loopback()"),
-            "the engine's address is not held to this computer"
+            "the engine no longer distinguishes loopback"
         );
+        assert!(engine.contains("ip.is_private()"));
     }
 }

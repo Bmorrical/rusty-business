@@ -43,8 +43,9 @@ pub fn run() {
                 data.join("memory.md"),
             ));
             app.manage(starter::Starter::new(data.join("engine.log")));
-            // The outbound gate: off until the person turns it on.
+            // Keep the existing WAN preference and start LAN off.
             let gate = gate::Gate::new(data.join("gate"));
+            app.manage(gate::LanGate::new(data.join("lan-gate")));
             app.manage(stack::Stack::new(
                 data.join("stack"),
                 data.join("stack.log"),
@@ -95,6 +96,8 @@ pub fn run() {
             update::install_update,
             gate::gate_status,
             gate::set_gate,
+            gate::lan_gate_status,
+            gate::set_lan_gate,
             makers::makers_status,
             makers::set_makers,
             outside::outside_status,
