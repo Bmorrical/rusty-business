@@ -149,7 +149,7 @@ pub struct Listed {
 /// Every maker on the app's list, and which are picked.
 #[tauri::command]
 pub fn makers_status(makers: tauri::State<'_, Makers>) -> Vec<Maker> {
-    makers.status(&crate::models::on_disk(), &crate::downloads::offers())
+    inventory(&makers)
 }
 
 /// Picks these makers, and answers as `makers_status` does.
@@ -159,7 +159,15 @@ pub fn set_makers(
     makers: tauri::State<'_, Makers>,
 ) -> Result<Vec<Maker>, String> {
     makers.set(&picked)?;
-    Ok(makers.status(&crate::models::on_disk(), &crate::downloads::offers()))
+    Ok(inventory(&makers))
+}
+
+fn inventory(makers: &Makers) -> Vec<Maker> {
+    if engine::base_url().is_ok_and(|base| engine::is_remote(&base)) {
+        makers.status(&[], &crate::downloads::remote_offers())
+    } else {
+        makers.status(&crate::models::on_disk(), &crate::downloads::offers())
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// The outbound gate, as the page shows it, checked on every test run.
+// The LAN and WAN gates, as the page shows them, checked on every test run.
 //
 // It answers the asks that started it: "there is a hard switch / circuit
 // breaker to hard stop all outbound communication, user can turn it on to use
@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const APP = 'apps/desktop/src/App.vue';
@@ -28,6 +29,10 @@ const GATE_TESTS = [
   ['GATE', 'the_gate_is_off_by_default'],
   ['GATE', 'a_closed_gate_makes_no_connection'],
   ['GATE', 'every_connection_past_this_computer_goes_through_the_gate'],
+  ['GATE', 'lan_and_wan_keep_independent_preferences'],
+  ['GATE', 'lan_closure_cancels_an_in_flight_request_even_if_reopened'],
+  ['DOWNLOADS', 'a_closed_lan_gate_never_starts_a_server_download'],
+  ['DOWNLOADS', 'wan_shutdown_only_cancels_downloads_onto_this_computer'],
   ['UPDATE', 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on'],
   ['DOWNLOADS', 'with_the_gate_off_nothing_is_downloaded'],
   ['STACK', 'with_the_gate_off_the_stack_is_not_started'],
@@ -39,12 +44,11 @@ function read(file) {
   return readFileSync(path.join(REPO, file), 'utf8');
 }
 
-/** One function's text in App.vue, up to the next one. */
+/** One function's text in App.vue. */
 function functionOf(app, name) {
-  const start = app.indexOf(`async function ${name}(`);
+  const start = app.search(new RegExp(`\\n(?:async )?function ${name}\\(`));
   assert.ok(start >= 0, `${APP} has no ${name}`);
-  const end = app.indexOf('\nasync function ', start + 1);
-  return app.slice(start, end < 0 ? undefined : end);
+  return app.slice(start, app.indexOf('\n}', start) + 2);
 }
 
 test('the page reads the gate as Rust keeps it, before it asks for anything', () => {
@@ -54,7 +58,7 @@ test('the page reads the gate as Rust keeps it, before it asks for anything', ()
   assert.match(readGate, /catch \{\s+gate\.value = false;/, 'the page reads a failed answer as on');
 
   const mounted = app.slice(app.indexOf('onMounted(async () => {'), app.indexOf('onBeforeUnmount('));
-  const first = mounted.indexOf('await readGate();');
+  const first = mounted.indexOf('await Promise.all([readGate(), readLanGate()]);');
   assert.ok(first >= 0, 'the page does not read the gate when it opens');
   for (const ask of ['checkStack();', 'checkUpdate();', 'checkEngine()']) {
     assert.ok(mounted.indexOf(ask) > first, `the page runs ${ask} before it knows whether the gate is on`);
@@ -65,7 +69,7 @@ test('a switch at the foot of the window turns the gate on and off', () => {
   const app = read(APP);
   const footer = app.slice(app.indexOf('<div class="gate">'), app.indexOf('</footer>'));
   assert.ok(footer, 'the switch is gone from the foot of the window');
-  for (const part of ['role="switch"', ':aria-checked="gate"', 'aria-describedby="gate-line"', ':disabled="gateBusy"', '@click="setGate(!gate)"', 'Outbound gate']) {
+  for (const part of ['role="switch"', ':aria-checked="gate"', 'aria-describedby="gate-line"', ':disabled="gateBusy"', '@click="setGate(!gate)"', 'WAN gate', ':aria-checked="lanGate"', 'aria-describedby="lan-gate-line"', ':disabled="lanGateBusy"', '@click="setLanGate(!lanGate)"', 'LAN gate']) {
     assert.ok(footer.includes(part), `the gate's switch has lost ${part}`);
   }
   assert.ok(footer.includes('{{ gateLine(gate) }}'), "the switch no longer says what the gate's state means");
@@ -79,6 +83,69 @@ test('a switch at the foot of the window turns the gate on and off', () => {
   const rule = (selector) => new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`).exec(app)?.[1] ?? '';
   assert.match(rule('.engine'), /min-height: 0;[\s\S]*overflow-y: auto;/, 'the footer cannot scroll, so a short window hides the switch');
   assert.match(rule('.sessions'), /min-height: 5rem;/, 'the footer can squeeze the saved chats out of sight');
+});
+
+test('LAN and WAN switches independently control model discovery, providers, and installs', async () => {
+  const app = read(APP);
+  const lanModel = { id: 'microsoft/phi-4-gguf:Q4_K' };
+  const localModel = { id: 'phi-4' };
+  const provider = { id: 'outside:grok/test' };
+  const refs = Object.fromEntries(
+    ['gate', 'gateBusy', 'gateNote', 'lanGate', 'lanGateBusy', 'lanGateNote', 'engine', 'outside', 'picked', 'updateChecked']
+      .map((name) => [name, { value: false }]),
+  );
+  refs.engine.value = { remote: true, reachable: true, models: [lanModel] };
+  refs.outside.value = [{ added: true, models: [provider] }];
+  const calls = [];
+  const saved = { wan: false, lan: false };
+  const context = vm.createContext({
+    ...refs,
+    computed: (get) => ({ get value() { return get(); } }),
+    async invoke(command, args) {
+      calls.push(command);
+      switch (command) {
+        case 'gate_status': return saved.wan;
+        case 'lan_gate_status': return saved.lan;
+        case 'set_gate': return (saved.wan = args.open);
+        case 'set_lan_gate': return (saved.lan = args.open);
+        default: throw new Error(command);
+      }
+    },
+    pickModels() {},
+    checkEngine() { calls.push('engine'); },
+    checkStack() { calls.push('stack'); },
+    checkUpdate() { calls.push('update'); },
+  });
+  const values = ['outsideListed', 'outsideModels', 'lanEngine', 'engineModels', 'onHand', 'installGateOpen', 'canDownload'];
+  const formulas = values.map((name) => app.match(new RegExp(`^const ${name} = .+;`, 'm'))?.[0]);
+  assert.ok(formulas.every(Boolean));
+  vm.runInContext([
+    ...formulas,
+    ...['readGate', 'readLanGate', 'setGate', 'setLanGate', 'turnOnInstallGate'].map((name) => functionOf(app, name)),
+  ].join('\n'), context);
+  const view = () => JSON.parse(vm.runInContext('JSON.stringify({ models: onHand.value.map(({id}) => id), canDownload: canDownload.value })', context));
+  await vm.runInContext('Promise.all([readGate(), readLanGate()])', context);
+  assert.deepEqual(view(), { models: [], canDownload: false });
+
+  await context.turnOnInstallGate();
+  assert.deepEqual(calls.splice(0), ['gate_status', 'lan_gate_status', 'set_lan_gate', 'engine']);
+  assert.deepEqual(view(), { models: [lanModel.id], canDownload: true });
+
+  await context.setGate(true);
+  assert.deepEqual(calls.splice(0), ['set_gate', 'stack', 'update']);
+  assert.deepEqual(view(), { models: [lanModel.id, provider.id], canDownload: true });
+
+  await context.setLanGate(false);
+  assert.deepEqual(calls.splice(0), ['set_lan_gate', 'engine']);
+  assert.deepEqual(view(), { models: [provider.id], canDownload: false });
+
+  await context.setGate(false);
+  assert.deepEqual(view(), { models: [], canDownload: false });
+  refs.engine.value = { remote: false, reachable: true, models: [localModel] };
+  assert.deepEqual(view(), { models: [localModel.id], canDownload: false });
+  await context.turnOnInstallGate();
+  assert.deepEqual(saved, { wan: true, lan: false });
+  assert.deepEqual(view(), { models: [localModel.id, provider.id], canDownload: true });
 });
 
 test('the comparison names every Rust test that keeps the gate', () => {

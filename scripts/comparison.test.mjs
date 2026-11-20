@@ -37,7 +37,7 @@ const WAYS_OUT = ['fetch(', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'sendB
 const KEPT_BY = [
   { file: ENGINE, test: 'only_listed_models_are_offered' },
   { file: ENGINE, test: 'a_model_off_the_list_is_refused' },
-  { file: ENGINE, test: 'the_engine_address_stays_on_this_computer' },
+  { file: ENGINE, test: 'the_engine_address_stays_on_the_private_network' },
   { file: STARTER, test: 'an_engine_is_never_started_where_another_computer_could_reach_it' },
   { file: STARTER, test: 'the_engine_the_app_starts_stays_offline' },
   { file: DOWNLOADS, test: 'a_download_comes_only_from_hugging_face' },
@@ -50,6 +50,10 @@ const KEPT_BY = [
   { file: GATE, test: 'the_gate_is_off_by_default' },
   { file: GATE, test: 'a_closed_gate_makes_no_connection' },
   { file: GATE, test: 'every_connection_past_this_computer_goes_through_the_gate' },
+  { file: GATE, test: 'lan_and_wan_keep_independent_preferences' },
+  { file: GATE, test: 'lan_closure_cancels_an_in_flight_request_even_if_reopened' },
+  { file: DOWNLOADS, test: 'a_closed_lan_gate_never_starts_a_server_download' },
+  { file: DOWNLOADS, test: 'wan_shutdown_only_cancels_downloads_onto_this_computer' },
   { file: UPDATE, test: 'with_the_gate_off_nothing_is_asked_and_the_check_says_to_turn_it_on' },
   { file: DOWNLOADS, test: 'with_the_gate_off_nothing_is_downloaded' },
   { file: STACK, test: 'with_the_gate_off_the_stack_is_not_started' },
@@ -220,7 +224,7 @@ test('what the comparison says of Rusty Business™ is kept by a test in the Rus
 // Brad, 2026-11-17: "it's no longer "local" only, but it's "local" first."
 // And: "there is a hard switch / circuit breaker to hard stop all outbound
 // communication, user can turn it on to use their inference."
-test('the page cannot reach past this computer, and Rust does only through the gate', () => {
+test('the page stays local, and Rust gates online requests', () => {
   const security = JSON.parse(read(TAURI)).app.security;
   for (const name of ['csp', 'devCsp']) {
     const sources = connectSources(security[name] ?? '');
@@ -248,8 +252,8 @@ test('the page cannot reach past this computer, and Rust does only through the g
   assert.ok(outside.includes('.no_proxy()'), `${OUTSIDE} may now send an outside engine's calls through a proxy`);
   assert.ok(outside.includes('redirect::Policy::none()'), `${OUTSIDE} may now follow a redirect away from a maker's API`);
 
-  // Every client that reaches past this computer is made by the gate, which
-  // refuses while it is off and holds each one to https with no proxy.
+  // Direct online clients use the gate, which refuses while it is off and
+  // holds each client to HTTPS with no proxy.
   const gate = read(GATE);
   assert.ok(gate.includes('if !self.is_open() {\n            return Err(refused.to_string());'), `${GATE} no longer refuses while it is off`);
   for (const rule of ['.https_only(true)', '.no_proxy()']) {
@@ -263,10 +267,10 @@ test('the page cannot reach past this computer, and Rust does only through the g
 
   // The README says so, in the reason to choose Rusty Business™.
   const why = (ours[0]?.body ?? '').replace(/\s+/g, ' ');
-  assert.ok(why.includes('- **Local first, behind a gate.** A chat needs nothing outside your computer.'), 'the comparison no longer says the app is local first');
+  assert.ok(why.includes('- **Local first, behind a gate.** Chat uses the engine on your computer by default.'), 'the comparison no longer says the app is local first');
   assert.ok(
-    why.includes('the outbound gate, a switch at the foot of the window that is off until you turn it on; turning it off stops what is under way.'),
-    'the comparison no longer says the gate is off until it is turned on',
+    why.includes('The LAN and WAN gates at the foot of the window are off by default and work independently.'),
+    'the comparison no longer says both gates are off by default and work independently',
   );
 
   const files = readdirSync(path.join(REPO, PAGE)).filter((file) => /\.(?:js|vue)$/.test(file) && !file.includes('.test.'));
