@@ -52,6 +52,9 @@ const TAURI_LIMITS = { opslimit: 1048576n, memlimit: 33554432n };
 const PASSWORD = `a password made for this test alone ${crypto.randomBytes(8).toString('hex')}`;
 
 const b64 = (bytes) => Buffer.from(bytes).toString('base64');
+// What the first line of a locked key calls it, put together here, so this
+// file does not hold it and the search for keys below can read this file too.
+const lockedKeyName = (tool) => [tool, 'encrypted', 'secret', 'key'].join(' ');
 const le64 = (value) => {
   const bytes = Buffer.alloc(8);
   bytes.writeBigUInt64LE(value);
@@ -70,7 +73,7 @@ function makeKey({ password = PASSWORD, limits = TAURI_LIMITS, settings = { N: 2
   const stream = crypto.scryptSync(Buffer.from(password, 'utf8'), salt, 104, { ...settings, maxmem: 256 * 1024 * 1024 });
   const locked = Buffer.from(plain.map((byte, i) => byte ^ stream[i]));
   const box = Buffer.concat([Buffer.from(kind, 'latin1'), salt, le64(limits.opslimit), le64(limits.memlimit), locked]);
-  const text = b64(`untrusted comment: rsign encrypted secret key\n${b64(box)}\n`);
+  const text = b64(`untrusted comment: ${lockedKeyName('rsign')}\n${b64(box)}\n`);
   const hex = Buffer.from(id).reverse().toString('hex').toUpperCase();
   const pubkey = b64(`untrusted comment: minisign public key: ${hex}\n${b64(Buffer.concat([Buffer.from('Ed', 'latin1'), id, pk]))}\n`);
   return { text, pubkey, id, seed, privateKey, publicKey };
@@ -410,12 +413,12 @@ test('the script uses Node\'s own modules alone, runs no other program, reads no
 });
 
 test('no file in the repository holds a key that signs', () => {
-  // Built here, so this file does not hold them.
+  // Put together here, so this file does not hold them.
   const needles = [
-    b64('untrusted comment: rsign encrypted secret key'),
-    b64('untrusted comment: minisign encrypted secret key'),
-    ['rsign', 'encrypted', 'secret', 'key'].join(' '),
-    ['minisign', 'encrypted', 'secret', 'key'].join(' '),
+    b64(`untrusted comment: ${lockedKeyName('rsign')}`),
+    b64(`untrusted comment: ${lockedKeyName('minisign')}`),
+    lockedKeyName('rsign'),
+    lockedKeyName('minisign'),
     b64(Buffer.from('EdScB2', 'latin1')).slice(0, 8),
   ];
   // A private key in PEM, with a body. mac-sign.sh names the first line to
