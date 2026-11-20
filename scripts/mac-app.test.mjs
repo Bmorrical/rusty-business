@@ -274,6 +274,26 @@ test('the app looks first for the engine it carries, where the script puts it', 
   assert.ok(rest > first, 'the usual folders come before the carried engine');
 });
 
+// Brad, 2026-11-19: "when can we do an in app install rather than a new dmg
+// download?" Install and restart unpacks the .app.tar.gz and puts the one
+// app inside in place.
+test('the .app.tar.gz holds the checked app alone, with none of this Mac\'s metadata, and its checksum beside it', () => {
+  assert.equal(valueOf('APP_TGZ'), 'Rusty-Business-mac-arm64.app.tar.gz');
+  assert.deepEqual(commandsWith(/^tar\s.*-czf/), [
+    'tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C "$WORK/app" "$APP.app"',
+  ]);
+  const order = [
+    /^codesign --verify --deep --strict "\$app"$/,
+    /^rm -f "\$WORK\/\$APP_TGZ" "\$WORK\/\$APP_TGZ\.sha256"$/,
+    /^tar\s.*-czf/,
+    /^\(cd "\$WORK" && shasum -a 256 "\$APP_TGZ" >"\$APP_TGZ\.sha256"\)$/,
+    // The link to Applications is for the .dmg, and stays out of the archive.
+    /^ln -s \/Applications "\$WORK\/app\/Applications"$/,
+  ].map(firstAt);
+  assert.ok(order.every((at) => at >= 0), `a step is missing: ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the steps are out of order');
+});
+
 test('the app is checked once it is signed, and the .dmg once it is packed, with its checksum beside it', () => {
   const order = [
     /^ditto "\$engine" "\$app\/Contents\/Resources\/engine"$/,

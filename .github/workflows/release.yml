@@ -11,6 +11,13 @@
 # them. A release that is out is never changed: for a version already
 # tagged, the run stops.
 #
+# Install and restart reads two more: the Mac app as a .app.tar.gz, which
+# the mac job packs beside the .dmg, and latest.json, which names each file a
+# copy installs over and holds its signature. The updater job makes
+# latest.json with scripts/updater.mjs and the release environment's Tauri
+# key, and the publish job checks every signature against the public key in
+# tauri.conf.json before the release goes out.
+#
 # The Mac's signing is a switch, off to start: the release environment's
 # MAC_SIGNING variable. The sign job, on a Mac of its own, takes the .dmg the
 # mac job built. While the switch is off, the .dmg goes on as `make dmg` made
@@ -45,15 +52,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build the app with its engine inside, and pack the .dmg
+      - name: Build the app with its engine inside, and pack the .dmg and the .app.tar.gz
         run: make dmg
-      - name: Keep the .dmg and its checksum for the sign job
+      - name: Keep the .dmg, the .app.tar.gz, and their checksums for the sign job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac-dmg-built
           path: |
             apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.dmg
             apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.dmg.sha256
+            apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.app.tar.gz
+            apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.app.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -63,9 +72,10 @@ jobs:
     needs: [gate, mac]
     runs-on: macos-15
     timeout-minutes: 90
-    # The signing secrets and the switch live in the release environment,
-    # which runs only from main. Only this job is handed them, on a Mac of its
-    # own, so nothing the build fetched or ran is there to see them.
+    # The Mac's signing secrets and the switch live in the release
+    # environment, which runs only from main. Only this job is handed them, on
+    # a Mac of its own, so nothing the build fetched or ran is there to see
+    # them.
     environment: release
     outputs:
       signed: ${{ steps.sign.outputs.signed }}
@@ -87,13 +97,15 @@ jobs:
           MAC_NOTARY_KEY_ID: ${{ secrets.MAC_NOTARY_KEY_ID }}
           MAC_NOTARY_ISSUER: ${{ secrets.MAC_NOTARY_ISSUER }}
         run: scripts/mac-sign.sh
-      - name: Keep the .dmg and its checksum for the next job
+      - name: Keep the .dmg, the .app.tar.gz, and their checksums for the next jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mac-dmg
           path: |
             apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.dmg
             apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.dmg.sha256
+            apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.app.tar.gz
+            apps/desktop/src-tauri/target/mac/Rusty-Business-mac-arm64.app.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -156,9 +168,49 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  updater:
+    name: Sign the files Install and restart puts in place
+    needs: [gate, sign, windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The Tauri key that signs them, and its password, live in the release
+    # environment, which runs only from main. Only this job is handed them, on
+    # a computer of its own that builds nothing, and only its one step reads
+    # them: scripts/updater.mjs, which uses Node's own crypto and nothing
+    # fetched. Only latest.json leaves the job.
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mac-dmg
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-exe
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-packages
+          path: dist
+      - name: Sign the four files, and make latest.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/updater.mjs sign dist
+      - name: Keep latest.json for the next job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: updater
+          path: dist/latest.json
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     name: Publish the release
-    needs: [gate, mac, sign, windows, linux]
+    needs: [gate, mac, sign, windows, linux, updater]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # The only job that may write anything, and only the repository's
@@ -181,6 +233,12 @@ jobs:
         with:
           name: linux-packages
           path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: updater
+          path: dist
+      - name: Check latest.json, and each signature in it
+        run: node scripts/updater.mjs check dist
       - name: Check the checksums, and make the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
