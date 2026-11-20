@@ -41,6 +41,16 @@ Select the picture to open it full size. The rest of the set is in
   download size. Install downloads one, with the gate on, then adds its
   maker so it shows at the top of the window. A model already here whose
   maker is not added has a Show button instead.
+- **A Workflow view**, at the foot of the window above Installers, that
+  shows a board: a road of releases, the stories and bugs under each, and
+  the slices each story is cut into. A slice goes through five lanes,
+  Sliced, Written, Checked, Reviewed, and Main, and the view says whose
+  move each slice and each story is. A story shows five marks, one for
+  each lane all of its slices have been through, and all five make a royal
+  flush. The view reads only a copy kept on this computer, so it works
+  with both gates off, and it keeps a note of your own on any story. The
+  sample board is made up, and shows how one reads. [Boards](#boards)
+  says where a board is kept and what is in one.
 - **A switch for each model**, in Settings under Models, for the models on
   this computer and the outside engines' alike. A model switched off is left
   out of questions, grading, and comparisons, and its files stay. Saved
@@ -178,6 +188,9 @@ page (Vue)  --IPC-->  Rust  --HTTP, loopback-->  on-device engine
   an address fixed in the code, over https, with no proxy and no redirect.
   The page gets the paths and the models, never a key.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
+- [src-tauri/src/board.rs](src-tauri/src/board.rs), the boards the Workflow
+  view shows. It reads and writes only the app's own `boards` folder, takes
+  no path from the page, asks nothing of the network, and deletes nothing.
 - [src-tauri/src/update.rs](src-tauri/src/update.rs), the notice of a new
   version. It asks only GitHub's API, only for this repository's newest
   release, and picks this system's file. The page names only Download or
@@ -251,12 +264,91 @@ If your server supports chat only, you can install a catalog GGUF on the
 server and refresh the app after llama-server lists it. Use this HTTP
 connection on a trusted private network.
 
+## Boards
+
+The Workflow view shows a board: releases, the stories and bugs under each,
+and the slices each story is cut into. A board is one JSON file in a
+`boards` folder, beside the `sessions` folder:
+
+- macOS: `~/Library/Application Support/net.morrical.rusty-business/boards`
+- Windows: `%APPDATA%\net.morrical.rusty-business\boards`
+- Linux: `~/.local/share/net.morrical.rusty-business/boards`
+
+The app cannot fetch a board yet. One gets there when you put its file in
+that folder, or when you open the sample board, which is made up. The file
+is named `<id>.json`, and its name is the board's id: up to 64 letters,
+digits, and hyphens. The view lists every board in the folder. A file it
+cannot read is listed with what is wrong, and left as it is.
+
+```json
+{
+  "format": "board v1",
+  "name": "A list app",
+  "epics": [
+    {
+      "release": "1.2.0",
+      "title": "Lists that sort",
+      "detail": "",
+      "status": "Building",
+      "stories": [
+        {
+          "number": 412,
+          "kind": "story",
+          "title": "Sortable column headers",
+          "detail": "Click a column's header to sort the list by it.",
+          "status": "Building",
+          "notes": ["Numbers sort as numbers, not as text."],
+          "slices": [
+            {
+              "id": "a",
+              "title": "A sort helper for text and numbers",
+              "detail": "Goal: one function that sorts rows by a column.",
+              "lane": "written"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- **`format`** is `board v1`. A file that says anything else is not read.
+- **`number`** is a story's number, from 1 up, and no two stories on a
+  board share one. **`kind`** is `story` or `bug`, and a story with no
+  `kind` is a story.
+- **`lane`** is the last lane a slice has been through: `sliced`,
+  `written`, `checked`, `reviewed`, or `main`, in that order. A slice with
+  no `lane` has been through none.
+- **`move`**, on a story or a slice, says whose move it is: `you`, `model`,
+  `check`, or `review`. Leave it out, and the move goes to whoever takes
+  the slice into its next lane: you, a local model, the check, a reviewer,
+  and you again.
+- **`detail`** on a slice is its brief: what to do, in which files, and
+  how to tell it is done. **`notes`** are the board's own notes on a story
+  or a slice.
+- **`id`** on a slice is up to 16 letters, digits, and hyphens, and no two
+  slices of a story share one.
+
+A story holds a lane when it has slices and every one of them has been
+through that lane. All five lanes make a royal flush: every slice is on
+main.
+
+A board is at most 4 MB, with up to 500 releases, 5,000 stories, 100 slices
+a story, and 200 notes on a story or a slice. The view lists up to 100
+boards.
+
+Your own notes are kept apart from the board, in `drafts/<id>.json` in the
+same folder: one note a story, up to 4,000 characters. A new copy of a
+board never changes or removes your notes. A note on a story that has left
+the board stays, and the view lists it under No longer on this board.
+
 ## What is in this folder
 
 | Path                   | What it is                                              |
 | ---------------------- | ------------------------------------------------------- |
-| [src](src)             | The page: one Vue component and its helpers             |
-| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the models switched off, Uninstall, the stack's start, saved chats |
+| [src](src)             | The page: the window, the Workflow view, and their helpers |
+| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the models switched off, Uninstall, the stack's start, saved chats, boards |
 | [engine](engine)       | The engine the Mac app carries: the one package asked for, and every package under it, pinned by hash |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |

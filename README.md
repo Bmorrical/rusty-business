@@ -40,7 +40,7 @@ a private-network llama-server you configure. Turn on the LAN gate to use
 that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
 Gemini with your own keys.
 
-**Status:** version 0.8.1, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.3, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -526,6 +526,9 @@ next.
   answers, not the chat before them.
 - **No pictures yet.** It reads attached PDF, Word, PowerPoint, spreadsheet,
   and text files, but not images. (On the roadmap: Reading images.)
+- **The Workflow view only reads.** A board gets there as a file you put in
+  the boards folder. The app cannot pull one yet, and cannot change a story
+  or a slice. (On the roadmap: A source for boards.)
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the

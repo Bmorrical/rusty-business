@@ -18,6 +18,7 @@ The desktop app's Rust code.
 | `web.rs`      | Web search: while Settings allows it and the gate is on, a model's search goes to Brave Search's API with the person's key, kept as a path, or to DuckDuckGo's plain results page without one |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
+| `board.rs`    | Boards for the Workflow view: a copy of each board as one JSON file, your notes in a second file, and the made-up sample board. It asks nothing of the network, and nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -151,6 +152,23 @@ Gemini alike:
   keeps the models found, so saved chats still name them, and leaves the
   other engines as they were. The key file is the person's, and the app never
   changes or removes it.
+
+Six more live in `board.rs`, each with tests:
+
+- It asks nothing of the network, so it needs no gate: the Workflow view
+  reads a board with both gates off.
+- No command takes a path. A board is asked for by its id, which is
+  letters, digits, and hyphens, and a file's name gives its board's id,
+  whatever the file says inside.
+- A new copy of a board replaces the copy alone. Your notes live in a
+  second file that a new copy never touches, and a note on a story that
+  has left the board is kept.
+- Nothing deletes. A file is written beside itself, then moved into
+  place, and notes that cannot be read are never written over.
+- A file that is not a board is named with what is wrong and left as it
+  is: one that breaks the format, is larger than 4 MB, or is a link.
+- On a Mac and on Linux, the boards folder and its files are readable by
+  this computer's user only.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts
