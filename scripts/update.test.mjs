@@ -303,7 +303,13 @@ test('the README, the security policy, and the roadmap say what the check does',
     security.includes('It installs that file only when its signature matches the public key built into the app'),
     'SECURITY.md no longer promises the install checks the signature',
   );
-  assert.match(read('ROADMAP.md'), /^- \*\*A notice of each new version\.\*\*/m, 'the roadmap no longer lists the notice as done');
+  const roadmap = read('ROADMAP.md');
+  assert.match(roadmap, /^- \*\*A notice of each new version\.\*\*/m, 'the roadmap no longer lists the notice as done');
+  // Brad, 2026-11-19: "if we can do it now, then roll that next".
+  const done = roadmap.slice(roadmap.indexOf('\n## Done\n'));
+  assert.match(done, /^- \*\*Install and restart\.\*\*/m, 'the roadmap no longer lists Install and restart as done');
+  assert.ok(!roadmap.replace(/\s+/g, ' ').includes('It installs nothing itself.'), 'the roadmap still says the app installs nothing itself');
+  assert.ok(roadmap.replace(/\s+/g, ' ').includes('installs the file only when its signature matches the key built into the app'), 'the roadmap no longer says the install checks the signature');
   assert.ok(read('apps/desktop/README.md').includes('[src-tauri/src/update.rs](src-tauri/src/update.rs)'), "the desktop app's README no longer names update.rs");
   assert.match(read('apps/desktop/src-tauri/src/README.md'), /^\| `update\.rs` +\|/m, "the Rust folder's README no longer names update.rs");
 });

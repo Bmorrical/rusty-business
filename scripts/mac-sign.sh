@@ -28,8 +28,9 @@
 # and a secure timestamp, and no entitlement, then signs the app, which seals
 # them. The engine runs under the hardened runtime as it is, once every part
 # carries the same signer. Apple notarizes the app, the ticket is stapled to
-# it, the .dmg is packed again around it the way `make dmg` packs it, and the
-# .dmg is signed, notarized, and stapled too.
+# it, the .app's .tar.gz (the file Install and restart puts in place) and the
+# .dmg are packed again around it the way `make dmg` packs them, and the .dmg
+# is signed, notarized, and stapled too.
 #
 # It signs only on GitHub's own Mac, in a Release run. The certificate goes
 # into a keychain of its own, made for this run in the runner's temporary
@@ -86,6 +87,7 @@ done
 [ "$(uname -s)/$(uname -m)" = Darwin/arm64 ] || fail "Mac signing runs on a Mac with Apple silicon. Nothing was signed."
 
 DMG=Rusty-Business-mac-arm64.dmg
+APP_TGZ=Rusty-Business-mac-arm64.app.tar.gz
 TAURI=apps/desktop/src-tauri
 WORK=$(pwd -P)/$TAURI/target/mac
 [ -f "$TAURI/tauri.conf.json" ] && [ -f "$WORK/$DMG" ] && [ -f "$WORK/$DMG.sha256" ] ||
@@ -197,6 +199,12 @@ notarize "$scratch/app.zip"
 xcrun stapler staple "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute "$app"
+
+# --- The .app's .tar.gz, packed again around the stapled app --------------------
+
+rm -f "$WORK/$APP_TGZ" "$WORK/$APP_TGZ.sha256"
+tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C "$scratch/app" "$APP.app"
+(cd "$WORK" && shasum -a 256 "$APP_TGZ" >"$APP_TGZ.sha256")
 
 # --- The .dmg, packed again around the stapled app ------------------------------
 
