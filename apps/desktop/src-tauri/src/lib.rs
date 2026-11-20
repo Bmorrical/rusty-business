@@ -1,4 +1,5 @@
 mod attachments;
+mod board;
 mod deactivated;
 mod downloads;
 mod engine;
@@ -66,6 +67,8 @@ pub fn run() {
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             // Web search: the path to a Brave key, never the key.
             app.manage(web::Web::new(data.join("web.json")));
+            // Boards: the local copies the Workflow view reads, and the notes on them.
+            app.manage(board::Boards::new(data.join("boards")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -81,6 +84,10 @@ pub fn run() {
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,
+            board::list_boards,
+            board::load_board,
+            board::open_sample_board,
+            board::save_board_note,
             sessions::list_sessions,
             sessions::load_session,
             sessions::save_session,

@@ -25,7 +25,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.8.1. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.8.3. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -79,6 +79,11 @@ I want to hear about:
   up to a size. It installs that file only when its signature matches the
   public key built into the app, and `latest.json` names that version and
   that file. Otherwise it installs nothing and says why.
+- The Workflow view reads only the boards kept on this computer, in the
+  app's own data folder. It asks nothing of the network and works with both
+  gates off. No command it uses takes a path, a new copy of a board never
+  changes or removes your notes, and nothing in the boards folder is
+  deleted.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.

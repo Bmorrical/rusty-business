@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
+import Workflow from "./Workflow.vue";
 import {
   answersLine,
   arrangeSessions,
@@ -693,13 +694,15 @@ async function setMaker(name, on, box) {
 }
 
 /**
- * Opens Installers or Settings in place of the chat. Both show the makers, and
- * Installers shows the outside engines, as Rust keeps them, so each asks Rust
- * afresh.
+ * Opens Workflow, Installers, or Settings in place of the chat. Installers and
+ * Settings show the makers, and Installers shows the outside engines, as Rust
+ * keeps them, so each asks Rust afresh. Workflow reads only its board, and
+ * asks for that itself.
  */
 async function openPage(name) {
   page.value = name;
   menuFor.value = "";
+  if (name === "workflow") return;
   if (name === "settings") {
     memoryDraft.value = memory.value;
     memorySaved.value = "";
@@ -1843,6 +1846,14 @@ onBeforeUnmount(() => {
         <button
           class="wide"
           type="button"
+          :aria-current="page === 'workflow' ? 'page' : undefined"
+          @click="togglePage('workflow')"
+        >
+          Workflow
+        </button>
+        <button
+          class="wide"
+          type="button"
           :aria-current="page === 'installers' ? 'page' : undefined"
           @click="togglePage('installers')"
         >
@@ -1922,6 +1933,15 @@ onBeforeUnmount(() => {
           <button class="link" type="button" @click="updateLater = update.version">Later</button>
         </div>
       </section>
+
+      <Workflow
+        v-if="page === 'workflow'"
+        :wan="gate"
+        :lan="lanGate"
+        :side-open="sideOpen"
+        @close="closePage"
+        @side="sideOpen = true"
+      />
 
       <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
         <header class="bar">

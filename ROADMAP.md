@@ -17,6 +17,17 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
+- **Kits.** A kit is a small file, kept outside the app, that names what a
+  board needs before work on it can start, such as a folder on this
+  computer or a repository to fetch. The app reads a kit and says what is
+  missing.
+- **A source for boards.** The app pulls a fresh copy of a board from a
+  source a kit names: a file on this computer, or an address reached
+  through the gates. A pull replaces the copy and leaves your notes.
+- **Slices you can write.** Add and edit a story's slices in the Workflow
+  view, each with a brief small enough for a local model, a meter that
+  says whether the brief fits the model's window, and a way to copy your
+  slices out as text.
 - **An engine for Windows and Linux.** The Windows installer and the Linux
   packages carry llama.cpp's `llama-server` inside the download, so nothing
   else has to be installed first: the Vulkan build from llama.cpp's own
@@ -161,3 +172,10 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   signature matches the key built into the app, and opens the new version.
   The Release workflow signs each of those files and writes `latest.json`.
   A copy unpacked from the `.tar.gz` updates by download.
+- **The Workflow view.** A board is a road of releases, the stories and
+  bugs under each, and the slices each story is cut into. The view shows
+  one, with the five lanes a slice goes through, Sliced, Written, Checked,
+  Reviewed, and Main, and whose move each slice and each story is. It
+  reads only a copy kept on this computer, so it works with both gates
+  off, and it keeps a note of your own on any story. A made-up sample
+  board shows how one reads.

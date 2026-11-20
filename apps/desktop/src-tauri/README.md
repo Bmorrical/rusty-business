@@ -5,13 +5,14 @@ from [../src](../src), and runs the commands the page calls.
 
 | Path                         | What it is                                               |
 | ---------------------------- | -------------------------------------------------------- |
-| [src](src)                   | The Rust code: the engine adapter, its start, the models on the disk and their download, the stack's start, and the saved chats |
+| [src](src)                   | The Rust code: the engine adapter, its start, the models on the disk and their download, the stack's start, the saved chats, and the boards |
 | [capabilities](capabilities) | What the page is allowed to ask Tauri for                |
 | [icons](icons)               | The app's icon in every size the systems ask for         |
 | `tauri.conf.json`            | The window's size and title, the page's content security policy, and what gets bundled |
 | `pinned-models.json`         | The app's models as downloads on a Mac, as MLX models: each one's revision on Hugging Face, and every file's name, size, and SHA-256 |
 | `pinned-gguf-models.json`    | The same models as GGUF files, for `llama-server` on Windows and Linux, from the maker's own copy first, then ggml-org's, with the same facts |
 | `stack-compose.yaml`         | The stack the app starts: [infra/compose.yaml](../../../infra/compose.yaml) with the API and the worker pulled from GitHub's container registry, pinned by digest, and only the front door on a port |
+| `sample-board.json`          | The made-up board the Workflow view opens as a sample, compiled into the app |
 | `build.rs`                   | Tauri's build step                                       |
 | `Cargo.toml`, `Cargo.lock`   | This crate's packages, pinned                            |
 
