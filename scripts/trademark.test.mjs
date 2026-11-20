@@ -33,6 +33,9 @@ const PLAIN = new Map([
   // The app's file name, in the command that opens the Mac app (see the last
   // test below). A ™ there would name a file that is not there.
   ['README.md', ['   xattr -dr com.apple.quarantine "/Applications/Rusty Business.app"']],
+  // The same file name, in the test that installs only over the Mac app put
+  // in place.
+  ['apps/desktop/src-tauri/src/update.rs', ['    const BUNDLE: &str = "Rusty Business.app";']],
 ]);
 
 /** Each use of the name with no ™ after it, as its line number, even when the name runs across two lines. */
