@@ -18,9 +18,9 @@
 # C compiler, is installed once by a person who may, and when any of it is
 # missing the script stops and gives the line that installs it.
 #
-# The packages carry no model engine yet. The app starts llama.cpp's
-# llama-server when it finds it on the computer, and otherwise the window
-# says so.
+# The packages carry the engine: llama.cpp's `llama-server`, the Vulkan build
+# from llama.cpp's own releases, pinned below by checksum. The app starts it
+# from the package, and looks on the computer only when the package lacks it.
 #
 # Safe to run again: what is already fetched and still matches its pin is
 # kept.
@@ -58,6 +58,8 @@ RUSTUP=1.29.3
 RUSTUP_SHA256=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
 NODE=22.23.3
 NODE_SHA256=1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af
+LLAMA_TAG=b12590
+LLAMA_SHA256=3b9b3c8a6412523b2a75f87b81b97c2f7c690b66dcad42e9c23f5859402a8c3a
 
 DEB=Rusty-Business-linux-x64.deb
 RPM=Rusty-Business-linux-x64.rpm
@@ -114,6 +116,14 @@ export npm_config_cache=$WORK/tools/npm-cache
 export npm_config_userconfig=$WORK/tools/npmrc
 export npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false
 
+# --- The engine: llama.cpp's llama-server, pinned by checksum ----------------
+
+rm -rf "$TAURI/engine"
+mkdir -p "$TAURI/engine"
+fetch "https://github.com/ggml-org/llama.cpp/releases/download/$LLAMA_TAG/llama-$LLAMA_TAG-bin-ubuntu-vulkan-x64.tar.gz" "$LLAMA_SHA256" llama-server.tar.gz
+tar -xzf "$WORK/downloads/llama-server.tar.gz" -C "$TAURI/engine" --strip-components=1
+[ -x "$TAURI/engine/llama-server" ] || fail "The llama.cpp download holds no llama-server."
+
 # --- The packages -----------------------------------------------------------
 
 APP=$(node -p "require('./$TAURI/tauri.conf.json').productName")
@@ -128,6 +138,11 @@ usr="$TAURI/target/release/bundle/deb/${APP}_${VERSION}_amd64/data/usr"
 [ -f "$deb" ] || fail "Tauri made no $deb."
 [ -f "$rpm" ] || fail "Tauri made no $rpm."
 [ -x "$usr/bin/rusty-business" ] || fail "Tauri left no $usr/bin/rusty-business."
+# The engine, and its libraries, must be in what Tauri packed, and it must
+# keep its run permission, or the app would start none.
+engine_dir=$(find "$usr" -type f -name llama-server -executable -printf '%h\n' -quit)
+[ -n "$engine_dir" ] || fail "Tauri left no usable llama-server in the package."
+[ -f "$engine_dir/libllama-server-impl.so" ] || fail "Tauri left llama-server without its libraries."
 
 rm -f "$WORK/$DEB" "$WORK/$DEB.sha256" "$WORK/$RPM" "$WORK/$RPM.sha256" "$WORK/$TGZ" "$WORK/$TGZ.sha256"
 cp "$deb" "$WORK/$DEB"

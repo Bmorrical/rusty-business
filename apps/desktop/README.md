@@ -192,8 +192,8 @@ Which program serves the contract is the only thing that changes per system:
 | System  | Engine                                             |
 | ------- | -------------------------------------------------- |
 | macOS   | `mlx_lm.server` (MLX, Apple silicon)               |
-| Windows | not chosen yet; any server with the same two calls |
-| Linux   | not chosen yet; any server with the same two calls |
+| Windows | `llama-server`, installed on the computer          |
+| Linux   | `llama-server`, carried in the packages            |
 
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 `RUSTY_ENGINE_URL` to use another port on this computer or an RFC 1918

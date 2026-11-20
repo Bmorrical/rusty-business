@@ -179,8 +179,9 @@ test("it builds with the Mac's Rust and Node, each download over HTTPS and kept 
     [
       [`https://nodejs.org/dist/v${valueOf('NODE')}/node-v${valueOf('NODE')}-linux-x64.tar.gz`, 'NODE_SHA256', 'node.tar.gz'],
       [`https://static.rust-lang.org/rustup/archive/${valueOf('RUSTUP')}/x86_64-unknown-linux-gnu/rustup-init`, 'RUSTUP_SHA256', 'rustup-init'],
+      [`https://github.com/ggml-org/llama.cpp/releases/download/${valueOf('LLAMA_TAG')}/llama-${valueOf('LLAMA_TAG')}-bin-ubuntu-vulkan-x64.tar.gz`, 'LLAMA_SHA256', 'llama-server.tar.gz'],
     ],
-    'expected two downloads: Node and rustup, for 64-bit Linux',
+    'expected three downloads: Node, rustup, and llama-server, for 64-bit Linux',
   );
   for (const [, , sum] of calls) assert.match(valueOf(sum), HEX, `${sum} is not a SHA-256`);
 
@@ -193,6 +194,34 @@ test("it builds with the Mac's Rust and Node, each download over HTTPS and kept 
   const checked = fetch.indexOf('check "$2" "$WORK/downloads/$3.part" || fail');
   assert.ok(checked > 0 && kept > checked, 'a download is kept before its checksum is checked');
   assert.match(SCRIPT, /^check\(\) \{\n\s+\[ "\$\(sha256sum "\$2" \| cut -c1-64\)" = "\$1" \]\n\}$/m);
+});
+
+test('it fetches the pinned llama-server and packs it with the app', () => {
+  assert.match(valueOf('LLAMA_TAG'), /^b\d+$/, 'LLAMA_TAG is not a pinned llama.cpp build');
+  assert.match(valueOf('LLAMA_SHA256'), HEX, 'LLAMA_SHA256 is not a SHA-256');
+
+  // The engine is fetched before the build, unpacked into src-tauri/engine
+  // (which the bundle's resources pack), and its presence is checked after.
+  const fetched = COMMANDS.find((command) => command.startsWith('fetch "https://github.com/ggml-org/llama.cpp/releases/download/'));
+  const built = COMMANDS.find((command) => command.startsWith('(cd "$DESKTOP"'));
+  assert.ok(fetched, 'the engine is not fetched');
+  assert.ok(built, 'the build was not found');
+  assert.ok(COMMANDS.indexOf(fetched) < COMMANDS.indexOf(built), 'the engine is not fetched before the build');
+  assert.ok(
+    COMMANDS.includes('tar -xzf "$WORK/downloads/llama-server.tar.gz" -C "$TAURI/engine" --strip-components=1'),
+    'the engine is not unpacked into src-tauri/engine',
+  );
+  assert.ok(COMMANDS.includes('rm -rf "$TAURI/engine"'), 'the engine folder is not cleaned first');
+  assert.ok(
+    COMMANDS.includes('[ -x "$TAURI/engine/llama-server" ] || fail "The llama.cpp download holds no llama-server."'),
+    'the download is not checked for llama-server',
+  );
+  assert.ok(
+    COMMANDS.some((command) => command.includes('find "$usr"') && command.includes('llama-server')),
+    'the package is not checked for the engine',
+  );
+  const bundle = JSON.parse(read('apps/desktop/src-tauri/tauri.conf.json')).bundle;
+  assert.deepEqual(bundle.resources, ['engine/**/*'], 'the bundle does not pack the engine folder');
 });
 
 test('every tool and cache it makes stays inside target/linux, which git ignores', () => {
@@ -234,12 +263,17 @@ test('every tool and cache it makes stays inside target/linux, which git ignores
   }
 });
 
-test('it removes only what it made, inside target/linux', () => {
+test('it removes only what it made', () => {
   const removals = commandsWith(/(^|[;&|(]\s*)rm(dir)?\s/);
-  assert.equal(removals.length, 5, 'the removals were not found');
+  assert.equal(removals.length, 6, 'the removals were not found');
   for (const command of removals) {
     const targets = command.replace(/^.*?\brm(dir)?\s+(-[a-z]+\s+)?/, '').split(/\s+/);
-    for (const target of targets) assert.ok(target.startsWith('"$WORK/'), `${command} removes ${target}`);
+    for (const target of targets) {
+      assert.ok(
+        target.startsWith('"$WORK/') || target === '"$TAURI/engine"',
+        `${command} removes ${target}`,
+      );
+    }
   }
 });
 
@@ -278,20 +312,22 @@ test('it builds the two packages, packs the same files as a .tar.gz, and keeps e
   for (const icon of ['icons/32x32.png', 'icons/128x128.png', 'icons/128x128@2x.png']) assert.ok(conf.bundle.icon.includes(icon), `the packages have no ${icon}`);
 });
 
-test('the .deb and the .rpm bring in OpenSSL 3, which the program links and a bare Fedora lacks', () => {
+test('the .deb and the .rpm bring in OpenSSL 3 and the Vulkan loader', () => {
   // The program links OpenSSL through its web client and will not start
-  // without it. Tauri names WebKitGTK and GTK on its own and adds these. A .deb's libssl3 is OpenSSL 3 on Ubuntu 22.04 and
-  // later and on Debian 12 and later; an .rpm names the two libraries, as
-  // Fedora's own packages do.
+  // without it, and the bundled llama-server's Vulkan backend needs the
+  // Vulkan loader. Tauri names WebKitGTK and GTK on its own and adds these. A .deb's libssl3 is OpenSSL 3 on Ubuntu 22.04 and
+  // later and on Debian 12 and later, and libvulkan1 is the Vulkan loader; an
+  // .rpm names the two OpenSSL libraries and the loader, as Fedora's own
+  // packages do.
   assert.match(read('apps/desktop/src-tauri/Cargo.lock'), /^name = "openssl-sys"$/m, 'the program no longer links OpenSSL, so these may go');
   const { linux } = JSON.parse(read('apps/desktop/src-tauri/tauri.conf.json')).bundle;
-  assert.deepEqual(linux?.deb?.depends, ['libssl3'], 'the .deb does not bring in OpenSSL 3');
-  assert.deepEqual(linux?.rpm?.depends, ['libssl.so.3()(64bit)', 'libcrypto.so.3()(64bit)'], 'the .rpm does not bring in OpenSSL 3');
+  assert.deepEqual(linux?.deb?.depends, ['libssl3', 'libvulkan1'], 'the .deb does not bring in OpenSSL 3 and the Vulkan loader');
+  assert.deepEqual(linux?.rpm?.depends, ['libssl.so.3()(64bit)', 'libcrypto.so.3()(64bit)', 'libvulkan.so.1()(64bit)'], 'the .rpm does not bring in OpenSSL 3 and the Vulkan loader');
   assert.ok(NEEDS.includes(' libssl-dev'), 'the build no longer installs what it links against');
 
   // The .tar.gz brings in nothing, so the README and the release notes say
-  // what it needs from the system.
-  const needs = 'It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.';
+  // what it needs from the system, the Vulkan loader now included.
+  const needs = 'It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.';
   for (const file of ['README.md', 'scripts/release.sh']) {
     assert.ok(read(file).replace(/\s+/g, ' ').includes(needs), `${file} does not say what the .tar.gz needs`);
   }
