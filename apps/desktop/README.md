@@ -107,8 +107,11 @@ Select the picture to open it full size. The rest of the set is in
   it stays open, and when you click Check for updates under the saved chats,
   the app asks GitHub for the newest release. When it is
   newer than this copy and holds this system's file, a notice above the chat
-  says so. Download opens that file in the browser and then says how to
-  install it; What changed opens the release's notes; Later hides the notice
+  says so. Where this copy came from the `.dmg`, the `.exe`, the `.deb`, or
+  the `.rpm`, Install and restart downloads the new version, checks its
+  signature, puts it in place of this copy, and opens it. Download opens
+  that file in the browser and then says how to install it; What changed
+  opens the release's notes; Later hides the notice
   until the app opens again, a newer version is out, or you click Check for
   updates. Check for updates says what it found, or why the check failed;
   while the gate is off, it says to turn the gate on.
@@ -120,6 +123,7 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
                       Rust  --gate--https, on Download only-->   Hugging Face
                       Rust  --gate--Docker, when the stack is not answering-->  the stack
                       Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
+                      Rust  --gate--https, on Install and restart only-->  this repository's releases on GitHub
                       Rust  --gate--https, with the key from your file-->  xAI's API (Grok)
                       Rust  --gate--https, with the key from your file-->  OpenAI's API (GPT)
                       Rust  --gate--https, with the key from your file-->  Anthropic's API (Claude)
@@ -186,8 +190,10 @@ through the gate. Rust owns twelve things:
   version. It asks only GitHub's API, only for this repository's newest
   release, and picks this system's file. The page names only Download or
   What changed, never an address, and Rust opens only this repository's
-  releases on github.com, in the browser. The app downloads and installs
-  nothing itself.
+  releases on github.com, in the browser. Install and restart fetches the
+  release's `latest.json` and this system's file through the gate, and
+  Tauri's updater installs the file only when its signature matches the
+  public key in `tauri.conf.json`.
 
 Which program serves the contract is the only thing that changes per system:
 
