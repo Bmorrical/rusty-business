@@ -282,7 +282,7 @@ impl Engine {
 
     /// What an engine says while the outbound gate is off.
     fn gate_off(self) -> String {
-        format!("The gate is off. Turn it on to ask {}.", self.name())
+        format!("The WAN gate is off. Turn it on to ask {}.", self.name())
     }
 
     /// What adding an engine says while the outbound gate is off.
@@ -381,8 +381,8 @@ fn openai_fits(id: &str) -> bool {
             .is_some_and(|rest| rest.starts_with(|letter: char| letter.is_ascii_digit()));
     family
         && id.split('-').all(|word| {
-            !NOT_FOR_CHAT.contains(&word)
-                && !(word.len() >= 4 && word.bytes().all(|byte| byte.is_ascii_digit()))
+            !(NOT_FOR_CHAT.contains(&word)
+                || (word.len() >= 4 && word.bytes().all(|byte| byte.is_ascii_digit())))
         })
 }
 
@@ -442,9 +442,9 @@ fn claude_name(id: &str) -> String {
 fn gemini_fits(id: &str) -> bool {
     id.strip_prefix("gemini-").is_some_and(|rest| {
         rest.split('-').all(|word| {
-            !word.is_empty()
-                && !GEMINI_NOT_FOR_CHAT.contains(&word)
-                && !(word.len() >= 3 && word.bytes().all(|byte| byte.is_ascii_digit()))
+            !(word.is_empty()
+                || GEMINI_NOT_FOR_CHAT.contains(&word)
+                || (word.len() >= 3 && word.bytes().all(|byte| byte.is_ascii_digit())))
         })
     })
 }
@@ -1813,14 +1813,17 @@ mod tests {
                     .starts_with("There is no key file")
             );
         }
-        assert_eq!(OPENAI.gate_off(), "The gate is off. Turn it on to ask GPT.");
+        assert_eq!(
+            OPENAI.gate_off(),
+            "The WAN gate is off. Turn it on to ask GPT."
+        );
         assert_eq!(
             ANTHROPIC.gate_off(),
-            "The gate is off. Turn it on to ask Claude."
+            "The WAN gate is off. Turn it on to ask Claude."
         );
         assert_eq!(
             GOOGLE.gate_off(),
-            "The gate is off. Turn it on to ask Gemini."
+            "The WAN gate is off. Turn it on to ask Gemini."
         );
         fs::remove_dir_all(&place).unwrap();
     }

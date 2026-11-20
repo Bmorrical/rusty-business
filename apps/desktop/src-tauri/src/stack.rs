@@ -450,7 +450,7 @@ pub fn plan(facts: &Facts) -> Step {
 pub fn sentence(why: Why, port: u16) -> String {
     match why {
         Why::NotOnThisSystem => "The app cannot start the stack on this system yet.".to_string(),
-        Why::GateClosed => "The gate is off, so the app did not start the stack; the chat does not need it yet.".to_string(),
+        Why::GateClosed => "The WAN gate is off, so the app did not start the stack; the chat does not need it yet.".to_string(),
         Why::PortTaken => format!("Something that is not the stack is using port {port} on this computer, so the app did not start the stack."),
         Why::NoDocker => "Docker is not on this computer, so the stack is not running; the chat does not need it yet.".to_string(),
         Why::DockerNotRunning => "Docker is not running, so the app did not start the stack; start Docker, then select Try again.".to_string(),
@@ -462,7 +462,7 @@ const NOT_READY: &str =
     "The stack was not ready within 15 minutes; select Try again to go on from where it stopped.";
 const NOT_ANSWERING: &str = "The stack started, and its front door is not answering yet.";
 const QUITTING: &str = "The app is closing, so it did not start the stack.";
-const GATE_TURNED_OFF: &str = "The gate was turned off, so the app stopped starting the stack.";
+const GATE_TURNED_OFF: &str = "The WAN gate was turned off, so the app stopped starting the stack.";
 
 fn failed(log: &Path) -> String {
     format!(

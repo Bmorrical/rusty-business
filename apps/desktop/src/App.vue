@@ -140,6 +140,9 @@ const updateInstalling = ref(false);
 const gate = ref(false);
 const gateBusy = ref(false);
 const gateNote = ref("");
+const lanGate = ref(false);
+const lanGateBusy = ref(false);
+const lanGateNote = ref("");
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
@@ -224,8 +227,10 @@ function blankSession(project = null) {
 // engine is added.
 const outsideListed = computed(() => outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []));
 const outsideModels = computed(() => (gate.value ? outsideListed.value : []));
+const lanEngine = computed(() => engine.value?.remote === true);
+const engineModels = computed(() => (lanEngine.value && !lanGate.value ? [] : engine.value?.models ?? []));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...(engine.value?.models ?? []), ...outsideModels.value]);
+const onHand = computed(() => [...engineModels.value, ...outsideModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -278,11 +283,26 @@ const quick = computed(() => quickest(offers.value));
 const handStart = computed(() => showsStartHint(engine.value, starting.value));
 const makersLocked = computed(() => makersBusy.value || Boolean(downloading.value));
 const engineAddress = computed(() => (engine.value?.url ?? "").replace(/^http:\/\//, "").replace(/\/v1$/, ""));
+const installGateOpen = computed(() => (lanEngine.value ? lanGate.value : gate.value));
+const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : gateBusy.value));
+const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
+const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
+const displayMakers = computed(() => {
+  if (!lanEngine.value) return makers.value;
+  const installed = lanGate.value ? [...engine.value.models, ...(engine.value.setAside ?? [])] : [];
+  return makers.value.map((maker) => ({
+    ...maker,
+    models: maker.models.map((entry) => {
+      const ids = installed.filter((model) => model.name === entry.name).map((model) => model.id);
+      return { ...entry, ids, onDisk: ids.length > 0, remote: true };
+    }),
+  }));
+});
 const side = computed(() => arrangeSessions(sessions.value, projects.value, now.value));
 const searching = computed(() => Boolean(query.value.trim()));
 const currentProject = computed(() => projects.value.find((project) => project.id === current.value.project) ?? null);
 const hello = computed(() => greeting(new Date(now.value).getHours()));
-const engineOn = computed(() => Boolean(engine.value?.reachable));
+const engineOn = computed(() => Boolean(engine.value?.reachable) && (!lanEngine.value || lanGate.value));
 
 function stored(key, fallback) {
   try {
@@ -411,18 +431,43 @@ async function checkEngine() {
   }
 }
 
-/**
- * "there is a hard switch / circuit breaker to hard stop all outbound
- * communication, user can turn it on to use their inference", and "off by
- * default, everything stops". Rust keeps the gate and holds every connection
- * past this computer to it; the page only shows it and turns it on or off.
- */
+/** Rust keeps the WAN setting and controls access to internet services. */
 async function readGate() {
   try {
     gate.value = (await invoke("gate_status")) === true;
   } catch {
     gate.value = false;
   }
+}
+
+async function readLanGate() {
+  try {
+    lanGate.value = (await invoke("lan_gate_status")) === true;
+  } catch {
+    lanGate.value = false;
+  }
+}
+
+async function setLanGate(open) {
+  if (lanGateBusy.value) return;
+  lanGateBusy.value = true;
+  lanGateNote.value = "";
+  try {
+    lanGate.value = (await invoke("set_lan_gate", { open })) === true;
+  } catch (error) {
+    lanGateNote.value = String(error);
+    await readLanGate();
+  } finally {
+    lanGateBusy.value = false;
+  }
+  if (lanEngine.value) {
+    pickModels(picked.value);
+    await checkEngine();
+  }
+}
+
+function turnOnInstallGate() {
+  return lanEngine.value ? setLanGate(true) : setGate(true);
 }
 
 async function setGate(open) {
@@ -609,7 +654,7 @@ async function setActive(ids, active, outsideModel = false) {
  */
 async function uninstall(entry) {
   askUninstall.value = "";
-  if (uninstalling.value || busy.value || downloading.value) return;
+  if (entry.remote || uninstalling.value || busy.value || downloading.value) return;
   uninstalling.value = entry.name;
   modelNote.value = "";
   try {
@@ -786,14 +831,13 @@ async function freeMemory() {
 }
 
 /**
- * Downloads one model from the app's list, then starts the engine with it.
- * Rust checks every file as it arrives and moves the model into place only
- * when all of it is there. Gives back whether the whole model is in place.
+ * Installs one model on the configured engine's host, then refreshes the
+ * model picker. Gives back whether the whole model is in place.
  */
 async function download(offer) {
-  if (downloading.value) return false;
+  if (downloading.value || !canDownload.value) return false;
   downloading.value = offer.id;
-  progress.value = { done: 0, total: offer.bytes };
+  progress.value = { done: 0, total: lanEngine.value ? 0 : offer.bytes };
   stoppedNote.value = "";
   problem.value = "";
   const channel = new Channel();
@@ -803,7 +847,11 @@ async function download(offer) {
   let whole = false;
   try {
     const report = await invoke("download_model", { id: offer.id, onProgress: channel });
-    if (report.stopped) stoppedNote.value = `The download of ${offer.name} stopped, and none of it was kept.`;
+    if (report.stopped) {
+      stoppedNote.value = lanEngine.value
+        ? `The download of ${offer.name} paused. Install it again to resume.`
+        : `The download of ${offer.name} stopped, and none of it was kept.`;
+    }
     // With the model in place, the engine can start with it.
     if (report.whole) await Promise.all([checkEngine(), readMakers()]);
     whole = report.whole === true;
@@ -1558,7 +1606,7 @@ onMounted(async () => {
   window.addEventListener("click", onWindowClick);
   clockTimer = window.setInterval(() => (now.value = Date.now()), 60_000);
   // While the gate is off, Rust starts no stack and asks for no new version.
-  await readGate();
+  await Promise.all([readGate(), readLanGate()]);
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   await readWeb();
@@ -1760,6 +1808,7 @@ onBeforeUnmount(() => {
         <template v-if="!engine">
           <p class="quiet">Looking for the engine...</p>
         </template>
+        <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
           <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
           <p v-if="engine.hidden" class="quiet small">
@@ -1768,13 +1817,22 @@ onBeforeUnmount(() => {
           </p>
         </template>
         <template v-else>
-          <p><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
-          <p class="quiet small">{{ onDiskLine(engine.onDisk) }}</p>
+          <p id="engine-error"><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
+          <p v-if="!lanEngine" class="quiet small">{{ onDiskLine(engine.onDisk) }}</p>
           <p v-if="starting" class="quiet small">Starting the engine...</p>
           <p v-if="!starting && startNote" class="small">{{ startNote }}</p>
           <p v-if="handStart" class="quiet small">To start it yourself:</p>
           <code v-if="handStart" class="hint">{{ engine.startHint }}</code>
-          <button v-if="!starting" class="wide" type="button" :disabled="checking" @click="checkEngine">Try again</button>
+          <button
+            v-if="!starting"
+            class="wide"
+            type="button"
+            aria-describedby="engine-error"
+            :disabled="checking"
+            @click="checkEngine"
+          >
+            {{ checking ? "Checking..." : "Try again" }}
+          </button>
         </template>
         <p v-if="stackStarting" class="quiet small">{{ stackLine(stack, true) }}</p>
         <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
@@ -1813,10 +1871,26 @@ onBeforeUnmount(() => {
             @click="setGate(!gate)"
           >
             <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            Outbound gate
+            WAN gate
           </button>
           <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
           <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+        </div>
+        <div class="gate">
+          <button
+            class="switch"
+            type="button"
+            role="switch"
+            :aria-checked="lanGate"
+            aria-describedby="lan-gate-line"
+            :disabled="lanGateBusy"
+            @click="setLanGate(!lanGate)"
+          >
+            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+            LAN gate
+          </button>
+          <p id="lan-gate-line" class="quiet small">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</p>
+          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
         </div>
       </footer>
     </aside>
@@ -1858,17 +1932,20 @@ onBeforeUnmount(() => {
           <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
-          <h3>Models to run here</h3>
-          <p class="quiet">
+          <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
+          <p v-if="lanEngine" class="quiet">
+            Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
+          </p>
+          <p v-else class="quiet">
             Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
             top of the window. Nothing downloads until you press Install.
           </p>
-          <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so nothing can install yet.</span>
-            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+          <p v-if="!installGateOpen" class="gate-ask">
+            <span>Turn on the {{ installGateName }} to install a model.</span>
+            <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
           </p>
           <ul class="makers" aria-label="Models to install">
-            <li v-for="maker in makers" :key="maker.name" class="maker">
+            <li v-for="maker in displayMakers" :key="maker.name" class="maker">
               <div class="maker-head">
                 <span class="maker-name">{{ maker.name }}</span>
                 <span v-if="!maker.picked" class="quiet small">Not added</span>
@@ -1882,13 +1959,13 @@ onBeforeUnmount(() => {
                   <template v-if="entry.offer && downloading === entry.offer.id">
                     <span class="offer-progress">
                       <progress
-                        :value="downloaded(progress)"
+                        :value="progress?.total ? downloaded(progress) : undefined"
                         max="1"
                         :aria-label="`How much of ${entry.name} has downloaded`"
                       ></progress>
-                      <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                      <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
                     </span>
-                    <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                    <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
                   </template>
                   <button
                     v-else-if="entry.onDisk && !maker.picked"
@@ -1903,7 +1980,7 @@ onBeforeUnmount(() => {
                     v-else-if="entry.offer && !entry.onDisk"
                     type="button"
                     :aria-label="`Install ${entry.name}`"
-                    :disabled="makersLocked || !gate"
+                    :disabled="makersLocked || !canDownload"
                     @click="install(maker.name, entry.offer)"
                   >
                     Install
@@ -1922,8 +1999,8 @@ onBeforeUnmount(() => {
             to that maker's API, while the gate is on. The key never shows here.
           </p>
           <p v-if="!gate" class="gate-ask">
-            <span>The outbound gate is off, so no outside engine can be asked.</span>
-            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            <span>The WAN gate is off, so no outside engine can be asked.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the WAN gate</button>
           </p>
           <div
             v-for="entry in outside"
@@ -2083,19 +2160,24 @@ onBeforeUnmount(() => {
           </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>
-            <p class="quiet">
+            <p v-if="lanEngine" class="quiet">
+              The app shows the models of the makers you pick. Removing a maker leaves its models on the LAN server.
+            </p>
+            <p v-else class="quiet">
               The app shows the models of the makers you pick. Removing a maker leaves its models on this computer.
             </p>
             <p class="quiet">
-              Switch a model off to leave it out of questions, grading, and comparisons. Its files stay. Uninstall moves
-              a model's files to {{ uninstallPlace?.trash || "the Trash" }}, where you can take them back.
+              Switch a model off to leave it out of questions, grading, and comparisons. Its files stay.
+              <template v-if="!lanEngine">
+                Uninstall moves a model's files to {{ uninstallPlace?.trash || "the Trash" }}, where you can take them back.
+              </template>
             </p>
             <p class="quiet small">
               To install a model or add an outside engine, go to the
               <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
             </p>
             <ul class="makers" aria-label="Model makers">
-              <li v-for="maker in makers" :key="maker.name" class="maker">
+              <li v-for="maker in displayMakers" :key="maker.name" class="maker">
                 <div class="maker-head">
                   <span class="maker-name">{{ maker.name }}</span>
                   <button
@@ -2124,7 +2206,7 @@ onBeforeUnmount(() => {
                       <span class="offer-name">{{ entry.name }}</span>
                       <span class="quiet small">{{ modelLine(entry, off) }}</span>
                     </span>
-                    <template v-if="entry.ids?.length && askUninstall === entry.name">
+                    <template v-if="!entry.remote && entry.ids?.length && askUninstall === entry.name">
                       <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
                       <button
                         class="link"
@@ -2151,6 +2233,7 @@ onBeforeUnmount(() => {
                         <span class="quiet small">{{ isOn(entry.ids, off) ? "On" : "Off" }}</span>
                       </button>
                       <button
+                        v-if="!entry.remote"
                         type="button"
                         :aria-label="`Uninstall ${entry.name}`"
                         :disabled="busy || Boolean(downloading) || Boolean(uninstalling)"
@@ -2197,17 +2280,19 @@ onBeforeUnmount(() => {
             </p>
             <p v-if="outsideOffNote" class="small" role="alert">{{ outsideOffNote }}</p>
 
-            <h3 class="gap-above">Loaded models</h3>
-            <p class="quiet">
-              A model stays in this computer's memory after it answers, until the app quits. Free memory lets it go now.
-              The next message loads it again, which takes a moment.
-            </p>
-            <div class="settings-actions">
-              <button type="button" :disabled="freeing || busy || Boolean(downloading)" @click="freeMemory">
-                {{ freeing ? "Freeing..." : "Free memory" }}
-              </button>
-              <span v-if="freeNote" class="quiet small" role="status">{{ freeNote }}</span>
-            </div>
+            <template v-if="!lanEngine">
+              <h3 class="gap-above">Loaded models</h3>
+              <p class="quiet">
+                A model stays in this computer's memory after it answers, until the app quits. Free memory lets it go now.
+                The next message loads it again, which takes a moment.
+              </p>
+              <div class="settings-actions">
+                <button type="button" :disabled="freeing || busy || Boolean(downloading)" @click="freeMemory">
+                  {{ freeing ? "Freeing..." : "Free memory" }}
+                </button>
+                <span v-if="freeNote" class="quiet small" role="status">{{ freeNote }}</span>
+              </div>
+            </template>
 
             <h3 class="gap-above">Grading</h3>
             <p class="quiet">
@@ -2295,7 +2380,10 @@ onBeforeUnmount(() => {
         <div v-if="!current.messages.length" class="empty">
           <div v-if="offers.length" class="first-run">
             <p class="display lead">Pick a model to start.</p>
-            <p class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
+            <p v-if="lanEngine" class="quiet">
+              llama-server at {{ engineAddress }} downloads the GGUF from Hugging Face when you press Download.
+            </p>
+            <p v-else class="quiet">Each one is a single download from Hugging Face. Nothing downloads until you press Download.</p>
             <fieldset class="makers-pick" :disabled="makersLocked">
               <legend class="quiet small">Show models from</legend>
               <label v-for="maker in makers" :key="maker.name" class="maker-check">
@@ -2309,16 +2397,16 @@ onBeforeUnmount(() => {
               </label>
             </fieldset>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
-            <p v-if="!gate" class="gate-ask">
-              <span>The outbound gate is off, so nothing can download yet.</span>
-              <button class="primary" type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to download a model.</span>
+              <button class="primary" type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
             </p>
             <ul class="offers" aria-label="Models to download">
               <li v-for="offer in offers" :key="offer.id" class="offer">
                 <span class="offer-text">
                   <span class="offer-name">{{ offer.name }}</span>
                   <span class="quiet small">
-                    by {{ offer.maker }} · {{ offer.license }} · {{ formatSize(offer.bytes) }}{{
+                    by {{ offer.maker }} · {{ offer.license }} · {{ lanEngine ? "about " : "" }}{{ formatSize(offer.bytes) }}{{
                       offer.id === quick ? " · quickest to start" : ""
                     }}
                   </span>
@@ -2326,19 +2414,19 @@ onBeforeUnmount(() => {
                 <template v-if="downloading === offer.id">
                   <span class="offer-progress">
                     <progress
-                      :value="downloaded(progress)"
+                      :value="progress?.total ? downloaded(progress) : undefined"
                       max="1"
                       :aria-label="`How much of ${offer.name} has downloaded`"
                     ></progress>
-                    <span class="quiet small">{{ stopping ? "Stopping..." : downloadLine(progress) }}</span>
+                    <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
                   </span>
-                  <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                  <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
                 </template>
                 <button
                   v-else
-                  :class="{ primary: gate && offer.id === quick }"
+                  :class="{ primary: installGateOpen && offer.id === quick }"
                   type="button"
-                  :disabled="Boolean(downloading) || !gate"
+                  :disabled="Boolean(downloading) || !canDownload"
                   @click="download(offer)"
                 >
                   Download

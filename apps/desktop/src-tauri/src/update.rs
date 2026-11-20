@@ -415,10 +415,10 @@ fn on_releases(url: &reqwest::Url) -> bool {
 }
 
 /// What Check for updates says while the outbound gate is off.
-const GATE_OFF: &str = "The gate is off. Turn it on to check for updates.";
+const GATE_OFF: &str = "The WAN gate is off. Turn it on to check for updates.";
 
 /// What Download and Release notes say while the outbound gate is off.
-const GATE_OFF_OPEN: &str = "The gate is off. Turn it on to open the download.";
+const GATE_OFF_OPEN: &str = "The WAN gate is off. Turn it on to open the download.";
 
 /// The one client the check uses, through the outbound gate. It sends no
 /// account, token, or cookie, and follows no redirect.
@@ -645,10 +645,10 @@ pub fn open_update(
 // ---------------------------------------------------------------------------
 
 /// What Install and restart says while the outbound gate is off.
-const GATE_OFF_INSTALL: &str = "The gate is off. Turn it on to install the new version.";
+const GATE_OFF_INSTALL: &str = "The WAN gate is off. Turn it on to install the new version.";
 
 /// What it says when the gate is turned off during the download.
-const GATE_TURNED_OFF: &str = "The gate was turned off, so nothing was installed.";
+const GATE_TURNED_OFF: &str = "The WAN gate was turned off, so nothing was installed.";
 
 /// The address of one of the new version's files, checked as Download's is.
 fn release_file(update: &Update, file: &str) -> Result<reqwest::Url, String> {
@@ -1250,7 +1250,10 @@ mod tests {
             &format!("https://127.0.0.1:{port}/repos"),
         ))
         .unwrap_err();
-        assert_eq!(error, "The gate is off. Turn it on to check for updates.");
+        assert_eq!(
+            error,
+            "The WAN gate is off. Turn it on to check for updates."
+        );
         assert_eq!(error, GATE_OFF);
         listener.set_nonblocking(true).unwrap();
         assert!(
@@ -1271,7 +1274,7 @@ mod tests {
         for part in [Part::Download, Part::Notes] {
             assert_eq!(
                 to_open(part, &updates, &Gate::at(false)).unwrap_err(),
-                "The gate is off. Turn it on to open the download."
+                "The WAN gate is off. Turn it on to open the download."
             );
             assert!(
                 on_releases(&to_open(part, &updates, &Gate::at(true)).unwrap()),
@@ -1483,7 +1486,7 @@ mod tests {
         updates.keep(Ok(found.clone())).unwrap();
         assert_eq!(
             to_install(&updates, &Gate::at(false), Some(Download::Mac)).unwrap_err(),
-            "The gate is off. Turn it on to install the new version."
+            "The WAN gate is off. Turn it on to install the new version."
         );
         assert_eq!(
             to_install(&Updates::default(), &Gate::at(true), Some(Download::Mac)).unwrap_err(),
@@ -1700,7 +1703,10 @@ mod tests {
         });
         let url = reqwest::Url::parse(&format!("https://127.0.0.1:{port}/x.app.tar.gz")).unwrap();
         let error = block_on(fetch_through(&gate, url, MOST_PACKAGE_BYTES)).unwrap_err();
-        assert_eq!(error, "The gate was turned off, so nothing was installed.");
+        assert_eq!(
+            error,
+            "The WAN gate was turned off, so nothing was installed."
+        );
         assert!(
             started.elapsed() < CONNECT_WAIT,
             "the download ran on after the gate was turned off"

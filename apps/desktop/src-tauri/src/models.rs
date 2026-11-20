@@ -723,6 +723,7 @@ mod tests {
             name: "MLX".to_string(),
             url: engine::DEFAULT_BASE_URL.to_string(),
             reachable: false,
+            remote: false,
             models: Vec::new(),
             set_aside: Vec::new(),
             hidden: 0,

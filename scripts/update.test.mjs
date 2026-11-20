@@ -152,7 +152,7 @@ test('"check for updates": a button asks now and says what it found', () => {
 // check for updates."
 test('with the gate off, Check for updates says to turn the gate on, and the line goes once it is on', () => {
   const update = codeOf(read(UPDATE));
-  assert.ok(update.includes('const GATE_OFF: &str = "The gate is off. Turn it on to check for updates.";'), `${UPDATE} no longer says to turn the gate on`);
+  assert.ok(update.includes('const GATE_OFF: &str = "The WAN gate is off. Turn it on to check for updates.";'), `${UPDATE} no longer says to turn the gate on`);
   assert.match(update, /fn client\(gate: &Gate\)[^{]*\{\s+gate\.client\(GATE_OFF,/, `${UPDATE} checks without the gate`);
   const app = read(APP);
   const setGate = app.slice(app.indexOf('async function setGate('), app.indexOf('async function', app.indexOf('async function setGate(') + 1));

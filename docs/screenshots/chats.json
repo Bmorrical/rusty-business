@@ -3,6 +3,7 @@
     "name": "MLX",
     "url": "http://127.0.0.1:8080/v1",
     "reachable": true,
+    "remote": false,
     "models": [
       {
         "id": "mlx-community/phi-4-4bit",

@@ -569,7 +569,7 @@ test("attached files go to the model before the message, and say when they were 
 // outbound communication, user can turn it on to use their inference." Then:
 // "off by default, everything stops".
 test("the gate's line says what off and on mean", () => {
-  assert.equal(gateLine(false), "Gate off. Nothing leaves this computer.");
+  assert.equal(gateLine(false), "Gate off. Internet features are paused.");
   assert.equal(
     gateLine(true),
     "Gate on. The app may go online to check for updates, download models, start the stack, and ask the outside engines you add.",
@@ -986,6 +986,16 @@ test("the first outside engine grades until another model is picked, and none wh
   assert.equal(graderFor(GROK.id, [phi]), null);
   assert.equal(graderFor(null, undefined), null);
   assert.equal(gradesLine(GROK), "Grok 4 grades the answers once all are in.");
+});
+
+test("a remote engine is never started by the desktop app", () => {
+  assert.equal(shouldStart({ reachable: false, remote: true }), false);
+  assert.equal(shouldStart({ reachable: false, remote: false }), true);
+});
+
+test("the model list names the server as the install destination", () => {
+  assert.equal(listedLine({ license: "MIT", onDisk: true, remote: true }), "MIT · on the LAN server");
+  assert.equal(listedLine({ license: "MIT", remote: true, offer: { bytes: 9_000_000_000 } }), "MIT · about 9.0 GB");
 });
 
 test("a reply that shows code instead of using the tools is caught", () => {

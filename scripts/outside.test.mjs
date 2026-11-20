@@ -189,7 +189,7 @@ test('an outside engine waits for no turn, and the app knows its commands', () =
   const stream = rustFunction(engine, 'chat_stream');
   const outside = stream.indexOf('let result = if outside::is_outside(&request.model) {');
   assert.ok(outside >= 0, "the chat no longer sends an outside engine's models to it");
-  assert.ok(stream.indexOf('wait_for_turn(') > outside, 'an outside engine waits for the turn the models on this computer take');
+  assert.ok(stream.indexOf('chat_on_engine(') > outside, 'an outside engine waits for the turn the on-device and LAN models take');
   assert.ok(stream.includes('outside::run_chat(&gate, &outside,'), 'an outside engine is asked without the gate');
 
   const lib = read(LIB);
@@ -218,7 +218,7 @@ test('the page sends only the path, keeps none of it, and offers an engine only 
       app.includes('const outsideModels = computed(() => (gate.value ? outsideListed.value : []));'),
     "an outside engine's models are offered with the gate off, or before it is added",
   );
-  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.\(engine\.value\?\.models \?\? \[\]\), \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.engineModels\.value, \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
   assert.ok(app.includes('const models = computed(() => switchedOn(onHand.value, off.value));'), 'an outside engine switched off is still asked');
   // Rust gives every engine, as a list.
   assert.ok(pageFunction(app, 'readOutside').includes('outside.value = Array.isArray(listed) ? listed : [];'), 'the page no longer reads the engines as a list');

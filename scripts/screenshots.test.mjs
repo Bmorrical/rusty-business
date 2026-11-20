@@ -160,7 +160,7 @@ function startFields() {
 /** What the page draws when no engine answers; undefined when it has no such panel. */
 function offPanel() {
   const page = read('apps/desktop/src/App.vue');
-  return page.match(/<template v-else>\n(\s+<p><span class="dot off"[\s\S]*?)<\/template>/)?.[1];
+  return page.match(/<template v-else>\n(\s+<p id="engine-error"><span class="dot off"[\s\S]*?)<\/template>/)?.[1];
 }
 
 /** The app's allow-list, read from the Rust source. */
@@ -461,9 +461,9 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   // model is whole.
   const page = read('apps/desktop/src/App.vue');
   const download = page.match(/\nasync function download\(offer\) \{\n([\s\S]*?)\n\}\n/)?.[1] ?? '';
-  assert.match(download, /^\s*if \(downloading\.value\) return false;/, 'download() does nothing while one is running');
+  assert.match(download, /^\s*if \(downloading\.value \|\| !canDownload\.value\) return false;/, 'download() does nothing while one is running or its gate is off');
   assert.match(download, /invoke\("download_model", \{ id: offer\.id, onProgress: channel \}\)/, 'Rust is told which model, and reports its progress');
-  assert.match(download, /if \(report\.stopped\) stoppedNote\.value = `The download of \$\{offer\.name\} stopped, and none of it was kept\.`;/, 'a stopped download says so');
+  assert.match(download, /if \(report\.stopped\) \{[\s\S]*?stoppedNote\.value = lanEngine\.value[\s\S]*?paused[\s\S]*?stopped, and none of it was kept/, 'the download reports a pause or cancellation');
   assert.match(
     download,
     /if \(report\.whole\) await Promise\.all\(\[checkEngine\(\), readMakers\(\)\]\);/,
@@ -475,23 +475,23 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
 
   const row = page.match(/<li v-for="offer in offers"[\s\S]*?<\/li>/)?.[0] ?? '';
   assert.match(row, /\{\{\s*offer\.id === quick \? " · quickest to start" : ""\s*\}\}/, 'the quickest to start is pointed to');
-  assert.match(row, /by \{\{ offer\.maker \}\} · \{\{ offer\.license \}\} · \{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer gives its maker, its license, and its size');
-  assert.match(row, /<progress\s+:value="downloaded\(progress\)"/, 'a download shows how far it has come');
-  assert.match(row, /\{\{ stopping \? "Stopping\.\.\." : downloadLine\(progress\) \}\}/, 'and in words');
-  assert.match(row, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it');
+  assert.match(row, /by \{\{ offer\.maker \}\} · \{\{ offer\.license \}\} · .*\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer gives its maker, its license, and its size');
+  assert.match(row, /<progress\s+:value="progress\?\.total \? downloaded\(progress\) : undefined"/, 'a download shows how far it has come');
+  assert.match(row, /\{\{ stopping \? "Stopping\.\.\." : progress\?\.total \? downloadLine\(progress\) : "Waiting for the server…" \}\}/, 'and in words');
+  assert.match(row, /<button type="button" :disabled="stopping" @click="cancelDownload">\{\{ lanEngine \? "Pause" : "Cancel" \}\}<\/button>/, 'Cancel stops it');
   // Brad, 2026-11-17: "off by default, everything stops". Download is off too
   // while the outbound gate is, and the picker offers to turn the gate on.
-  assert.match(row, /:disabled="Boolean\(downloading\) \|\| !gate"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
+  assert.match(row, /:disabled="Boolean\(downloading\) \|\| !canDownload"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
   const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16}<\/li>/)?.[0] ?? '';
   assert.match(
     listed,
-    /v-else-if="entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="makersLocked \|\| !gate"\s*\n\s*@click="install\(maker\.name, entry\.offer\)"/,
+    /v-else-if="entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="makersLocked \|\| !canDownload"\s*\n\s*@click="install\(maker\.name, entry\.offer\)"/,
     'Install is off there too, and shows only for a model that is not here yet',
   );
-  assert.match(listed, /<button type="button" :disabled="stopping" @click="cancelDownload">Cancel<\/button>/, 'Cancel stops it there too');
+  assert.match(listed, /<button type="button" :disabled="stopping" @click="cancelDownload">\{\{ lanEngine \? "Pause" : "Cancel" \}\}<\/button>/, 'Cancel stops it there too');
   assert.match(
     page,
-    /<p v-if="!gate" class="gate-ask">\s*<span>The outbound gate is off, so nothing can download yet\.<\/span>\s*<button class="primary" type="button" :disabled="gateBusy" @click="setGate\(true\)">Turn on the gate<\/button>\s*<\/p>/,
+    /<p v-if="!installGateOpen" class="gate-ask">\s*<span>Turn on the \{\{ installGateName \}\} to download a model\.<\/span>\s*<button class="primary" type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the \{\{ installGateName \}\}<\/button>\s*<\/p>/,
     'the first-run picker offers to turn the gate on',
   );
   assert.match(page, /<p v-if="stoppedNote" class="quiet small">\{\{ stoppedNote \}\}<\/p>/, 'the stopped note is shown');
@@ -711,8 +711,9 @@ test('the stand-in answers the ten calls the pictures need, and refuses the rest
   // Asked to start the stack, it starts nothing and says the stack runs.
   assert.deepEqual(plain(await invoke('start_stack')), STACK_RUNNING);
 
-  // The outbound gate is off, as on a first run, and the pictures leave it so.
+  // Both gates are off, as on a first run.
   assert.equal(await invoke('gate_status'), false);
+  assert.equal(await invoke('lan_gate_status'), false);
 
   // No model is switched off, and Uninstall would move one to the Trash, as on a Mac.
   assert.deepEqual(plain(await invoke('deactivated_models')), []);

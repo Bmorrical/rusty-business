@@ -106,6 +106,9 @@ pub async fn uninstall_model(
     downloads: tauri::State<'_, Downloads>,
     deactivated: tauri::State<'_, Deactivated>,
 ) -> Result<String, String> {
+    if engine::base_url().is_ok_and(|base| engine::is_remote(&base)) {
+        return Err("Uninstall LAN models on the server that stores them.".to_string());
+    }
     if downloads.running() {
         return Err(
             "A model is downloading. Uninstall once it is done, or cancel it first.".to_string(),

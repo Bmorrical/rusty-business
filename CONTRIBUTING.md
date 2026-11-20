@@ -7,9 +7,11 @@ contributor is not a maintainer.
 
 ## The rules for every change
 
-- **Offline first.** The app works with nothing leaving the computer.
-  Anything that reaches outside waits for the outbound gate, which is off
-  until the user turns it on, and goes only to that service's own fixed host.
+- **Offline first.** On-device chat works with both network gates off. The
+  LAN gate allows model discovery, chat, and model install, pause, and
+  resume requests to the configured private-network engine. The WAN gate
+  allows direct internet features, which use each service's own fixed hosts.
+  Both gates start off and can be enabled independently.
 - **Tests come with the work.** Every change brings tests that cover it, in
   the backend and end to end. Coverage never slips.
 - **All checks pass before a pull request merges.** The gate runs on every

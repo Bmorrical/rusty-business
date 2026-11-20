@@ -1,9 +1,10 @@
 # Security
 
-Rusty Business™ is built local first, to keep what you type on your
-computer, with an outbound gate that holds everything else back until you
-turn it on. If you find a way around that, or any other security problem, I
-want to hear about it.
+Rusty Business™ uses the engine on your computer by default. It can also
+send chat to a server you configure on your private network. The LAN gate
+controls access to that server. The WAN gate controls the app’s internet
+features. If you find a way around those controls or any other security
+problem, I want to hear about it.
 
 ## Reporting a problem
 
@@ -24,7 +25,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.8.0. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.8.1. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -39,11 +40,13 @@ These are the promises that matter most. A way to break one is exactly what
 I want to hear about:
 
 - The page has no way to call out.
-- While the outbound gate is off, which it is until you turn it on, the app
-  makes no connection past this computer: no check for a new version, no
-  download, no start of the stack, and no question to Grok, GPT, Claude, or Gemini.
-  Turning it off stops what is under way. With it on, every such connection is https only,
-  through no proxy.
+- Both gates start off and can be turned on independently. Local model
+  downloads, update checks and installs, stack startup, and provider
+  requests wait for the WAN gate. Turning WAN off stops those actions.
+- Discovery, chat, and install, pause, and resume requests to the configured
+  private-network server wait for the LAN gate. Turning LAN off closes those
+  app connections. A download already delegated to the server may continue
+  there. The server operator controls the server's internet access.
 - Your xAI, OpenAI, Anthropic, and Google keys stay in the files you name. The app
   keeps only each file's path, reads the key from it when it asks that
   engine, and sends the key only to its maker's API, over https, following
@@ -57,10 +60,13 @@ I want to hear about:
   it, those from the models on this computer too, and only while the gate
   is on. The grader reads no model's name. Settings picks a model on this
   computer to grade instead, or none.
-- The app refuses an engine address that is not on this computer, and an
-  engine it starts listens on this computer only.
-- The app downloads only the models on its list, only from Hugging Face over
-  https, and checks every file against its pinned size and checksum.
+- Engine requests use HTTP with no redirects or proxy. The address must be
+  loopback or an RFC 1918 IPv4 address. Engines the app starts bind to
+  loopback only.
+- For downloads onto this computer, the app fetches catalog models from
+  Hugging Face over HTTPS and verifies each file's pinned size and checksum.
+  For a LAN install, the app sends a catalog model identifier and
+  llama-server handles the transfer and file validation.
 - The check for a new version asks GitHub's API for this repository's newest
   release, over https, and nothing else. It sends nothing you type, follows
   no redirect, and downloads nothing. Its Download button opens only this

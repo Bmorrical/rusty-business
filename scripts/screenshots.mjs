@@ -230,6 +230,7 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
+      lan_gate_status: () => false,
       deactivated_models: () => [],
       uninstall_place: () => ({ trash: 'the Trash', sharedCache: true }),
       outside_status: () => outside,
