@@ -29,7 +29,7 @@ use std::fs::{self, File, OpenOptions};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -145,15 +145,36 @@ pub fn find_program(
         .find(|candidate| can_run(candidate))
 }
 
-/// Where the engine the app carries is, when the app runs as a Mac app:
+/// The app's resource folder, set once when the app starts. It holds the
+/// engine the app carries on Windows and Linux. Only the first call counts.
+static RESOURCE: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Sets the app's resource folder. Only the first call counts.
+pub fn use_resource_folder(folder: Option<PathBuf>) {
+    let _ = RESOURCE.set(folder);
+}
+
+/// The app's resource folder, worked out from the binary's place and the
+/// app's un-marked name. The package puts it in `lib/<name>` beside the `bin`
+/// that holds the app: `/usr/lib/<name>` for the `.deb` and `.rpm`, and
+/// `<folder>/lib/<name>` for the `.tar.gz`.
+pub fn resource_folder(exe: &Path, name: &str) -> Option<PathBuf> {
+    Some(exe.parent()?.parent()?.join("lib").join(name))
+}
+
+/// The folder the engine the app carries is in, when it carries one. On a Mac,
 /// `Contents/Resources/engine/bin`, beside the `Contents/MacOS` folder that
-/// holds the app's own program, `exe`. `make app` and `make dmg` put it there.
-/// None when the app runs any other way, as it does from `npm run tauri dev`.
-pub fn carried_folder(exe: &Path) -> Option<PathBuf> {
+/// holds the app's own program, `exe`; `make app` and `make dmg` put it there.
+/// On Windows and Linux, `engine` under the app's resource folder, `resource`,
+/// which `scripts/linux-app.sh` puts the engine into. None when the app runs
+/// any other way, as it does from `npm run tauri dev`.
+pub fn carried_folder(exe: &Path, resource: Option<&Path>) -> Option<PathBuf> {
     let programs = exe.parent()?;
     let contents = programs.parent()?;
-    (programs.file_name()? == "MacOS" && contents.file_name()? == "Contents")
-        .then(|| contents.join("Resources").join("engine").join("bin"))
+    if programs.file_name()? == "MacOS" && contents.file_name()? == "Contents" {
+        return Some(contents.join("Resources").join("engine").join("bin"));
+    }
+    resource.map(|resource| resource.join("engine"))
 }
 
 /// The folders the program is looked for in on this system, in order.
@@ -376,9 +397,10 @@ pub struct Found {
 pub fn look() -> Found {
     let engine = Engine::here();
     let home = std::env::home_dir();
+    let resource = RESOURCE.get().and_then(|folder| folder.as_deref());
     let carried = std::env::current_exe()
         .ok()
-        .and_then(|exe| carried_folder(&exe));
+        .and_then(|exe| carried_folder(&exe, resource));
     let program = engine.as_ref().and_then(|engine| {
         find_program(
             engine.program(),
@@ -2126,7 +2148,7 @@ mod tests {
             // The app's file name does not matter, only where its program is.
             let app = Path::new("/Applications/Any Name.app/Contents");
             assert_eq!(
-                carried_folder(&app.join("MacOS").join("rusty-business")),
+                carried_folder(&app.join("MacOS").join("rusty-business"), None),
                 Some(app.join("Resources").join("engine").join("bin"))
             );
             // Anywhere the app runs without its bundle, there is none.
@@ -2138,8 +2160,81 @@ mod tests {
                 "rusty-business",
                 "/",
             ] {
-                assert_eq!(carried_folder(Path::new(exe)), None, "{exe}");
+                assert_eq!(carried_folder(Path::new(exe), None), None, "{exe}");
             }
+        }
+
+        #[test]
+        fn the_carried_engine_on_linux_is_the_resource_folder_engine() {
+            // scripts/linux-app.sh puts llama-server and its libraries in
+            // `engine` under the app's resource folder, and the app looks
+            // there before PATH, so the packaged engine is the one that
+            // starts. A program named outright is still the only one tried.
+            let root = scratch();
+            let home = root.join("home");
+            let resource = root.join("lib").join("rusty-business");
+            let bundled = program_named(&resource.join("engine"), "llama-server", "exit 0");
+            let on_path = program_named(&root.join("bin"), "llama-server", "exit 0");
+            let text = |file: &Path| file.to_str().unwrap().to_string();
+            let find = |pairs: &[(&str, String)], folder: Option<&Path>| {
+                let set: HashMap<String, String> = pairs
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), value.clone()))
+                    .collect();
+                find_program("llama-server", |name| set.get(name).cloned(), Some(&home), folder)
+            };
+            let path = ("PATH", text(on_path.parent().unwrap()));
+
+            // The folder carried_folder names, and the engine found there.
+            assert_eq!(
+                carried_folder(Path::new("/usr/bin/rusty-business"), Some(&resource)),
+                Some(resource.join("engine"))
+            );
+            assert_eq!(
+                find(&[path.clone()], Some(&resource.join("engine"))),
+                Some(bundled)
+            );
+            // Without it, PATH is tried next.
+            assert_eq!(
+                find(&[path.clone()], Some(&root.join("empty"))),
+                Some(on_path)
+            );
+            // A program named outright is still the only one tried.
+            let named = program_named(&root.join("named"), "llama-server", "exit 0");
+            assert_eq!(
+                find(
+                    &[path.clone(), (PROGRAM_VARIABLE, text(&named))],
+                    Some(&resource.join("engine"))
+                ),
+                Some(named)
+            );
+
+            // The app keeps the resource folder, and reads it when it looks.
+            assert!(code().contains("static RESOURCE: OnceLock<Option<PathBuf>> = OnceLock::new();"));
+            assert!(code().contains("pub fn use_resource_folder(folder: Option<PathBuf>)"));
+            assert!(code().contains("pub fn resource_folder(exe: &Path, name: &str) -> Option<PathBuf>"));
+            assert!(PUT_TOGETHER.contains("starter::use_resource_folder("));
+            assert!(PUT_TOGETHER.contains("starter::resource_folder("), "lib.rs does not work the folder out from the binary's place");
+            assert!(PUT_TOGETHER.contains("product_name"), "lib.rs does not use the un-marked name");
+        }
+
+        #[test]
+        fn the_resource_folder_is_beside_the_binary_under_lib() {
+            // The package puts the engine's folder in `lib/<name>` beside the
+            // `bin` that holds the app, with the app's un-marked name.
+            assert_eq!(
+                resource_folder(Path::new("/usr/bin/rusty-business"), "My App"),
+                Some(PathBuf::from("/usr/lib/My App"))
+            );
+            assert_eq!(
+                resource_folder(Path::new("/opt/rusty/bin/rusty-business"), "My App"),
+                Some(PathBuf::from("/opt/rusty/lib/My App"))
+            );
+            assert_eq!(
+                resource_folder(Path::new("rusty-business"), "My App"),
+                None,
+                "no parent, so no folder"
+            );
         }
 
         /// Needs the engine's program where the app looks for it (or named

@@ -131,15 +131,26 @@ test('pin 1 says signing waits behind a switch, and downloads ship unsigned unti
 // with the Mac's signing kept in 0.6.0: "everything else is roadmap". So the
 // app starting llama.cpp is done, the engine inside the downloads is next,
 // and Windows's signing switch follows the Mac's.
-test('the engine for Windows and Linux is next, inside the downloads, and is llama.cpp', () => {
-  const engine = itemsOf(section('Next').body).find((item) => item.title === 'An engine for Windows and Linux.');
-  assert.ok(engine, 'the roadmap does not have the engine for Windows and Linux next');
+test('the engine for Windows is next, inside the installer, and is llama.cpp', () => {
+  const engine = itemsOf(section('Next').body).find((item) => item.title === 'An engine for Windows.');
+  assert.ok(engine, 'the roadmap does not have the engine for Windows next');
   assert.match(engine.text, /llama\.cpp's `llama-server` inside the download/);
   assert.match(engine.text, /the Vulkan build/);
   assert.match(engine.text, /checked by its SHA-256/);
   assert.match(engine.text, /the Vulkan loader/);
   const later = itemsOf(section('Later').body).map((item) => item.title);
-  assert.ok(!later.includes('An engine for Windows and Linux.'), 'the engine is still in Later');
+  assert.ok(!later.includes('An engine for Windows.'), 'the engine is still in Later');
+});
+
+test('the engine for Linux is done, inside the packages, and is llama.cpp', () => {
+  const linux = itemsOf(section('Done').body).find((item) => item.title === 'An engine for Linux.');
+  assert.ok(linux, 'the roadmap does not have the Linux engine done');
+  assert.match(linux.text, /llama\.cpp's `llama-server`/);
+  assert.match(linux.text, /the Vulkan build/);
+  assert.match(linux.text, /checked by its SHA-256/);
+  assert.match(linux.text, /the Vulkan loader/);
+  const next = itemsOf(section('Next').body).map((item) => item.title);
+  assert.ok(!next.includes('An engine for Linux.'), 'the Linux engine is still in Next');
 });
 
 test('everything else is roadmap: the app starting llama.cpp is done, and Windows signing follows the Mac', () => {

@@ -96,11 +96,11 @@ On 64-bit Windows 10 or 11. The installer carries no model engine yet: the app s
 1. Download ${EXE} and open it.
 2. It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.
 
-On 64-bit Linux on an Intel or AMD processor. The files carry no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.
+On 64-bit Linux on an Intel or AMD processor. The three files carry the engine inside them, llama.cpp's llama-server, the Vulkan build pinned by checksum.
 
 - On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}
 - On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}
-- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.
+- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.
 
 To check a download first, put it and its .sha256 file in one folder. On a Mac, run:
 

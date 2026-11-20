@@ -262,11 +262,12 @@ test('the app looks first for the engine it carries, where the script puts it', 
   assert.match(SCRIPT, /^\s*ditto "\$engine" "\$app\/Contents\/Resources\/engine"$/m);
   assert.match(STARTER_RS, /"macos" => Some\(Engine::Mlx\)/);
   assert.match(STARTER_RS, /Engine::Mlx => "mlx_lm\.server"/);
-  const carried = /pub fn carried_folder\(exe: &Path\) -> Option<PathBuf> \{([\s\S]*?)\n\}/.exec(STARTER_RS);
+  const carried = /pub fn carried_folder\(exe: &Path, resource: Option<&Path>\) -> Option<PathBuf> \{([\s\S]*?)\n\}/.exec(STARTER_RS);
   assert.ok(carried, 'starter.rs has no carried_folder');
   assert.match(carried[1], /== "MacOS" && contents\.file_name\(\)\? == "Contents"/);
   assert.match(carried[1], /contents\.join\("Resources"\)\.join\("engine"\)\.join\("bin"\)/);
-  assert.match(STARTER_RS, /let carried = std::env::current_exe\(\)\s*\.ok\(\)\s*\.and_then\(\|exe\| carried_folder\(&exe\)\);/);
+  assert.match(STARTER_RS, /let resource = RESOURCE\.get\(\)\.and_then\(\|folder\| folder\.as_deref\(\)\);/);
+  assert.match(STARTER_RS, /let carried = std::env::current_exe\(\)\s*\.ok\(\)\s*\.and_then\(\|exe\| carried_folder\(&exe, resource\)\);/);
   assert.match(STARTER_RS, /find_program\(\s*engine\.program\(\),\s+\|key\| std::env::var\(key\)\.ok\(\),\s+home\.as_deref\(\),\s+carried\.as_deref\(\),?\s*\)/);
   // The named program comes before the carried one, and the carried one before the rest.
   const find = /pub fn find_program\([\s\S]*?\) -> Option<PathBuf> \{\n([\s\S]*?)\n\}/.exec(STARTER_RS)[1];
