@@ -2139,11 +2139,11 @@ onBeforeUnmount(() => {
                 <button type="button" :disabled="webBusy" @click="changeWeb('remove_web_key')">Remove key</button>
               </div>
             </template>
-            <form v-else class="key-path" @submit.prevent="setWebKey">
-              <label for="web-key-path" class="small">Path to your Brave Search key file</label>
-              <span class="key-path-row">
+            <form v-else class="brave-key" @submit.prevent="setWebKey">
+              <label for="brave-key-file" class="small">Path to your Brave Search key file</label>
+              <span class="brave-key-row">
                 <input
-                  id="web-key-path"
+                  id="brave-key-file"
                   v-model="webPath"
                   type="text"
                   placeholder="~/.config/brave/key"
@@ -3664,12 +3664,14 @@ button.switch.model-switch {
   overflow-wrap: anywhere;
 }
 
-.key-path {
+.key-path,
+.brave-key {
   display: grid;
   gap: 0.3rem;
 }
 
-.key-path-row {
+.key-path-row,
+.brave-key-row {
   display: flex;
   gap: 0.5rem;
 }
@@ -3687,7 +3689,8 @@ button.switch.model-switch {
   padding: 0.4rem 0.6rem;
 }
 
-.key-path input {
+.key-path input,
+.brave-key input {
   flex: 1;
   min-width: 0;
   font: inherit;
