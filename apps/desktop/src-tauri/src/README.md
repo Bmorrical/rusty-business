@@ -17,7 +17,7 @@ The desktop app's Rust code.
 | `outside.rs`  | The engines outside this computer, Grok, GPT, Claude, and Gemini: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, Anthropic's, or Google's API through the gate |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
-| `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
+| `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
 
@@ -105,7 +105,7 @@ Four more live in `stack.rs`, each with tests:
   Stopping keeps every container and its data. Nothing removes a volume or
   an image, and Docker Desktop is left running.
 
-Five more live in `update.rs`, each with tests:
+Seven more live in `update.rs`, each with tests:
 
 - Only GitHub's API is asked, over https, and only for this repository's
   newest release. No redirect is followed, no proxy, account, token, or
@@ -118,8 +118,17 @@ Five more live in `update.rs`, each with tests:
 - The page names only the download or the notes, never an address. Rust
   opens only this repository's releases on github.com, in the browser.
 - A check that fails keeps what the last one found. Check for updates says
-  why it failed; the checks at open and once a day show nothing. The app
-  downloads and installs nothing itself.
+  why it failed; the checks at open and once a day show nothing.
+- Install and restart downloads nothing until it is clicked, and only while
+  the gate is on; turning the gate off stops its download. It fetches only
+  the found release's `latest.json` and this system's file, follows a
+  redirect only to GitHub's own file hosts, reads each up to a size, and
+  runs one install at a time.
+- A file is installed only when its signature matches the public key in
+  `tauri.conf.json`, and `latest.json` names the version found and that
+  file. It installs only over a copy put in place from the `.dmg`, the
+  `.exe`, the `.deb`, or the `.rpm`; any other copy keeps Download. When it
+  fails, it says why and that Download still works.
 
 Five more live in `outside.rs`, each with tests, for Grok, GPT, Claude, and
 Gemini alike:

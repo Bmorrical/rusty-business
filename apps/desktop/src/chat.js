@@ -349,9 +349,22 @@ export function updateLine(update) {
   return `Rusty Business™ ${update.version} is ready.`;
 }
 
-/** "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser." */
+/**
+ * "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser."
+ * Where this copy installs new versions itself, it names Install and restart
+ * first.
+ */
 export function updateDetail(update) {
-  return `This is ${update.current}. Download opens ${update.file} in your browser.`;
+  const download = `Download opens ${update.file} in your browser.`;
+  if (update.install) {
+    return `This is ${update.current}. Install and restart puts ${update.version} in place of this copy and opens it. ${download}`;
+  }
+  return `This is ${update.current}. ${download}`;
+}
+
+/** The notice's first button where this copy installs new versions itself. */
+export function installButton(installing) {
+  return installing ? "Installing..." : "Install and restart";
 }
 
 /**
