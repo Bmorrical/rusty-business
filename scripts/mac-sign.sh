@@ -167,11 +167,11 @@ notarize() {
 # --- The app, out of the .dmg -------------------------------------------------
 
 mkdir "$scratch/built" "$scratch/app"
-hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG"
+hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG" >/dev/null
 mounted=1
 [ -d "$scratch/built/$APP.app" ] || fail "The .dmg holds no $APP.app. Nothing was signed."
 ditto "$scratch/built/$APP.app" "$scratch/app/$APP.app"
-hdiutil detach -quiet "$scratch/built"
+hdiutil detach "$scratch/built" >/dev/null
 mounted=""
 ln -s /Applications "$scratch/app/Applications"
 
@@ -208,9 +208,26 @@ tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C
 
 # --- The .dmg, packed again around the stapled app ------------------------------
 
+# Brad, 2026-11-20, of the 0.7.0 release run: "failed". Its Mac build packed
+# the app, then stopped in hdiutil with no word of why, since -quiet closes
+# hdiutil's error output as well as its own. So its own output goes and its
+# errors stay, and a pack that fails is tried again, twice, because a build
+# machine's disk is now and then busy for a moment. mac-app.sh holds the
+# same lines, and packs the .dmg with them first.
+pack_dmg() {
+  local try
+  for try in 1 2 3; do
+    if hdiutil create -ov -volname "${APP}™" -srcfolder "$1" -format ULMO -o "$WORK/$DMG" >/dev/null; then
+      hdiutil verify "$WORK/$DMG" >/dev/null
+      return
+    fi
+    [ "$try" = 3 ] || { echo "hdiutil could not pack the .dmg, try $try of 3. Trying again in 20 seconds." >&2; sleep 20; }
+  done
+  fail "hdiutil could not pack the .dmg in 3 tries. What it said is above."
+}
+
 rm -f "$WORK/$DMG" "$WORK/$DMG.sha256"
-hdiutil create -quiet -volname "${APP}™" -srcfolder "$scratch/app" -format ULMO -o "$WORK/$DMG"
-hdiutil verify -quiet "$WORK/$DMG"
+pack_dmg "$scratch/app"
 sign "$WORK/$DMG"
 codesign --verify --strict "$WORK/$DMG"
 notarize "$WORK/$DMG"
