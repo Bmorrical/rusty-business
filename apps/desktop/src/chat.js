@@ -482,7 +482,11 @@ export function greeting(hour) {
 
 /** Tools that change files, which run only after the person says yes. */
 export const WRITE_TOOLS = ["write", "edit"];
-const TOOLS = ["list", "read", "search", ...WRITE_TOOLS];
+/** Tools that work in a project's folder. */
+export const FOLDER_TOOLS = ["list", "read", "search", ...WRITE_TOOLS];
+/** The tool that searches the web, offered only while Settings allows it. */
+export const WEB_TOOL = "web_search";
+const TOOLS = [...FOLDER_TOOLS, WEB_TOOL];
 /** Steps the model may take for one message before it has to answer. */
 export const TOOL_STEPS = 16;
 
@@ -502,6 +506,26 @@ export function workspacePrompt(project, overview) {
     '- {"tool": "write", "path": "src/new.js", "content": "the whole file"}: makes a file, or replaces all of one.',
     "When the user asks you to make, add, or change something, do it in the folder with these tools; never just show the code for them to copy. Start by listing or reading the files that matter, then write or edit.",
     "The user approves each edit and write before it happens, and may decline. Look before you change: read the files that matter instead of guessing. Use one tool per message. When you have what you need, answer normally with no tool block.",
+  ].join("\n\n");
+}
+
+/** Told before the tools, when the folder's prompt does not already say how to call one. */
+const TOOL_FORMAT = [
+  "To use a tool, end your message with exactly one tool block and nothing after it, then stop and wait for the result:",
+  '```tool\n{"tool": "web_search", "query": "plumbers in Jacksonville, FL"}\n```',
+];
+
+/**
+ * What the model is told about searching the web. With a folder, the folder's
+ * prompt has already said how to call a tool.
+ */
+export function webPrompt(today, withFolder = false) {
+  return [
+    ...(withFolder ? [] : TOOL_FORMAT),
+    `You can search the web. Today is ${today}.`,
+    '- {"tool": "web_search", "query": "plumbers in Jacksonville, FL"}: the top results, each with its title, address, and a few lines from the page.',
+    "Search when the answer depends on the world outside this chat: businesses and places near somewhere, news, prices, opening hours, or anything that may have changed since you learned it. Do not search for what you already know well.",
+    "Write searches the way a person types them. Search again with other words if the first results miss. Answer from what the results say, name the places you found with their web addresses, and say when the results do not settle it. When you have what you need, answer normally with no tool block.",
   ].join("\n\n");
 }
 
@@ -589,6 +613,7 @@ export function withoutToolFences(text) {
 /** The tool a bare set of arguments points to, from the keys it has. */
 function toolFor(args) {
   if (typeof args.tool === "string") return args.tool;
+  if ("query" in args) return WEB_TOOL;
   if ("find" in args && "replace" in args) return "edit";
   if ("content" in args) return "write";
   if ("text" in args) return "search";
@@ -657,6 +682,8 @@ export function toolLabel(call) {
       return `Edit ${path}`;
     case "write":
       return `Write ${path}`;
+    case WEB_TOOL:
+      return `Searched the web for "${args.query ?? ""}"`;
     default:
       return "A tool the app does not have";
   }

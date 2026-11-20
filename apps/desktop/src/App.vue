@@ -76,6 +76,8 @@ import {
   updateLine,
   withMaker,
   withPick,
+  webPrompt,
+  WEB_TOOL,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -159,6 +161,12 @@ const outsideNote = ref("");
 const outsideNotes = ref({});
 // The path typed for each engine's key, by the engine's id.
 const outsidePaths = ref({});
+// Web search: off to start. A search sends its words to Brave or DuckDuckGo.
+const webOn = ref(stored("web", "off") === "on");
+const web = ref({ engine: "duckduckgo", keyPath: null, warning: null });
+const webPath = ref("");
+const webBusy = ref(false);
+const webNote = ref("");
 // The model picked in Settings to grade the answers: its id, "" for no
 // grading, or null until one is picked.
 const graderPick = ref(rememberedGrader());
@@ -353,6 +361,7 @@ watch(theme, (value) => {
 watch(learnOn, (on) => store("learn", on ? "on" : "off"));
 watch(learnOutside, (on) => store("learnOutside", on ? "on" : "off"));
 watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
+watch(webOn, (on) => store("web", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
 
 /**
@@ -451,6 +460,47 @@ async function setGate(open) {
  * engine is asked, and never hands the key to the page. The page sends only
  * the path typed.
  */
+/**
+ * Web search's key: Rust keeps the path to the person's Brave key, as for an
+ * outside engine, and never hands the key to the page. With no key, a search
+ * goes to DuckDuckGo.
+ */
+async function readWeb() {
+  try {
+    web.value = await invoke("web_status");
+  } catch (error) {
+    webNote.value = String(error);
+  }
+}
+
+async function changeWeb(command, args = {}) {
+  if (webBusy.value) return false;
+  webBusy.value = true;
+  webNote.value = "";
+  try {
+    web.value = await invoke(command, args);
+    return true;
+  } catch (error) {
+    webNote.value = String(error);
+    return false;
+  } finally {
+    webBusy.value = false;
+  }
+}
+
+async function setWebKey() {
+  const given = webPath.value.trim();
+  if (!given) return;
+  const added = await changeWeb("set_web_key", { keyPath: given });
+  // A key pasted where the path goes does not stay on screen.
+  if (added || !looksLikePath(given)) webPath.value = "";
+}
+
+/** "Friday, November 20, 2026": the day, so the model knows what "now" is. */
+function todayLine() {
+  return new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+
 async function readOutside() {
   try {
     const listed = await invoke("outside_status");
@@ -1044,16 +1094,22 @@ async function send() {
   await learning;
 
   let system = systemPrompt(memory.value, project);
-  // A project's folder is worked in by one model at a time.
+  // A project's folder, and the web, are worked in by one model at a time.
   let tools = false;
+  let folder = false;
   if (project?.folder && asked.length === 1) {
     try {
       const overview = await invoke("workspace_overview", { project: project.id });
       system = [system, workspacePrompt(project, overview)].filter(Boolean).join("\n\n");
-      tools = true;
+      tools = folder = true;
     } catch (error) {
       problem.value = String(error);
     }
+  }
+  // The web is searched only while Settings allows it and the gate is on.
+  if (webOn.value && gate.value && asked.length === 1) {
+    system = [system, webPrompt(todayLine(), folder)].filter(Boolean).join("\n\n");
+    tools = true;
   }
   if (system) history.unshift({ role: "system", content: system });
 
@@ -1079,7 +1135,7 @@ async function send() {
   // A reply that never began is not kept.
   session.messages = session.messages.filter((turn) => !replies.includes(turn) || turn.content || turn.thinking);
   let answered = !stopAll && !failed.length;
-  // In a project with a folder, the model may take steps there.
+  // In a project with a folder, or with web search on, the model may take steps.
   if (tools && answered && session.messages.includes(replies[0])) {
     answered = await work(session, asked[0], project, system, replies[0]);
   }
@@ -1125,7 +1181,7 @@ async function work(session, entry, project, system, first) {
     if (!call) {
       // A model that shows code instead of working in the folder is told
       // once to use its tools.
-      if (nudged || !describesWork(reply.content)) return true;
+      if (nudged || !project?.folder || !describesWork(reply.content)) return true;
       nudged = true;
       result = WORK_NUDGE;
     } else {
@@ -1292,6 +1348,23 @@ async function useTool(project, call, reply) {
   if (call.error) {
     Object.assign(reply.tool, { status: "failed", output: call.error });
     return toolResult(call, call.error, true);
+  }
+  if (call.tool === WEB_TOOL) {
+    try {
+      if (!webOn.value) throw new Error("Web search is off in Settings. Answer without it.");
+      const output = await invoke("web_search", { query: String(call.args.query ?? "") });
+      Object.assign(reply.tool, { status: "done", output: output.slice(0, 6000) });
+      return toolResult(call, output);
+    } catch (error) {
+      const said = String(error?.message ?? error);
+      Object.assign(reply.tool, { status: "failed", output: said });
+      return toolResult(call, said, true);
+    }
+  }
+  if (!project?.folder) {
+    const said = "This chat has no folder to work in. Answer without that tool.";
+    Object.assign(reply.tool, { status: "failed", output: said });
+    return toolResult(call, said, true);
   }
   if (WRITE_TOOLS.includes(call.tool) && !autoApply.value) {
     reply.tool.status = "asked";
@@ -1466,6 +1539,7 @@ onMounted(async () => {
   await readGate();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
+  await readWeb();
   // The makers picked are kept on this computer, so they need no gate.
   await readMakers();
   // So are the models switched off, and where Uninstall moves a model.
@@ -1897,6 +1971,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
             <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
             <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
+            <button type="button" :class="{ here: settingsTab === 'web' }" @click="settingsTab = 'web'">Web</button>
             <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
           </nav>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
@@ -1935,6 +2010,51 @@ onBeforeUnmount(() => {
                 <span class="quiet small block">The model's edits and new files go straight into the folder, with no Apply or Skip. Stop still ends the work.</span>
               </span>
             </label>
+          </div>
+          <div v-else-if="settingsTab === 'web'" class="settings-pane">
+            <h3>Web search</h3>
+            <p class="quiet">A model can look things up on the web while it answers, such as a plumber near you or today's news.</p>
+            <label class="check">
+              <input v-model="webOn" type="checkbox" />
+              <span>
+                Let models search the web
+                <span class="quiet small block">The model writes the search; only its words leave this computer, to {{ web.engine === "brave" ? "Brave Search" : "DuckDuckGo" }}. Works while the outbound gate is on, with one model asked at a time.</span>
+              </span>
+            </label>
+            <p v-if="webOn && !gate" class="gate-ask">
+              <span>The outbound gate is off, so nothing can be searched.</span>
+              <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the gate</button>
+            </p>
+            <h3 class="gap-above">Brave Search key</h3>
+            <p class="quiet">
+              Optional. With a key from Brave's Search API, results are steadier than DuckDuckGo's. Give the path to a file
+              that holds the key; Rusty Business™ reads it for each search and sends it only to Brave. The key never shows here.
+            </p>
+            <template v-if="web.keyPath">
+              <p class="small key-file">Key file: <code>{{ web.keyPath }}</code></p>
+              <p v-if="web.warning" class="small" role="alert">{{ web.warning }}</p>
+              <div class="settings-actions">
+                <button type="button" :disabled="webBusy" @click="changeWeb('remove_web_key')">Remove key</button>
+              </div>
+            </template>
+            <form v-else class="key-path" @submit.prevent="setWebKey">
+              <label for="web-key-path" class="small">Path to your Brave Search key file</label>
+              <span class="key-path-row">
+                <input
+                  id="web-key-path"
+                  v-model="webPath"
+                  type="text"
+                  placeholder="~/.config/brave/key"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  :disabled="webBusy"
+                />
+                <button class="primary" type="submit" :disabled="webBusy || !webPath.trim()">Add</button>
+              </span>
+            </form>
+            <p v-if="webNote" class="small" role="alert">{{ webNote }}</p>
           </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>

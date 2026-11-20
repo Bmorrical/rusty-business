@@ -26,6 +26,9 @@ import {
   toolResult,
   WRITE_TOOLS,
   workspacePrompt,
+  webPrompt,
+  WEB_TOOL,
+  FOLDER_TOOLS,
   describesWork,
   withoutToolFences,
   formatCount,
@@ -486,6 +489,18 @@ test("a reply's tool block is read, and shown without the block", () => {
   assert.equal(toolResult({ tool: "list" }, "src/\n"), '<tool_result tool="list">\nsrc/\n</tool_result>');
   assert.ok(WRITE_TOOLS.includes("edit") && !WRITE_TOOLS.includes("read"));
   assert.match(workspacePrompt({ folder: "/Users/me/code/site" }, "src/"), /"site"[\s\S]*<folder>\nsrc\/\n<\/folder>/);
+});
+
+test("a model can search the web with one tool", () => {
+  const call = parseToolCall('Let me look.\n```tool\n{"tool": "web_search", "query": "plumber Jacksonville FL"}\n```');
+  assert.deepEqual(call, { tool: WEB_TOOL, args: { query: "plumber Jacksonville FL" }, before: "Let me look." });
+  assert.equal(findToolCall("", '{"query":"weather Jacksonville"}').tool, WEB_TOOL);
+  assert.equal(toolLabel({ tool: WEB_TOOL, args: { query: "plumbers" } }), 'Searched the web for "plumbers"');
+  assert.ok(!FOLDER_TOOLS.includes(WEB_TOOL) && !WRITE_TOOLS.includes(WEB_TOOL));
+  // Alone, the prompt says how to call a tool; after a folder's, it does not repeat it.
+  assert.match(webPrompt("Friday, November 20, 2026"), /```tool[\s\S]*Today is Friday, November 20, 2026\./);
+  assert.doesNotMatch(webPrompt("today", true), /end your message with exactly one tool block/);
+  assert.match(webPrompt("today", true), /"web_search"/);
 });
 
 test("a change reads as lines gone and lines new", () => {

@@ -464,11 +464,18 @@ fn gemini_version(id: &str) -> Option<(u32, u32)> {
 
 /// The person's key, read from their file for one call and dropped after it.
 /// It has no `Debug` and no `Display`, so nothing can print it.
-struct Key(String);
+pub(crate) struct Key(String);
+
+impl Key {
+    /// The key itself, for the one header it goes in.
+    pub(crate) fn secret(&self) -> &str {
+        &self.0
+    }
+}
 
 /// The key in the file at `path`. A file that holds anything but one key is
 /// refused, and no message says what the file holds.
-fn read_key(path: &Path) -> Result<Key, String> {
+pub(crate) fn read_key(path: &Path) -> Result<Key, String> {
     let about = fs::metadata(path)
         .map_err(|_| "There is no key file at that path, or the app cannot read it.".to_string())?;
     if about.is_dir() {
@@ -494,7 +501,7 @@ fn read_key(path: &Path) -> Result<Key, String> {
 }
 
 /// A warning when other accounts on this computer can read the key file.
-fn warning_for(path: &Path) -> Option<String> {
+pub(crate) fn warning_for(path: &Path) -> Option<String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -509,7 +516,7 @@ fn warning_for(path: &Path) -> Option<String> {
 }
 
 /// This computer's home folder, for a path that starts with `~/`.
-fn home() -> Option<PathBuf> {
+pub(crate) fn home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)

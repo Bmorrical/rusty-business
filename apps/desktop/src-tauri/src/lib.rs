@@ -12,6 +12,7 @@ mod stack;
 mod starter;
 mod uninstall;
 mod update;
+mod web;
 mod workspace;
 
 use tauri::Manager;
@@ -57,9 +58,15 @@ pub fn run() {
             app.manage(outside::Outside::new(data.join("outside.json")));
             // The models switched off: on this computer, or outside it.
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
+            // Web search: the path to a Brave key, never the key.
+            app.manage(web::Web::new(data.join("web.json")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            web::web_status,
+            web::set_web_key,
+            web::remove_web_key,
+            web::web_search,
             engine::engine_status,
             engine::chat_stream,
             engine::stop_chat,

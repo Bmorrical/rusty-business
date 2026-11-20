@@ -15,6 +15,7 @@ The desktop app's Rust code.
 | `deactivated.rs` | The models switched off: left out of questions, grading, and comparisons, with their files kept |
 | `uninstall.rs` | Uninstall: moves a model's folder or file to the Trash, never deletes |
 | `outside.rs`  | The engines outside this computer, Grok, GPT, Claude, and Gemini: keeps the path to each of the person's keys, never a key, and asks xAI's, OpenAI's, Anthropic's, or Google's API through the gate |
+| `web.rs`      | Web search: while Settings allows it and the gate is on, a model's search goes to Brave Search's API with the person's key, kept as a path, or to DuckDuckGo's plain results page without one |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, and opens this system's file in the browser |
