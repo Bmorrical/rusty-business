@@ -60,16 +60,20 @@ Release puts the app on a GitHub release named for its version, such as
 `Rusty-Business-linux-x64.deb`, `Rusty-Business-linux-x64.rpm`, and
 `Rusty-Business-linux-x64.tar.gz`, those four with no engine inside yet, and a
 checksum for each. It is marked as the newest release, which is the one the README's
-download links find.
+download links find. Install and restart reads two more:
+`Rusty-Business-mac-arm64.app.tar.gz`, the same Mac app packed for the app to
+put in place, with its checksum, and `latest.json`, which names each file a
+copy installs over and holds its signature.
 
 | Job       | Machine                  | What it does                                                   |
 | --------- | ------------------------ | -------------------------------------------------------------- |
 | `gate`    | as above                 | The whole gate. Nothing below starts until it is green         |
-| `mac`     | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg` and its checksum for the sign job. It is handed no secret |
-| `sign`    | macOS, Apple silicon, a Mac of its own | Runs `scripts/mac-sign.sh` on the `.dmg` from `mac`. With the switch off, it leaves the `.dmg` as it is. With it on, it signs and notarizes the app and the `.dmg`. Either way it keeps them for the next job and says which it did |
+| `mac`     | macOS, Apple silicon     | Runs `make dmg`, the command a person runs, and keeps the `.dmg`, the `.app.tar.gz`, and their checksums for the sign job. It is handed no secret |
+| `sign`    | macOS, Apple silicon, a Mac of its own | Runs `scripts/mac-sign.sh` on the `.dmg` from `mac`. With the switch off, it leaves the `.dmg` as it is. With it on, it signs and notarizes the app and the `.dmg`, and packs the `.app.tar.gz` again around the signed app. Either way it keeps them for the next jobs and says which it did |
 | `windows` | Windows, Intel or AMD    | Runs `scripts/windows-app.sh` in Git Bash, the command a person runs, and keeps the `.exe` and its checksum for the next job |
 | `linux`   | Linux, Intel or AMD      | Works in Ubuntu 22.04's image, pinned by digest, so the packages start on Ubuntu 22.04 and Debian 12 too (a program built against a newer C library does not start on an older one). Installs WebKitGTK, OpenSSL, and a C compiler with `apt-get`, runs `scripts/linux-app.sh`, the command a person runs, and keeps the `.deb`, the `.rpm`, the `.tar.gz`, and their checksums for the next job |
-| `publish` | Linux                    | Checks all five checksums and that the app's three version numbers agree, then makes the release and its tag at this commit, with the steps to open the Mac app as it went out, signed or not |
+| `updater` | Linux                    | Runs `scripts/updater.mjs`, which signs the `.app.tar.gz`, the `.exe`, the `.deb`, and the `.rpm` with the Tauri key and writes `latest.json`, naming each one with its signature. It builds nothing, and keeps only `latest.json` for the next job |
+| `publish` | Linux                    | Checks each signature in `latest.json` against the public key in `tauri.conf.json`, all six checksums, and that the app's three version numbers agree, then makes the release and its tag at this commit, with the steps to open the Mac app as it went out, signed or not |
 
 A release that is out is never changed. When the version's tag is already
 on GitHub, the run stops, so publishing again means raising the version in
@@ -98,11 +102,24 @@ unsigned by mistake.
 `scripts/mac-sign.sh` takes the app out of the `.dmg`, signs every program
 file in it, the engine's included, with the hardened runtime and a secure
 timestamp, signs the app, and has Apple notarize it. Then it packs the
-`.dmg` again the way `make dmg` does, and signs and notarizes that too. The
+`.app.tar.gz` and the `.dmg` again the way `make dmg` does, and signs and
+notarizes the `.dmg` too. The
 certificate goes into a keychain made for the run, which is removed when
 it ends. The script refuses to sign anywhere but in a GitHub run.
 `scripts/mac-sign.test.mjs` checks it, with made-up secrets, so nothing is
 signed by a test.
+
+### Signing for Install and restart
+
+Install and restart installs a file only when its signature matches the
+public key built into the app, in `apps/desktop/src-tauri/tauri.conf.json`.
+The private key and its password are two secrets of the `release`
+environment: `TAURI_SIGNING_PRIVATE_KEY`, the text of the key file, and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. A missing secret, a wrong password, or a
+key that does not match the public key stops the run before anything goes
+out. `scripts/updater.mjs` signs in minisign's format with Node's own crypto,
+and `scripts/updater.test.mjs` checks it with keys made for each run, so no
+real key is used by a test.
 
 `scripts/release.sh` makes the release, and `scripts/release.test.mjs`
 checks what it asks GitHub to do, with a stand-in `gh`, so nothing is
@@ -143,17 +160,20 @@ The gate then judges what actually landed on `main`.
 - The registry token reaches Docker only on its standard input, never on a
   command line. In Release, the token reaches `gh` only through the release
   step's own `env:`.
-- The Mac signing secrets and the switch live in the `release` environment,
-  and only the `sign` job names it. That job runs on a Mac of its own and
-  runs no package the build fetched. No other secret is used.
+- The Mac signing secrets, the switch, and the Tauri key live in the
+  `release` environment, and only the `sign` and `updater` jobs name it.
+  Each runs on a computer of its own and runs no package the build fetched.
+  Only the `updater` job's one step is handed the Tauri key. No other secret
+  is used.
 
 `scripts/workflows.test.mjs` checks these rules, that every job in
 `deploy.yml` and `release.yml` waits for the gate, that Deploy builds each
 kind of image on its own kind of computer before it joins them, and that
 Release builds the Mac app on a Mac with `make dmg`, the Windows
 installer on Windows with `scripts/windows-app.sh`, and the Linux packages
-on Linux with `scripts/linux-app.sh`, and signs the Mac app only in its
-`sign` job, behind the switch. It runs with
+on Linux with `scripts/linux-app.sh`, signs the Mac app only in its
+`sign` job, behind the switch, and signs the files Install and restart puts
+in place only in its `updater` job. It runs with
 `make test-repo`, so the gate checks its own rules.
 
 There is no README directly in `.github`: GitHub would show it as the

@@ -87,7 +87,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   window says so, and Download opens this system's file in the browser: the
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
   GitHub when the window opens, once a day, and when you click Check for
-  updates. It installs nothing itself.
+  updates. The check itself downloads nothing.
 - **The outbound gate.** A switch at the foot of the window, off until you
   turn it on. While it is off, nothing leaves the computer: no check for a
   new version, no download, and no start of the stack. Turning it off stops
@@ -153,3 +153,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   switched off is left out of questions, grading, and comparisons, and its
   files stay. Uninstall asks first, then moves a model on this computer to
   the Trash, or the Recycle Bin on Windows. Nothing is deleted.
+- **Install and restart.** Where this copy came from the `.dmg`, the
+  `.exe`, the `.deb`, or the `.rpm`, the notice of a new version offers
+  Install and restart, with Download beside it. Nothing downloads until you
+  click it. Then the app fetches the release's `latest.json` and this
+  system's file through the outbound gate, installs the file only when its
+  signature matches the key built into the app, and opens the new version.
+  The Release workflow signs each of those files and writes `latest.json`.
+  A copy unpacked from the `.tar.gz` updates by download.
