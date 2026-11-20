@@ -44,6 +44,7 @@ import {
   graderFor,
   gradesLine,
   groups,
+  installButton,
   installLine,
   isOutside,
   keptPicks,
@@ -388,6 +389,25 @@ test("a new version is shown until Later is chosen for it", () => {
 test("the notice says which version is ready and what Download opens", () => {
   assert.equal(updateLine(update), "Rusty Business™ 0.5.0 is ready.");
   assert.equal(updateDetail(update), "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser.");
+  // A copy that does not install new versions itself keeps Download alone.
+  assert.equal(
+    updateDetail({ ...update, install: false }),
+    "This is 0.4.0. Download opens Rusty-Business-mac-arm64.dmg in your browser.",
+  );
+});
+
+// "when can we do an in app install rather than a new dmg download? is that
+// after the signing? if we can do it now, then roll that next", then "Click to
+// install": the notice shows Install and restart, nothing downloads until it
+// is clicked, and Download stays beside it.
+test("where this copy installs new versions, the notice names Install and restart first", () => {
+  const installs = { ...update, install: true };
+  assert.equal(
+    updateDetail(installs),
+    "This is 0.4.0. Install and restart puts 0.5.0 in place of this copy and opens it. Download opens Rusty-Business-mac-arm64.dmg in your browser.",
+  );
+  assert.equal(installButton(false), "Install and restart");
+  assert.equal(installButton(true), "Installing...");
 });
 
 // "is the user able to click a refresh button? If not, I want that.", then

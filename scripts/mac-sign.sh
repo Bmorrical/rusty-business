@@ -28,8 +28,9 @@
 # and a secure timestamp, and no entitlement, then signs the app, which seals
 # them. The engine runs under the hardened runtime as it is, once every part
 # carries the same signer. Apple notarizes the app, the ticket is stapled to
-# it, the .dmg is packed again around it the way `make dmg` packs it, and the
-# .dmg is signed, notarized, and stapled too.
+# it, the .app's .tar.gz (the file Install and restart puts in place) and the
+# .dmg are packed again around it the way `make dmg` packs them, and the .dmg
+# is signed, notarized, and stapled too.
 #
 # It signs only on GitHub's own Mac, in a Release run. The certificate goes
 # into a keychain of its own, made for this run in the runner's temporary
@@ -86,6 +87,7 @@ done
 [ "$(uname -s)/$(uname -m)" = Darwin/arm64 ] || fail "Mac signing runs on a Mac with Apple silicon. Nothing was signed."
 
 DMG=Rusty-Business-mac-arm64.dmg
+APP_TGZ=Rusty-Business-mac-arm64.app.tar.gz
 TAURI=apps/desktop/src-tauri
 WORK=$(pwd -P)/$TAURI/target/mac
 [ -f "$TAURI/tauri.conf.json" ] && [ -f "$WORK/$DMG" ] && [ -f "$WORK/$DMG.sha256" ] ||
@@ -165,11 +167,11 @@ notarize() {
 # --- The app, out of the .dmg -------------------------------------------------
 
 mkdir "$scratch/built" "$scratch/app"
-hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG"
+hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG" >/dev/null
 mounted=1
 [ -d "$scratch/built/$APP.app" ] || fail "The .dmg holds no $APP.app. Nothing was signed."
 ditto "$scratch/built/$APP.app" "$scratch/app/$APP.app"
-hdiutil detach -quiet "$scratch/built"
+hdiutil detach "$scratch/built" >/dev/null
 mounted=""
 ln -s /Applications "$scratch/app/Applications"
 
@@ -198,11 +200,34 @@ xcrun stapler staple "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute "$app"
 
+# --- The .app's .tar.gz, packed again around the stapled app --------------------
+
+rm -f "$WORK/$APP_TGZ" "$WORK/$APP_TGZ.sha256"
+tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C "$scratch/app" "$APP.app"
+(cd "$WORK" && shasum -a 256 "$APP_TGZ" >"$APP_TGZ.sha256")
+
 # --- The .dmg, packed again around the stapled app ------------------------------
 
+# Brad, 2026-11-20, of the 0.7.0 release run: "failed". Its Mac build packed
+# the app, then stopped in hdiutil with no word of why, since -quiet closes
+# hdiutil's error output as well as its own. So its own output goes and its
+# errors stay, and a pack that fails is tried again, twice, because a build
+# machine's disk is now and then busy for a moment. mac-app.sh holds the
+# same lines, and packs the .dmg with them first.
+pack_dmg() {
+  local try
+  for try in 1 2 3; do
+    if hdiutil create -ov -volname "${APP}™" -srcfolder "$1" -format ULMO -o "$WORK/$DMG" >/dev/null; then
+      hdiutil verify "$WORK/$DMG" >/dev/null
+      return
+    fi
+    [ "$try" = 3 ] || { echo "hdiutil could not pack the .dmg, try $try of 3. Trying again in 20 seconds." >&2; sleep 20; }
+  done
+  fail "hdiutil could not pack the .dmg in 3 tries. What it said is above."
+}
+
 rm -f "$WORK/$DMG" "$WORK/$DMG.sha256"
-hdiutil create -quiet -volname "${APP}™" -srcfolder "$scratch/app" -format ULMO -o "$WORK/$DMG"
-hdiutil verify -quiet "$WORK/$DMG"
+pack_dmg "$scratch/app"
 sign "$WORK/$DMG"
 codesign --verify --strict "$WORK/$DMG"
 notarize "$WORK/$DMG"

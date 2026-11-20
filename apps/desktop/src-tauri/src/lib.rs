@@ -26,6 +26,10 @@ pub fn run() {
     context.package_info_mut().name = "Rusty Business™".to_string();
 
     let app = tauri::Builder::default()
+        // Checks a new version's signature and puts it in place. It reaches
+        // nothing itself: `update::install_update` hands it what was fetched
+        // through the outbound gate.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine::Chats::default())
         .manage(update::Updates::default())
         .setup(|app| {
@@ -94,6 +98,7 @@ pub fn run() {
             attachments::pick_files,
             update::check_update,
             update::open_update,
+            update::install_update,
             gate::gate_status,
             gate::set_gate,
             makers::makers_status,
@@ -110,16 +115,21 @@ pub fn run() {
         .build(context)
         .expect("error while building tauri application");
 
-    // When the app quits, it stops the engine and the stack it started. One
-    // that was already running is not the app's to stop.
     app.run(|app, event| {
         if let tauri::RunEvent::Exit = event {
-            if let Some(starter) = app.try_state::<starter::Starter>() {
-                starter.stop();
-            }
-            if let Some(stack) = app.try_state::<stack::Stack>() {
-                stack.stop();
-            }
+            stop_everything(app);
         }
     });
+}
+
+/// When the app quits, or a new version is put in its place, it stops the
+/// engine and the stack it started. One that was already running is not the
+/// app's to stop.
+pub(crate) fn stop_everything(app: &tauri::AppHandle) {
+    if let Some(starter) = app.try_state::<starter::Starter>() {
+        starter.stop();
+    }
+    if let Some(stack) = app.try_state::<stack::Stack>() {
+        stack.stop();
+    }
 }

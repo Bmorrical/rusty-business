@@ -12,7 +12,8 @@
 // anywhere but GitHub's own Mac; when it touches any keychain but the one it
 // makes for the run, or leaves that one behind; when a secret could reach the
 // log; when it signs without the hardened runtime or a timestamp, or with an
-// entitlement; or when it packs the .dmg another way than `make dmg` does.
+// entitlement; when it packs the .dmg another way than `make dmg` does; or
+// when hdiutil could stop the run and the log say nothing of why.
 //
 // Every run here is of a copy of the script in a folder of its own, which
 // holds no .dmg, so no run gets as far as a keychain or a signature.
@@ -239,6 +240,7 @@ test("it signs with a keychain of its own, in the runner's temporary folder, and
   assert.deepEqual(commandsWith(/(^|[\s(|;&])rm /), [
     'rm -rf "$scratch"',
     'rm -f "$scratch/certificate.p12"',
+    'rm -f "$WORK/$APP_TGZ" "$WORK/$APP_TGZ.sha256"',
     'rm -f "$WORK/$DMG" "$WORK/$DMG.sha256"',
   ]);
   assert.ok(!/\$HOME|~\//.test(COMMANDS.join('\n')), 'the script reaches into the home folder');
@@ -246,7 +248,7 @@ test("it signs with a keychain of its own, in the runner's temporary folder, and
 
 test('it opens the .dmg read-only, after its checksum, and takes the app out to sign it', () => {
   assert.deepEqual(commandsWith(/hdiutil attach/), [
-    'hdiutil attach -quiet -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG"',
+    'hdiutil attach -readonly -nobrowse -noautoopen -mountpoint "$scratch/built" "$WORK/$DMG" >/dev/null',
   ]);
   assert.ok(firstAt(/hdiutil attach/) > firstAt(LAST_CHECK));
   assert.ok(COMMANDS.includes('ditto "$scratch/built/$APP.app" "$scratch/app/$APP.app"'));
@@ -289,10 +291,58 @@ test('the app and the .dmg are each notarized, stapled, and checked, and only th
   assert.ok(COMMANDS.some((command) => command.startsWith('fail "Apple did not accept $(basename "$1"): ${status:-no answer}. Nothing was published."')));
 });
 
+// Brad, 2026-11-19: "when can we do an in app install rather than a new dmg
+// download?" Install and restart puts the app from the .app.tar.gz in place,
+// so once the app is signed, that file holds the signed, stapled app too.
+test('the .app.tar.gz is packed again around the stapled app, the way make dmg packs it, under the same name, before the next job is told', () => {
+  assert.ok(setting(SCRIPT, 'APP_TGZ'), 'the script names no .app.tar.gz');
+  assert.equal(setting(SCRIPT, 'APP_TGZ'), setting(MAC_APP, 'APP_TGZ'));
+  const packed = commandsOf(MAC_APP).filter((command) => /^tar\s.*-czf/.test(command));
+  assert.equal(packed.length, 1);
+  assert.deepEqual(commandsWith(/^tar\s/), [packed[0].replace('"$WORK/app"', '"$scratch/app"')]);
+  const order = [
+    /^xcrun stapler validate "\$app"$/,
+    /^spctl --assess --type execute "\$app"$/,
+    /^rm -f "\$WORK\/\$APP_TGZ" "\$WORK\/\$APP_TGZ\.sha256"$/,
+    /^tar\s/,
+    /^\(cd "\$WORK" && shasum -a 256 "\$APP_TGZ" >"\$APP_TGZ\.sha256"\)$/,
+    /^tell signed true$/,
+  ].map(firstAt);
+  assert.ok(order.every((at) => at >= 0), `a step is missing: ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the steps are out of order');
+});
+
 test('the .dmg is packed again the way make dmg packs it, under the same name', () => {
   assert.equal(setting(SCRIPT, 'DMG'), setting(MAC_APP, 'DMG'));
-  const made = commandsOf(MAC_APP).filter((command) => command.startsWith('hdiutil create '));
-  assert.equal(made.length, 1);
-  assert.deepEqual(commandsWith(/^hdiutil create /), [made[0].replace('"$WORK/app"', '"$scratch/app"')]);
+  // The same lines pack it, tried again on a busy disk, and checked:
+  // mac-app.test.mjs runs them.
+  const packDmg = (text) => /^pack_dmg\(\) \{\n[\s\S]*?\n\}$/m.exec(text)?.[0];
+  assert.ok(packDmg(MAC_APP), 'mac-app.sh has no pack_dmg');
+  assert.equal(packDmg(SCRIPT), packDmg(MAC_APP));
+  assert.deepEqual(commandsWith(/^pack_dmg "/), ['pack_dmg "$scratch/app"']);
+  assert.deepEqual(commandsOf(MAC_APP).filter((command) => command.startsWith('pack_dmg "')), ['pack_dmg "$WORK/app"']);
   assert.ok(COMMANDS.includes('ln -s /Applications "$scratch/app/Applications"'));
+  const order = [
+    /^ln -s \/Applications "\$scratch\/app\/Applications"$/,
+    /^rm -f "\$WORK\/\$DMG" "\$WORK\/\$DMG\.sha256"$/,
+    /^pack_dmg "\$scratch\/app"$/,
+    /^sign "\$WORK\/\$DMG"$/,
+  ].map(firstAt);
+  assert.ok(order.every((at) => at >= 0), `a step is missing: ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the steps are out of order');
+});
+
+// Brad, 2026-11-20, of the 0.7.0 release run: "failed". hdiutil stopped the
+// Mac build, and -quiet had closed its error output, so the log said nothing
+// of why.
+test('hdiutil keeps its errors in the log, but where the run is already ending', () => {
+  const ending = COMMANDS.slice(firstAt(/^finish\(\) \{$/), firstAt(/^trap finish EXIT$/));
+  const used = commandsWith(/(^|[\s(|;&])hdiutil /).filter((command) => !ending.includes(command));
+  assert.equal(used.length, 4, used.join('\n'));
+  for (const command of used) {
+    assert.ok(!/-quiet|2>/.test(command), `hdiutil's errors are kept out of the log: ${command}`);
+  }
+  assert.deepEqual(ending.filter((command) => /hdiutil /.test(command)), [
+    'hdiutil detach -quiet -force "$scratch/built" >/dev/null 2>&1 || true',
+  ]);
 });

@@ -12,14 +12,17 @@
 // system, removes anything outside target/mac, downloads anything not pinned
 // by its checksum, or installs a package not pinned by its hash. They also
 // fail when the app stops finding the engine where the script puts it, or the
-// Mac stops showing the name with its mark.
+// Mac stops showing the name with its mark, and when a .dmg that does not pack
+// says nothing of why, or is not packed again.
 //
 // Most checks read the files as text. One runs the script with a wrong
-// argument, which stops it before it fetches or builds anything.
+// argument, which stops it before it fetches or builds anything, and one runs
+// the lines that pack the .dmg, with a stand-in for hdiutil.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -274,20 +277,147 @@ test('the app looks first for the engine it carries, where the script puts it', 
   assert.ok(rest > first, 'the usual folders come before the carried engine');
 });
 
+// Brad, 2026-11-19: "when can we do an in app install rather than a new dmg
+// download?" Install and restart unpacks the .app.tar.gz and puts the one
+// app inside in place.
+test('the .app.tar.gz holds the checked app alone, with none of this Mac\'s metadata, and its checksum beside it', () => {
+  assert.equal(valueOf('APP_TGZ'), 'Rusty-Business-mac-arm64.app.tar.gz');
+  assert.deepEqual(commandsWith(/^tar\s.*-czf/), [
+    'tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C "$WORK/app" "$APP.app"',
+  ]);
+  const order = [
+    /^codesign --verify --deep --strict "\$app"$/,
+    /^rm -f "\$WORK\/\$APP_TGZ" "\$WORK\/\$APP_TGZ\.sha256"$/,
+    /^tar\s.*-czf/,
+    /^\(cd "\$WORK" && shasum -a 256 "\$APP_TGZ" >"\$APP_TGZ\.sha256"\)$/,
+    // The link to Applications is for the .dmg, and stays out of the archive.
+    /^ln -s \/Applications "\$WORK\/app\/Applications"$/,
+  ].map(firstAt);
+  assert.ok(order.every((at) => at >= 0), `a step is missing: ${order}`);
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the steps are out of order');
+});
+
 test('the app is checked once it is signed, and the .dmg once it is packed, with its checksum beside it', () => {
   const order = [
     /^ditto "\$engine" "\$app\/Contents\/Resources\/engine"$/,
     /^codesign --force --deep --sign - "\$app"$/,
     /^codesign --verify --deep --strict "\$app"$/,
-    // Braces, so the macOS Bash does not read the ™ as part of the name.
-    /^hdiutil create -quiet -volname "\$\{APP\}™" -srcfolder "\$WORK\/app" -format ULMO -o "\$WORK\/\$DMG"$/,
-    /^hdiutil verify -quiet "\$WORK\/\$DMG"$/,
+    /^pack_dmg "\$WORK\/app"$/,
     /^\(cd "\$WORK" && shasum -a 256 "\$DMG" >"\$DMG\.sha256"\)$/,
   ].map(firstAt);
   assert.ok(order.every((at) => at >= 0), `a step is missing: ${order}`);
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'the steps are out of order');
+  // Braces, so the macOS Bash does not read the ™ as part of the name.
+  assert.deepEqual(commandsWith(/(^|[\s(|;&])hdiutil /), [
+    'if hdiutil create -ov -volname "${APP}™" -srcfolder "$1" -format ULMO -o "$WORK/$DMG" >/dev/null; then',
+    'hdiutil verify "$WORK/$DMG" >/dev/null',
+  ]);
   assert.equal(valueOf('DMG'), 'Rusty-Business-mac-arm64.dmg');
   assert.equal(valueOf('APP'), '$(/usr/bin/plutil -extract productName raw -o - "$TAURI/tauri.conf.json")');
+});
+
+// The lines that pack the .dmg, as the script holds them.
+const PACK_DMG = /^pack_dmg\(\) \{\n[\s\S]*?\n\}$/m.exec(SCRIPT)?.[0];
+
+// A stand-in for hdiutil, which writes down how it was run. It fails to pack
+// as many times as it is told, the way a busy disk makes the real one fail,
+// and with -quiet it closes its output, the way the real one does.
+const FAKE_HDIUTIL = `#!/bin/bash
+for arg in "$@"; do [ "$arg" = -quiet ] && exec >/dev/null 2>&1; done
+echo "$*" >>"$FAKE_CALLS"
+case "$1" in
+  create)
+    if [ "$(grep -c '^create ' "$FAKE_CALLS")" -le "$CREATE_FAILS" ]; then
+      echo 'hdiutil: create failed - Resource busy' >&2
+      exit 1
+    fi
+    echo "created: \${@: -1}" ;;
+  verify)
+    if [ "$VERIFY_FAILS" = 1 ]; then
+      echo 'hdiutil: verify: checksum failed' >&2
+      exit 1
+    fi
+    echo 'verified' ;;
+esac
+`;
+
+/**
+ * Runs the script's pack_dmg on its own, with the stand-in for hdiutil, and
+ * with a sleep that only says it slept. Returns the run and how hdiutil was
+ * run each time, with the run's folder shown as WORK.
+ */
+function pack({ createFails = 0, verifyFails = false } = {}) {
+  const folder = mkdtempSync(path.join(tmpdir(), 'mac-app-pack-'));
+  try {
+    const bin = path.join(folder, 'bin');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'hdiutil'), FAKE_HDIUTIL, { mode: 0o755 });
+    const calls = path.join(folder, 'calls');
+    writeFileSync(calls, '');
+    const script = [
+      'set -euo pipefail',
+      'fail() { echo "$1" >&2; exit 1; }',
+      'sleep() { echo "slept $1" >&2; }',
+      `APP='${CONF.productName}' WORK='${folder}' DMG=${valueOf('DMG')}`,
+      PACK_DMG,
+      `pack_dmg '${folder}/app'`,
+      'echo packed',
+    ].join('\n');
+    const run = spawnSync('/bin/bash', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        FAKE_CALLS: calls,
+        CREATE_FAILS: String(createFails),
+        VERIFY_FAILS: verifyFails ? '1' : '0',
+      },
+    });
+    const ran = readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => line.replaceAll(folder, 'WORK'));
+    return { status: run.status, stdout: run.stdout, stderr: run.stderr, ran };
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+const CREATE = `create -ov -volname ${CONF.productName}™ -srcfolder WORK/app -format ULMO -o WORK/${valueOf('DMG')}`;
+const VERIFY = `verify WORK/${valueOf('DMG')}`;
+const BUSY = 'hdiutil: create failed - Resource busy\n';
+const again = (n) => `hdiutil could not pack the .dmg, try ${n} of 3. Trying again in 20 seconds.\nslept 20\n`;
+
+// Brad, 2026-11-20, of the 0.7.0 release run: "failed". Its Mac build packed
+// the app, then stopped in hdiutil, and the log said nothing of why: the
+// script ran hdiutil with -quiet, which closes its error output too.
+test('a .dmg that does not pack says why, and is packed again, twice at most, then checked', () => {
+  assert.ok(PACK_DMG, 'the script has no pack_dmg');
+
+  // Packed the first time: what hdiutil prints to its output stays out of the
+  // log. (The real one also writes notes to its error output, and those stay.)
+  assert.deepEqual(pack(), { status: 0, stdout: 'packed\n', stderr: '', ran: [CREATE, VERIFY] });
+
+  // A busy disk twice: each error is in the log, and the third try packs it.
+  assert.deepEqual(pack({ createFails: 2 }), {
+    status: 0,
+    stdout: 'packed\n',
+    stderr: BUSY + again(1) + BUSY + again(2),
+    ran: [CREATE, CREATE, CREATE, VERIFY],
+  });
+
+  // Three times: the run stops, with each of hdiutil's errors above its own.
+  assert.deepEqual(pack({ createFails: 3 }), {
+    status: 1,
+    stdout: '',
+    stderr: `${BUSY + again(1) + BUSY + again(2) + BUSY}hdiutil could not pack the .dmg in 3 tries. What it said is above.\n`,
+    ran: [CREATE, CREATE, CREATE],
+  });
+
+  // A .dmg that packs and does not pass its check stops the run at once, and
+  // says why: a check that fails is not a busy disk, so it is not tried again.
+  assert.deepEqual(pack({ verifyFails: true }), {
+    status: 1,
+    stdout: '',
+    stderr: 'hdiutil: verify: checksum failed\n',
+    ran: [CREATE, VERIFY],
+  });
 });
 
 test('the Mac shows the name with its mark, and the file name stays plain', () => {

@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Puts the Mac app, the Windows installer, and the Linux packages on a GitHub
-# release, where the README's download links find them. The Release workflow
-# runs it after a green gate, with the .dmg from `make dmg`, the .exe from
+# release, where the README's download links find them, and the list
+# Install and restart reads. The Release workflow runs it after a green gate,
+# with the .dmg and the .app.tar.gz from `make dmg`, the .exe from
 # scripts/windows-app.sh, the .deb, the .rpm, and the .tar.gz from
-# scripts/linux-app.sh, and their checksums downloaded into one folder:
+# scripts/linux-app.sh, and their checksums, and latest.json from
+# scripts/updater.mjs, downloaded into one folder:
 #
 #   scripts/release.sh publish dist
 #
 # It checks that the app's three version numbers agree, that the folder
-# holds the five downloads and their checksums and nothing else, and that each
-# checksum matches its download. It stops when the version's tag is already
-# on GitHub: a release that is out is never changed, so publishing again
-# needs a new version. Then it makes release v<version> at this commit, with
-# the ten files, marked as the newest, which is the one the README links.
+# holds the six downloads and their checksums and latest.json and nothing
+# else, and that each checksum matches its download. The workflow has checked
+# latest.json's signatures already, with scripts/updater.mjs. It stops when
+# the version's tag is already on GitHub: a release that is out is never
+# changed, so publishing again needs a new version. Then it makes release
+# v<version> at this commit, with the thirteen files, marked as the newest,
+# which is the one the README links and Install and restart reads.
 #
 # It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, GH_TOKEN,
 # which the workflow passes on, and MAC_SIGNED, true or false, from the sign
@@ -22,12 +26,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DMG=Rusty-Business-mac-arm64.dmg
+APP_TGZ=Rusty-Business-mac-arm64.app.tar.gz
 EXE=Rusty-Business-windows-x64-setup.exe
 DEB=Rusty-Business-linux-x64.deb
 RPM=Rusty-Business-linux-x64.rpm
 TGZ=Rusty-Business-linux-x64.tar.gz
-# The five, in the order the release lists them.
-DOWNLOADS=("${DMG}" "${EXE}" "${DEB}" "${RPM}" "${TGZ}")
+# The six, in the order the release lists them, and the list Install and
+# restart reads, which goes last.
+DOWNLOADS=("${DMG}" "${APP_TGZ}" "${EXE}" "${DEB}" "${RPM}" "${TGZ}")
+MANIFEST=latest.json
 USAGE="use: scripts/release.sh publish <folder>"
 
 fail() {
@@ -107,6 +114,8 @@ On Linux, run this, with the name of the file you downloaded:
 
     sha256sum -c ${DEB}.sha256
 
+A copy of 0.8.0 or later that finds a newer version offers Install and restart: it reads ${MANIFEST}, fetches this system's file (on a Mac, ${APP_TGZ}), and installs it only when its signature matches the key built into the app. A copy unpacked from ${TGZ} updates by download.
+
 Built from https://github.com/${repository}/commit/${commit} by the Release workflow, after a green gate.
 NOTES
 }
@@ -121,10 +130,11 @@ publish() {
     for name in "${DOWNLOADS[@]}"; do
         files+=("${dir}/${name}" "${dir}/${name}.sha256")
     done
+    files+=("${dir}/${MANIFEST}")
     listed="$(cd "${dir}" && ls -A | LC_ALL=C sort | tr '\n' ' ')"
-    expected="$(printf '%s\n' "${DOWNLOADS[@]}" "${DOWNLOADS[@]/%/.sha256}" | LC_ALL=C sort | tr '\n' ' ')"
+    expected="$(printf '%s\n' "${DOWNLOADS[@]}" "${DOWNLOADS[@]/%/.sha256}" "${MANIFEST}" | LC_ALL=C sort | tr '\n' ' ')"
     [ "${listed}" = "${expected}" ] ||
-        fail "${dir} should hold ${DMG}, ${EXE}, ${DEB}, ${RPM}, ${TGZ}, and their .sha256 files, and nothing else, and holds: ${listed}"
+        fail "${dir} should hold ${DMG}, ${APP_TGZ}, ${EXE}, ${DEB}, ${RPM}, ${TGZ}, their .sha256 files, and ${MANIFEST}, and nothing else, and holds: ${listed}"
     for name in "${files[@]}"; do
         [ -f "${name}" ] && [ ! -L "${name}" ] && [ -s "${name}" ] ||
             fail "${name} is not a plain file with something in it"

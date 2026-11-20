@@ -2,7 +2,9 @@
 # Builds the Mac app with its engine inside, from this checkout alone.
 #
 #   scripts/mac-app.sh app   builds the app and opens it    (or: make app)
-#   scripts/mac-app.sh dmg   builds the app and packs a .dmg (or: make dmg)
+#   scripts/mac-app.sh dmg   builds the app and packs a .dmg (or: make dmg),
+#                            and the .app as a .tar.gz, the file Install and
+#                            restart puts in place
 #
 # Brad, 2026-11-17: "this should be must easier for the user to boot up, run
 # it in isolation, one command to rule it all, start a makefile"
@@ -51,6 +53,7 @@ PYTHON_URL=https://github.com/astral-sh/python-build-standalone/releases/downloa
 PYTHON_SHA256=ad8d0c637c0a36b967b310e2c07254f4d2ca8cabaa7699e55ed6290aceb481a2
 
 DMG=Rusty-Business-mac-arm64.dmg
+APP_TGZ=Rusty-Business-mac-arm64.app.tar.gz
 DESKTOP=apps/desktop
 TAURI=$DESKTOP/src-tauri
 WORK=$(pwd -P)/$TAURI/target/mac
@@ -186,11 +189,39 @@ if [ "$goal" = app ]; then
   exit 0
 fi
 
+# --- The .app as a .tar.gz, for Install and restart ------------------------
+#
+# Brad, 2026-11-19: "when can we do an in app install rather than a new dmg
+# download?" The updater unpacks this and puts the one .app inside in place,
+# so the archive holds that folder alone, with no Finder or extended
+# attributes of this Mac's.
+
+rm -f "$WORK/$APP_TGZ" "$WORK/$APP_TGZ.sha256"
+tar --no-mac-metadata --no-xattrs --no-acls --no-fflags -czf "$WORK/$APP_TGZ" -C "$WORK/app" "$APP.app"
+(cd "$WORK" && shasum -a 256 "$APP_TGZ" >"$APP_TGZ.sha256")
+
 # --- The .dmg ---------------------------------------------------------------
+
+# Brad, 2026-11-20, of the 0.7.0 release run: "failed". Its Mac build packed
+# the app, then stopped in hdiutil with no word of why, since -quiet closes
+# hdiutil's error output as well as its own. So its own output goes and its
+# errors stay, and a pack that fails is tried again, twice, because a build
+# machine's disk is now and then busy for a moment. mac-sign.sh holds the
+# same lines, and packs the .dmg again with them.
+pack_dmg() {
+  local try
+  for try in 1 2 3; do
+    if hdiutil create -ov -volname "${APP}™" -srcfolder "$1" -format ULMO -o "$WORK/$DMG" >/dev/null; then
+      hdiutil verify "$WORK/$DMG" >/dev/null
+      return
+    fi
+    [ "$try" = 3 ] || { echo "hdiutil could not pack the .dmg, try $try of 3. Trying again in 20 seconds." >&2; sleep 20; }
+  done
+  fail "hdiutil could not pack the .dmg in 3 tries. What it said is above."
+}
 
 ln -s /Applications "$WORK/app/Applications"
 rm -f "$WORK/$DMG" "$WORK/$DMG.sha256"
-hdiutil create -quiet -volname "${APP}™" -srcfolder "$WORK/app" -format ULMO -o "$WORK/$DMG"
-hdiutil verify -quiet "$WORK/$DMG"
+pack_dmg "$WORK/app"
 (cd "$WORK" && shasum -a 256 "$DMG" >"$DMG.sha256")
-echo "Built $WORK/$DMG"
+echo "Built $WORK/$DMG and $WORK/$APP_TGZ"

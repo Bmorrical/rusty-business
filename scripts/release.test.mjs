@@ -9,6 +9,12 @@
 // Brad, 2026-11-17, to a request for Linux downloads (.deb, .rpm, and
 // .tar.gz): "I got you in coming build". The same release carries those
 // three.
+//
+// Brad, 2026-11-19: "when can we do an in app install rather than a new dmg
+// download? is that after the signing? if we can do it now, then roll that
+// next". Install and restart reads latest.json from the newest release, and
+// on a Mac puts the app from the .app.tar.gz in place, so the release
+// carries both.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -38,6 +44,8 @@ const RECORD = '\u001e';
 
 const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
 const DMG = /^DMG=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
+const APP_TGZ = /^APP_TGZ=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
+const MANIFEST = 'latest.json';
 const EXE = /^EXE=(\S+)$/m.exec(read('scripts/windows-app.sh'))?.[1];
 const [DEB, RPM, TGZ] = ['DEB', 'RPM', 'TGZ'].map((name) => new RegExp(`^${name}=(\\S+)$`, 'm').exec(read('scripts/linux-app.sh'))?.[1]);
 const { version: VERSION } = JSON.parse(read('apps/desktop/package.json'));
@@ -67,19 +75,36 @@ function sha256(bytes) {
 /** What stands in for each Linux download, unless a test gives its own. */
 const LINUX = { deb: 'not really a .deb\n', rpm: 'not really an .rpm\n', tgz: 'not really a .tar.gz\n' };
 
+/** What stands in for the Mac's .app.tar.gz and latest.json, unless a test gives its own. */
+const APP = 'not really a packed app\n';
+const LATEST = '{"version": "not really latest.json"}\n';
+
 /**
- * A folder like the one the Release workflow downloads: the .dmg, the .exe,
- * the .deb, the .rpm, and the .tar.gz, and their checksums, as `make dmg`,
- * scripts/windows-app.sh, and scripts/linux-app.sh write them.
+ * A folder like the one the Release workflow downloads: the .dmg, the
+ * .app.tar.gz, the .exe, the .deb, the .rpm, and the .tar.gz, and their
+ * checksums, as `make dmg`, scripts/windows-app.sh, and scripts/linux-app.sh
+ * write them, and latest.json, as scripts/updater.mjs writes it.
  */
 function distIn(
   folder,
-  { dmg = 'not really a disk image\n', checksum, exe = 'not really an installer\n', exeChecksum, linux = {}, linuxChecksums = {} } = {},
+  {
+    dmg = 'not really a disk image\n',
+    checksum,
+    app = APP,
+    appChecksum,
+    exe = 'not really an installer\n',
+    exeChecksum,
+    linux = {},
+    linuxChecksums = {},
+    latest = LATEST,
+  } = {},
 ) {
   const dist = path.join(folder, 'dist');
   mkdirSync(dist);
   writeFileSync(path.join(dist, DMG), dmg);
   writeFileSync(path.join(dist, `${DMG}.sha256`), checksum ?? `${sha256(dmg)}  ${DMG}\n`);
+  writeFileSync(path.join(dist, APP_TGZ), app);
+  writeFileSync(path.join(dist, `${APP_TGZ}.sha256`), appChecksum ?? `${sha256(app)}  ${APP_TGZ}\n`);
   writeFileSync(path.join(dist, EXE), exe);
   writeFileSync(path.join(dist, `${EXE}.sha256`), exeChecksum ?? `${sha256(exe)}  ${EXE}\n`);
   for (const [kind, name] of [['deb', DEB], ['rpm', RPM], ['tgz', TGZ]]) {
@@ -87,6 +112,7 @@ function distIn(
     writeFileSync(path.join(dist, name), bytes);
     writeFileSync(path.join(dist, `${name}.sha256`), linuxChecksums[kind] ?? `${sha256(bytes)}  ${name}\n`);
   }
+  writeFileSync(path.join(dist, MANIFEST), latest);
   return dist;
 }
 
@@ -153,12 +179,14 @@ function createOf(tag, version, notes, dist) {
     '--notes',
     notes,
     '--latest',
-    ...[DMG, EXE, DEB, RPM, TGZ].flatMap((name) => [path.join(dist, name), path.join(dist, `${name}.sha256`)]),
+    ...[DMG, APP_TGZ, EXE, DEB, RPM, TGZ].flatMap((name) => [path.join(dist, name), path.join(dist, `${name}.sha256`)]),
+    path.join(dist, MANIFEST),
   ];
 }
 
-test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg, the .exe, the .deb, the .rpm, the .tar.gz, and their checksums, as the newest', () => {
+test('a release asks once whether the tag is there, then makes it at this commit, with the .dmg, the .app.tar.gz, the .exe, the .deb, the .rpm, the .tar.gz, their checksums, and latest.json, as the newest', () => {
   assert.ok(DMG, 'scripts/mac-app.sh names no .dmg');
+  assert.ok(APP_TGZ, 'scripts/mac-app.sh names no .app.tar.gz');
   assert.ok(EXE, 'scripts/windows-app.sh names no .exe');
   assert.ok(DEB && RPM && TGZ, 'scripts/linux-app.sh does not name its three downloads');
   let dist;
@@ -196,6 +224,9 @@ test('a release asks once whether the tag is there, then makes it at this commit
     `On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}`,
     `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.`,
     `    sha256sum -c ${DEB}.sha256`,
+    // Brad, 2026-11-19, asked how Install and restart should start: "Click
+    // to install". And for Linux: ".deb and .rpm".
+    `A copy of 0.8.0 or later that finds a newer version offers Install and restart: it reads ${MANIFEST}, fetches this system's file (on a Mac, ${APP_TGZ}), and installs it only when its signature matches the key built into the app. A copy unpacked from ${TGZ} updates by download.`,
     `https://github.com/${REPOSITORY}/commit/${COMMIT}`,
     'after a green gate',
   ]) {
@@ -217,13 +248,14 @@ test('a release asks once whether the tag is there, then makes it at this commit
       `### Released ${TAG}`,
       '',
       `- \`${DMG}\`: \`${sha256(dmg)}\``,
+      `- \`${APP_TGZ}\`: \`${sha256(APP)}\``,
       `- \`${EXE}\`: \`${sha256(exe)}\``,
       `- \`${DEB}\`: \`${sha256(LINUX.deb)}\``,
       `- \`${RPM}\`: \`${sha256(LINUX.rpm)}\``,
       `- \`${TGZ}\`: \`${sha256(LINUX.tgz)}\``,
       '',
     ].join('\n'),
-    'the run summary does not give the five checksums',
+    'the run summary does not give the six checksums',
   );
 });
 
@@ -287,7 +319,7 @@ test('a check that fails stops the run, and so does a release that fails', () =>
   assert.equal(made.summary, '', 'a failed release wrote a summary');
 });
 
-test('a folder that does not hold exactly the five downloads and their matching checksums reaches no gh call', () => {
+test('a folder that does not hold exactly the six downloads, their matching checksums, and latest.json reaches no gh call', () => {
   const dmg = 'not really a disk image\n';
   const sum = sha256(dmg);
   const exeSum = sha256('not really an installer\n');
@@ -349,6 +381,25 @@ test('a folder that does not hold exactly the five downloads and their matching 
       return dist;
     },
     'a .dmg that is a link': linked(DMG),
+    'no .app.tar.gz': without(APP_TGZ),
+    'no .app.tar.gz checksum': without(`${APP_TGZ}.sha256`),
+    'an empty .app.tar.gz': (folder) => distIn(folder, { app: '' }),
+    "the .dmg's checksum beside the .app.tar.gz": (folder) => distIn(folder, { appChecksum: `${sum}  ${APP_TGZ}\n` }),
+    'an .app.tar.gz checksum that names the .dmg': (folder) => distIn(folder, { appChecksum: `${sha256(APP)}  ${DMG}\n` }),
+    'an .app.tar.gz that is a link': linked(APP_TGZ),
+    'no latest.json': without(MANIFEST),
+    'an empty latest.json': (folder) => distIn(folder, { latest: '' }),
+    'a latest.json that is a link': linked(MANIFEST),
+    'a checksum of latest.json beside it': (folder) => {
+      const dist = distIn(folder);
+      writeFileSync(path.join(dist, `${MANIFEST}.sha256`), `${sha256(LATEST)}  ${MANIFEST}\n`);
+      return dist;
+    },
+    'a .sig beside the .app.tar.gz': (folder) => {
+      const dist = distIn(folder);
+      writeFileSync(path.join(dist, `${APP_TGZ}.sig`), 'x');
+      return dist;
+    },
     'no folder': (folder) => path.join(folder, 'missing'),
     'a file, not a folder': (folder) => {
       writeFileSync(path.join(folder, 'dist'), 'x');

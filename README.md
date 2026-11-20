@@ -42,7 +42,7 @@ until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
 OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
 with your own key.
 
-**Status:** version 0.7.0, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
@@ -98,7 +98,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   Face, over https and from nowhere else. The first time it starts the stack, Docker downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
-  out. Nothing you type goes with any of these three. The fourth is the
+  out. Install and restart downloads it from GitHub only when you click it.
+  Nothing you type goes with any of these three. The fourth is the
   outside engines, Grok, GPT, Claude, and Gemini: once you add one on the Installers
   page, with the path to a file that holds your own key, a question you ask it
   goes to its maker's API, xAI's for Grok, OpenAI's for GPT, Anthropic's
@@ -501,11 +502,15 @@ next.
   in [Run the chat window (macOS)](#run-the-chat-window-macos). Windows may stop
   the installer until you choose More info, then Run anyway. (On the
   roadmap: Signed installers.)
-- **A new version is a download.** When one is out, the window says so, and
-  Download opens this system's file from the release in your browser. The
-  app does not install it: you do, as the first time. Check for updates,
-  under the saved chats, asks at any time. While the outbound gate is off,
-  the app does not ask, and the button says to turn the gate on.
+- **Some copies update by download.** When a new version is out, the window
+  says so. Where this copy came from the `.dmg`, the `.exe`, the `.deb`, or
+  the `.rpm`, Install and restart puts the new version in its place and opens
+  it, once its signature matches; on Linux, the system asks for your password
+  first. A copy unpacked from the `.tar.gz`, or one run from inside the
+  `.dmg`, has Download alone: it opens this system's file in your browser,
+  and you install it as the first time. Check for updates, under the saved
+  chats, asks at any time. While the outbound gate is off, the app does not
+  ask, and the button says to turn the gate on.
 - **It does not install Docker.** The app starts the stack when Docker is
   on the computer and the gate is on. It does not put Docker there. The chat does not need the
   stack yet.

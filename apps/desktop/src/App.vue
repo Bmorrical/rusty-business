@@ -41,6 +41,7 @@ import {
   gradesLine,
   greeting,
   groups,
+  installButton,
   installLine,
   isOn,
   isOutside,
@@ -135,6 +136,7 @@ const updateOpened = ref("");
 const updateProblem = ref("");
 const updateChecking = ref(false);
 const updateChecked = ref("");
+const updateInstalling = ref(false);
 const gate = ref(false);
 const gateBusy = ref(false);
 const gateNote = ref("");
@@ -739,6 +741,26 @@ async function openUpdate(part) {
     if (part === "download") updateOpened.value = update.value?.version ?? "";
   } catch (error) {
     updateProblem.value = String(error);
+  }
+}
+
+/**
+ * "when can we do an in app install rather than a new dmg download?" Install
+ * and restart asks Rust to install the version it found. Nothing downloads
+ * until it is clicked. Rust checks the file's signature, puts it in place, and
+ * opens the new version; when it cannot, the notice says why, and Download
+ * still works.
+ */
+async function installUpdate() {
+  if (!inApp || updateInstalling.value) return;
+  updateInstalling.value = true;
+  updateProblem.value = "";
+  try {
+    await invoke("install_update");
+  } catch (error) {
+    updateProblem.value = String(error);
+  } finally {
+    updateInstalling.value = false;
   }
 }
 
@@ -1818,7 +1840,10 @@ onBeforeUnmount(() => {
           <p v-if="updateProblem" class="update-problem small" role="alert">{{ updateProblem }}</p>
         </div>
         <div class="update-buttons">
-          <button class="primary" type="button" @click="openUpdate('download')">Download</button>
+          <button v-if="update.install" class="primary" type="button" :disabled="updateInstalling" @click="installUpdate">
+            {{ installButton(updateInstalling) }}
+          </button>
+          <button :class="{ primary: !update.install }" type="button" @click="openUpdate('download')">Download</button>
           <button type="button" @click="openUpdate('notes')">What changed</button>
           <button class="link" type="button" @click="updateLater = update.version">Later</button>
         </div>

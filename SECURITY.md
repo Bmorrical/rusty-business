@@ -24,7 +24,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.7.0. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.8.0. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -63,8 +63,16 @@ I want to hear about:
   https, and checks every file against its pinned size and checksum.
 - The check for a new version asks GitHub's API for this repository's newest
   release, over https, and nothing else. It sends nothing you type, follows
-  no redirect, and downloads and installs nothing. Its Download button opens
-  only this repository's release files on github.com, in your browser.
+  no redirect, and downloads nothing. Its Download button opens only this
+  repository's release files on github.com, in your browser.
+- Install and restart downloads nothing until you click it, and only while
+  the outbound gate is on. Then it fetches two files of the release the
+  check found, from this repository's releases on github.com: `latest.json`
+  and this system's file. It follows a redirect only to GitHub's own file
+  hosts, over https, sends no account, token, or cookie, and reads each file
+  up to a size. It installs that file only when its signature matches the
+  public key built into the app, and `latest.json` names that version and
+  that file. Otherwise it installs nothing and says why.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.
