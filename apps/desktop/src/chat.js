@@ -219,7 +219,7 @@ export function onDiskLine(models) {
  * starts one. An engine that answers is never started again.
  */
 export function shouldStart(engine) {
-  return Boolean(engine) && engine.reachable === false;
+  return Boolean(engine) && !engine.remote && engine.reachable === false;
 }
 
 /**
@@ -724,13 +724,13 @@ export function attachmentLine(file) {
 }
 
 /**
- * The line under the outbound gate's switch. A chat with a model on this
- * computer works either way; only what reaches past it waits for the gate.
+ * The line under the outbound gate's switch. Chat with the configured
+ * local or private-network engine works either way.
  */
 export function gateLine(open) {
   return open
     ? "Gate on. The app may go online to check for updates, download models, start the stack, and ask the outside engines you add."
-    : "Gate off. Nothing leaves this computer.";
+    : "Gate off. Internet features are paused.";
 }
 
 /** The names of the model makers picked, in the list's order. */
@@ -755,8 +755,8 @@ export function canRemove(makers, name) {
 
 /** "MIT · on this computer", "Apache 2.0 · 15.4 GB", or why it cannot download. */
 export function listedLine(model) {
-  if (model.onDisk) return `${model.license} · on this computer`;
-  if (model.offer) return `${model.license} · ${formatSize(model.offer.bytes)}`;
+  if (model.onDisk) return `${model.license} · ${model.remote ? "on the LAN server" : "on this computer"}`;
+  if (model.offer) return `${model.license} · ${model.remote ? "about " : ""}${formatSize(model.offer.bytes)}`;
   return `${model.license} · no download for this computer`;
 }
 

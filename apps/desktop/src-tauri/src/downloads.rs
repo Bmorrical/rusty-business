@@ -1,4 +1,4 @@
-//! Downloading the app's models.
+//! Downloading the app's models onto this computer.
 //!
 //! When none of the app's models is on this computer, the page offers them
 //! with their download sizes, and Download brings one from Hugging Face into
@@ -39,7 +39,7 @@ use tauri::ipc::Channel;
 use tokio::sync::watch;
 
 use crate::gate::Gate;
-use crate::{engine, models};
+use crate::{engine, models, remote};
 
 /// Where the app downloads from.
 const SOURCE: &str = "https://huggingface.co";
@@ -179,6 +179,19 @@ pub struct Offer {
 /// order. The page shows them only while none of them is on the disk.
 pub fn offers() -> Vec<Offer> {
     offers_from(pins_here())
+}
+
+pub fn remote_offers() -> Vec<Offer> {
+    offers_from(&GGUF_PINNED)
+}
+
+pub(crate) fn remote_model(id: &str) -> Option<String> {
+    let pin = pinned(&GGUF_PINNED, id)?;
+    let file = pin.files.first()?.name.strip_suffix(".gguf")?;
+    // llama.cpp indexes cached models by the token at the end of the
+    // filename. This is usually the quantization, and is IT for Gemma.
+    let (_, tag) = file.rsplit_once('-')?;
+    Some(format!("{id}:{}", tag.to_ascii_uppercase()))
 }
 
 fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
@@ -493,7 +506,7 @@ pub struct Progress {
 }
 
 /// Finishes when Cancel is pressed, and never otherwise.
-async fn cancelled(cancel: &mut watch::Receiver<bool>) {
+pub(crate) async fn cancelled(cancel: &mut watch::Receiver<bool>) {
     while !*cancel.borrow_and_update() {
         if cancel.changed().await.is_err() {
             // The app is going away, and the download with it.
@@ -683,7 +696,7 @@ fn rename_new(from: &Path, to: &Path) -> std::io::Result<()> {
 pub struct DownloadReport {
     /// The model is whole in the models folder.
     pub whole: bool,
-    /// Cancel was pressed, and nothing was kept.
+    /// The download was stopped. The remote server may keep partial files.
     pub stopped: bool,
 }
 
@@ -725,6 +738,30 @@ impl Downloads {
         if let Some(cancel) = self.slot().as_ref() {
             let _ = cancel.send(true);
         }
+    }
+
+    async fn download_remote(
+        &self,
+        gate: &Gate,
+        base: &str,
+        id: &str,
+        report: impl FnMut(Progress),
+    ) -> Result<DownloadReport, String> {
+        let model = remote_model(id).ok_or_else(|| sentence(Why::NotListed, &name_of(id), 0))?;
+        let mut cancel = {
+            let mut slot = self.slot();
+            if !gate.is_open() {
+                return Err(GATE_OFF.to_string());
+            }
+            if slot.is_some() {
+                return Err(sentence(Why::Busy, &name_of(id), 0));
+            }
+            let (sender, receiver) = watch::channel(false);
+            *slot = Some(sender);
+            receiver
+        };
+        let _running = Running(self);
+        remote::download(base, &model, gate, &mut cancel, report).await
     }
 
     /// Throws away what downloads left in the app's own folder: a download
@@ -842,12 +879,16 @@ pub async fn download_model(
     id: String,
     on_progress: Channel<Progress>,
 ) -> Result<DownloadReport, String> {
-    let hub = models::models_folder();
-    let client = client(&gate)?;
-    let open = move |url: String| open_url(client.clone(), url);
+    let base = engine::base_url()?;
     let report = move |progress: Progress| {
         let _ = on_progress.send(progress);
     };
+    if engine::is_remote(&base) {
+        return downloads.download_remote(&gate, &base, &id, report).await;
+    }
+    let hub = models::models_folder();
+    let client = client(&gate)?;
+    let open = move |url: String| open_url(client.clone(), url);
     let layout = models::Layout::here();
     let done = download_through(
         &downloads,
@@ -860,9 +901,7 @@ pub async fn download_model(
         report,
     )
     .await?;
-    if reloads_after(layout, &done)
-        && let Ok(base) = engine::base_url()
-    {
+    if reloads_after(layout, &done) {
         engine::reload_models(&base).await;
     }
     Ok(done)

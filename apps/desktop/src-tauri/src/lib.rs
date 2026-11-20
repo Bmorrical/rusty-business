@@ -7,6 +7,7 @@ mod makers;
 mod models;
 mod outside;
 mod projects;
+mod remote;
 mod sessions;
 mod stack;
 mod starter;

@@ -4,16 +4,16 @@
 //! all outbound communication, user can turn it on to use their inference",
 //! and "off by default, everything stops". The app is local first: a chat
 //! with a model on this computer needs nothing outside it, so it works with
-//! the gate off. Everything that would reach past this computer waits for the
-//! gate.
+//! the gate off. Chat with a configured private-network engine also works
+//! with the gate off. Model downloads and internet services wait for it.
 //!
 //! The rules, each with a test:
 //!
 //! - The gate is off until the person turns it on, and it stays as they left
 //!   it the next time the app opens. Anything but a kept "on" reads as off.
-//! - Every connection past this computer is made here, and only while the
-//!   gate is on, over https, with no proxy. The one other client in the app
-//!   speaks to the model engine on this computer.
+//! - Direct online connections are made here over HTTPS with no proxy.
+//!   A LAN model install asks the configured server to start a download
+//!   while the gate is on.
 //! - Turning the gate off stops what is under way: the check for a new
 //!   version, a model download, a start of the stack, and an outside
 //!   engine's answer.

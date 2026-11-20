@@ -1,10 +1,10 @@
 # The desktop app
 
-A window for chatting with models that run on your own computer. The shell is
-Rust (Tauri 2), and the page is Vue 3. It is local first: a chat needs nothing
-outside the computer, and nothing leaves it until you turn on the outbound
-gate. With it on, Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and
-Gemini, by Google, can answer too, each with your own key.
+A window for chatting with models on your own computer or a configured
+llama-server on your private network. The shell is Rust (Tauri 2), and the
+page is Vue 3. The outbound gate controls internet features.
+With it on, Grok, GPT, Claude, and Gemini can answer too, each with your
+own key.
 
 [![A chat with Phi-4 in the dark theme: two questions about rusty nails, each answer with its token count and speed, saved chats on the left, Phi-4 picked among the models at the top, and the context meter under the message box reading 184 of 16,384 tokens](../../docs/screenshots/chat.png)](../../docs/screenshots/chat.png?raw=true)
 
@@ -14,11 +14,9 @@ Select the picture to open it full size. The rest of the set is in
 ## What it does
 
 - **The outbound gate**, a switch at the foot of the window. It is off until
-  you turn it on, and it stays as you leave it. While it is off, the app
-  makes no connection past this computer: it asks for no new version,
-  downloads nothing, starts no stack, and asks Grok, GPT, Claude, and Gemini
-  nothing.
-  Turning it off stops what is under way. A chat with a model here works either way.
+  you turn it on, and it stays as you leave it. Turning it off stops active
+  internet requests and asks the LAN server to pause a download the app is
+  tracking. Discovery and chat work with the configured engine either way.
 - **Chat** with a streamed reply, a Stop button, and the model's thinking kept
   apart from its answer.
 - **One model or several.** The models sit at the top of the window, one
@@ -119,7 +117,7 @@ Select the picture to open it full size. The rest of the set is in
 ## How it is put together
 
 ```
-page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
+page (Vue)  --IPC-->  Rust  --http, loopback or configured private address-->  engine
                       Rust  --gate--https, on Download only-->   Hugging Face
                       Rust  --gate--Docker, when the stack is not answering-->  the stack
                       Rust  --gate--https, at open, once a day, and on Check for updates-->  GitHub's API
@@ -130,21 +128,18 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
                       Rust  --gate--https, with the key from your file-->  Google's API (Gemini)
 ```
 
-The page never talks to the network, and Rust reaches past this computer only
-through the gate. Rust owns twelve things:
+The page reaches the configured engine through Rust. Rust gates internet
+features, including model downloads delegated to a private-network engine.
 
 - [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
-  keeps the switch, off until the person turns it on, and makes every client
-  that reaches past this computer: only while the gate is on, over https,
-  with no proxy. Turning it off stops a check, a download, a start of the
-  stack, or an outside engine's answer that is under way.
+  keeps the switch and provides HTTPS clients for online services. Remote
+  installs check it before asking a LAN server to download a model.
 
 - [src-tauri/src/engine.rs](src-tauri/src/engine.rs), the engine adapter. It
   speaks one contract, an OpenAI-style server (`GET /v1/models`,
-  `POST /v1/chat/completions` with a streamed reply). It refuses any address
-  that is not on this computer, filters the models, and separates thinking
-  from the answer (channel markers, think tags, or a separate reasoning
-  field).
+  `POST /v1/chat/completions` with a streamed reply). It accepts loopback
+  and RFC 1918 IPv4 addresses, filters the models, and separates thinking
+  from the answer (channel markers, think tags, or a reasoning field).
 - [src-tauri/src/models.rs](src-tauri/src/models.rs), the search for the
   app's models on the disk. It works with the engine off, and it changes
   nothing in the folder it reads.
@@ -157,7 +152,8 @@ through the gate. Rust owns twelve things:
   download. It brings only a model on the list, at a pinned revision, and
   only from Hugging Face over https, and it checks each file's size and
   SHA-256 as it arrives. A finished model moves into the models folder
-  whole; a cancelled or broken one leaves nothing behind.
+  whole. [src-tauri/src/remote.rs](src-tauri/src/remote.rs) delegates LAN
+  installs to llama-server and tracks when the model is ready.
 - [src-tauri/src/stack.rs](src-tauri/src/stack.rs), the stack's start. It
   starts [src-tauri/stack-compose.yaml](src-tauri/stack-compose.yaml), the
   same stack as `make up`, with the API and the worker pulled from GitHub's
@@ -204,7 +200,8 @@ Which program serves the contract is the only thing that changes per system:
 | Linux   | not chosen yet; any server with the same two calls |
 
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
-`RUSTY_ENGINE_URL` to use another port on this computer.
+`RUSTY_ENGINE_URL` to use another port on this computer or an RFC 1918
+IPv4 address on your private network.
 
 The Mac app that `make app` and `make dmg` build carries its engine inside
 it, in `Contents/Resources/engine`, and looks there first. How it is built
@@ -215,6 +212,45 @@ engine: it looks for the engine's program in each folder on `PATH`, then in
 `PATH`, which is why the usual folders are looked in as well. When the
 program is somewhere else, set `RUSTY_ENGINE_PROGRAM` to its full path, and
 that program is the only one tried, even in an app that carries its own.
+
+## Install models on a LAN server
+
+Run a [llama-server build with the model management API](https://github.com/ggml-org/llama.cpp/pull/23976)
+in router mode on the server. Start it without `--model` or `--hf-repo`,
+bind it to your private interface, and allow it to reach Hugging Face.
+For example, on the server at `192.168.1.50`:
+
+```sh
+llama-server --host 192.168.1.50 --port 8080
+```
+
+On the Mac, run this from `apps/desktop` after installing the desktop
+dependencies:
+
+```sh
+RUSTY_ENGINE_URL=http://192.168.1.50:8080/v1 npm run tauri dev
+```
+
+For a packaged build of this version installed in Applications:
+
+```sh
+RUSTY_ENGINE_URL=http://192.168.1.50:8080/v1 \
+  /Applications/Rusty\ Business.app/Contents/MacOS/rusty-business
+```
+
+Open **Installers**, turn on the outbound gate, and select **Install**.
+llama-server fetches the selected GGUF into its own cache. The app shows
+its progress and refreshes the picker when the server lists the model.
+**Pause** requests a pause on the server, and **Install** resumes any partial
+download the server retained. A server-side download can continue if the
+app closes or loses its connection. Chat with the configured LAN server
+works with the gate off.
+
+The server chooses the file from the catalog's Hugging Face repository and
+filename tag. It controls the cache, network access, and download validation.
+If your server supports chat only, you can install a catalog GGUF on the
+server and refresh the app after llama-server lists it. Use this HTTP
+connection on a trusted private network.
 
 ## What is in this folder
 

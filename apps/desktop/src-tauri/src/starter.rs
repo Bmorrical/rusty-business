@@ -245,6 +245,9 @@ pub struct Address {
 /// here, so an engine is never started where another computer could reach it.
 pub fn address_of(base: &str) -> Result<Address, String> {
     let checked = engine::checked_base_url(base)?;
+    if engine::is_remote(&checked) {
+        return Err("An engine started by the app must be on this computer.".to_string());
+    }
     let url = reqwest::Url::parse(&checked)
         .map_err(|_| "The engine address could not be read.".to_string())?;
     let host = url

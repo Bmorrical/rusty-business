@@ -381,8 +381,8 @@ fn openai_fits(id: &str) -> bool {
             .is_some_and(|rest| rest.starts_with(|letter: char| letter.is_ascii_digit()));
     family
         && id.split('-').all(|word| {
-            !NOT_FOR_CHAT.contains(&word)
-                && !(word.len() >= 4 && word.bytes().all(|byte| byte.is_ascii_digit()))
+            !(NOT_FOR_CHAT.contains(&word)
+                || (word.len() >= 4 && word.bytes().all(|byte| byte.is_ascii_digit())))
         })
 }
 
@@ -442,9 +442,9 @@ fn claude_name(id: &str) -> String {
 fn gemini_fits(id: &str) -> bool {
     id.strip_prefix("gemini-").is_some_and(|rest| {
         rest.split('-').all(|word| {
-            !word.is_empty()
-                && !GEMINI_NOT_FOR_CHAT.contains(&word)
-                && !(word.len() >= 3 && word.bytes().all(|byte| byte.is_ascii_digit()))
+            !(word.is_empty()
+                || GEMINI_NOT_FOR_CHAT.contains(&word)
+                || (word.len() >= 3 && word.bytes().all(|byte| byte.is_ascii_digit())))
         })
     })
 }

@@ -1,14 +1,12 @@
 //! The engine adapter.
 //!
-//! The app speaks one contract: an OpenAI-style server on this computer
-//! (`GET /models`, `POST /chat/completions` with a streamed reply). Which
-//! program serves it is the only thing that changes per system: on a Mac it
-//! is `mlx_lm.server`; on Windows and Linux it is llama.cpp's `llama-server`,
-//! behind the same two calls. Nothing above this file knows the difference.
+//! The app uses an OpenAI-style API to list models and stream chat replies.
+//! It connects to MLX on a Mac, llama-server on Windows and Linux, or a
+//! configured llama-server on the private network.
 //!
 //! Three rules live here:
-//! - a prompt to the engine never leaves the computer (loopback addresses
-//!   only, no proxy, no redirects), so a chat needs no outbound gate;
+//! - a prompt goes to the configured loopback or private-network engine
+//!   with no proxy or redirects;
 //! - only models on the list below are offered or accepted;
 //! - a model's thinking is separated from its answer, so the window never
 //!   shows raw markers.
@@ -40,25 +38,48 @@ pub fn base_url() -> Result<String, String> {
     checked_base_url(&raw)
 }
 
-/// Accepts only a plain-http address on this computer.
+/// Accepts a plain-http address on this computer or on the local network.
+/// Loopback (127.x.x.x, ::1), localhost, and RFC 1918 private ranges are allowed:
+/// - 10.0.0.0/8 (10.x.x.x)
+/// - 172.16.0.0/12 (172.16.x.x through 172.31.x.x)
+/// - 192.168.0.0/16 (192.168.x.x)
 pub fn checked_base_url(raw: &str) -> Result<String, String> {
-    let refusal =
-        || format!("The engine address must be on this computer (for example {DEFAULT_BASE_URL}).");
+    let refusal = || {
+        format!(
+            "The engine address must be on this computer or your local network (for example {DEFAULT_BASE_URL})."
+        )
+    };
     let url = reqwest::Url::parse(raw.trim()).map_err(|_| refusal())?;
-    if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
+    if url.scheme() != "http"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(refusal());
     }
-    let host = url.host_str().unwrap_or_default();
-    let bare = host.trim_start_matches('[').trim_end_matches(']');
-    let local = host == "localhost"
-        || bare
-            .parse::<IpAddr>()
-            .map(|ip| ip.is_loopback())
-            .unwrap_or(false);
-    if !local {
+    let private = url
+        .host_str()
+        .and_then(|host| host.parse::<std::net::Ipv4Addr>().ok())
+        .is_some_and(|ip| ip.is_private());
+    if !loopback(&url) && !private {
         return Err(refusal());
     }
     Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+fn loopback(url: &reqwest::Url) -> bool {
+    let host = url.host_str().unwrap_or_default();
+    host == "localhost"
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// The base must already have passed the engine address check.
+pub(crate) fn is_remote(base: &str) -> bool {
+    reqwest::Url::parse(base).is_ok_and(|url| !loopback(&url))
 }
 
 pub fn engine_name() -> &'static str {
@@ -88,7 +109,7 @@ fn start_hint_on(os: &str) -> &'static str {
     }
 }
 
-fn client() -> Result<reqwest::Client, String> {
+pub(crate) fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
@@ -219,6 +240,7 @@ pub struct EngineStatus {
     pub name: String,
     pub url: String,
     pub reachable: bool,
+    pub remote: bool,
     pub models: Vec<ModelInfo>,
     /// Models the engine holds from makers the person did not pick. The page
     /// never offers them, but a saved chat still names the model that wrote it.
@@ -236,14 +258,26 @@ pub struct EngineStatus {
 }
 
 #[derive(Deserialize)]
-struct ModelList {
+pub(crate) struct ModelList {
     #[serde(default)]
-    data: Vec<ModelRow>,
+    pub data: Vec<ModelRow>,
 }
 
 #[derive(Deserialize)]
-struct ModelRow {
-    id: String,
+pub(crate) struct ModelRow {
+    pub id: String,
+    #[serde(default)]
+    pub status: serde_json::Value,
+}
+
+impl ModelRow {
+    pub fn status(&self) -> &str {
+        self.status["value"].as_str().unwrap_or_default()
+    }
+
+    pub fn available(&self) -> bool {
+        !matches!(self.status(), "downloading" | "downloaded" | "incomplete")
+    }
 }
 
 /// Where the engine lists its models. With `reload`, `llama-server` reads its
@@ -286,7 +320,12 @@ pub(crate) async fn fetch_model_ids(base: &str) -> Result<Vec<String>, String> {
         .json()
         .await
         .map_err(|_| "The engine's model list could not be read.".to_string())?;
-    Ok(list.data.into_iter().map(|row| row.id).collect())
+    Ok(list
+        .data
+        .into_iter()
+        .filter(ModelRow::available)
+        .map(|row| row.id)
+        .collect())
 }
 
 /// What the page is told before the engine is asked: the app's models on
@@ -296,6 +335,7 @@ fn first_status() -> EngineStatus {
         name: engine_name().to_string(),
         url: DEFAULT_BASE_URL.to_string(),
         reachable: false,
+        remote: false,
         models: Vec::new(),
         set_aside: Vec::new(),
         hidden: 0,
@@ -336,11 +376,23 @@ async fn status_now() -> EngineStatus {
         }
     };
     status.url = base.clone();
+    status.remote = is_remote(&base);
+    if status.remote {
+        status.name = "llama.cpp".to_string();
+        status.start_hint.clear();
+        status.on_disk.clear();
+        status.offers = crate::downloads::remote_offers();
+    }
     match fetch_model_ids(&base).await {
         Ok(ids) => {
             status.reachable = true;
             status.models = allowed_models(&ids);
             status.hidden = ids.len().saturating_sub(status.models.len());
+        }
+        Err(error) if status.remote => {
+            status.error = Some(format!(
+                "The LAN server at {base} did not return a model list. {error}"
+            ));
         }
         Err(error) => status.error = Some(error),
     }
@@ -1159,18 +1211,23 @@ mod tests {
     }
 
     #[test]
-    fn the_engine_address_stays_on_this_computer() {
+    fn the_engine_address_stays_on_the_private_network() {
         for good in [
             "http://127.0.0.1:8080/v1",
             "http://localhost:8080/v1/",
             "http://[::1]:9000/v1",
+            "http://192.168.1.50:8080/v1",
+            "http://10.0.0.5:8080/v1",
+            "http://172.31.0.1/v1",
         ] {
             assert!(checked_base_url(good).is_ok(), "{good} should be accepted");
         }
         for bad in [
             "https://127.0.0.1:8080/v1",
             "http://example.com/v1",
-            "http://10.0.0.5:8080/v1",
+            "http://172.32.0.5:8080/v1",
+            "http://127.0.0.1/v1?other=1",
+            "http://127.0.0.1/v1#other",
             "http://127.0.0.1.example.com/v1",
             "http://user:pass@127.0.0.1:8080/v1",
             "file:///etc/hosts",

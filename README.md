@@ -35,12 +35,10 @@
    It needs Rust, Node 20 or later, what building from source needs, and a
    model engine on the computer.
 
-A desktop window for chatting with models that run on your own computer, and
-the start of the servers that will sit behind it. It is local first: a chat
-with a model here needs nothing from outside, and nothing leaves the computer
-until you turn on the outbound gate. With it on, Grok, by xAI, GPT, by
-OpenAI, Claude, by Anthropic, and Gemini, by Google, can answer too, each
-with your own key.
+A desktop window for chatting with models on your own computer or
+a private-network llama-server you configure. Chat with either engine works
+with the outbound gate off. With the gate on, you can also ask Grok, GPT,
+Claude, and Gemini with your own keys.
 
 **Status:** version 0.8.0, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
@@ -87,15 +85,14 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   in Settings, or install from the Installers page, each with one click. A model that is not on the list is never
   shown and never accepted, even when the engine holds it. Ollama's library
   is far larger, and open to models from many makers.
-- **Local first, behind a gate.** A chat needs nothing outside your
-  computer. The page has no way to call out, and the Rust behind it refuses
-  an engine address that is not on this computer. An engine the app starts
-  listens on this computer only, and is told to stay offline. Everything
-  else waits for the outbound gate, a switch at the foot of the window that
-  is off until you turn it on; turning it off stops what is under way. With
-  the gate on, the app reaches out in four places. On a first run or on the
-  Installers page, Download or Install brings the model you pick from Hugging
-  Face, over https and from nowhere else. The first time it starts the stack, Docker downloads the stack's
+- **Local first, behind a gate.** Chat uses the engine on your computer by
+  default. You can also point the app at a [llama-server on your private
+  network](apps/desktop/README.md#install-models-on-a-lan-server). Engines
+  started by the app listen on loopback and run offline. Internet features wait
+  for the outbound gate at the foot of the window, which is off by default.
+  With the gate on, Download or Install fetches the model from Hugging Face. If a LAN server
+  is configured, that server fetches and stores the model. The first time
+  the app starts the stack, Docker downloads the stack's
   images. When the window opens, once a day while it stays open, and when
   you click Check for updates, the app asks GitHub whether a new version is
   out. Install and restart downloads it from GitHub only when you click it.
@@ -195,7 +192,7 @@ says what is in it.
 | [.github/workflows](.github/workflows) | What GitHub runs: the test gate, and a deploy and a release that wait for it | The gate runs; Deploy publishes the API and worker images, and Release the Mac app, the Windows installer, and the Linux packages |
 
 The chat window starts the stack when Docker is on the computer and the
-outbound gate is on, and does not use it yet: it talks only to the model engine on this computer. The stack is
+outbound gate is on. Chat talks to the configured model engine. The stack is
 the ground the next features stand on.
 
 ## Download the built app
