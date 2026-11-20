@@ -1,6 +1,6 @@
 [package]
 name = "rusty-business"
-version = "0.6.0"
+version = "0.7.0"
 description = "A desktop window for models that run on this computer"
 edition = "2024"
 license = "MIT"
@@ -36,9 +36,12 @@ sha2 = "0.10"
 libc = "0.2"
 # Attachments: the text of PDFs, Word files, and spreadsheets, read on this
 # computer. zip is the version calamine already uses, so it is built once.
-calamine = "0.30"
+calamine = "0.38"
 pdf-extract = "0.12.1"
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+# Uninstall: a model's files go to the system's Trash, or the Recycle Bin on
+# Windows, where the person can take them back. Nothing is deleted.
+trash = "5.4"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

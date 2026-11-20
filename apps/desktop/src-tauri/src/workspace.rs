@@ -17,8 +17,22 @@ use crate::projects::Projects;
 
 /// Folders that are built, fetched, or kept by tools, never read through.
 const SKIPPED: &[&str] = &[
-    ".git", "node_modules", "target", "dist", "build", ".next", ".nuxt", "vendor", "__pycache__", ".venv", "venv",
-    ".idea", ".vscode", ".DS_Store", "coverage", ".cache",
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".idea",
+    ".vscode",
+    ".DS_Store",
+    "coverage",
+    ".cache",
 ];
 const LIST_LIMIT: usize = 300;
 const OVERVIEW_LIMIT: usize = 150;
@@ -39,7 +53,8 @@ fn root_of(folder: &str) -> Result<PathBuf, String> {
     if folder.is_empty() {
         return Err("This project has no folder.".to_string());
     }
-    let root = fs::canonicalize(folder).map_err(|_| "The project's folder is not on this computer.".to_string())?;
+    let root = fs::canonicalize(folder)
+        .map_err(|_| "The project's folder is not on this computer.".to_string())?;
     if !root.is_dir() {
         return Err("The project's folder is not a folder.".to_string());
     }
@@ -55,7 +70,11 @@ pub fn inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     for component in path.components() {
         match component {
             Component::Normal(_) | Component::CurDir => {}
-            _ => return Err(format!("{relative} is outside the project's folder. Paths are relative to it.")),
+            _ => {
+                return Err(format!(
+                    "{relative} is outside the project's folder. Paths are relative to it."
+                ));
+            }
         }
     }
     let joined = root.join(path);
@@ -64,8 +83,15 @@ pub fn inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     // A link counts as there even when it leads nowhere, so it is followed
     // and checked below, never written through as a new name.
     while existing.symlink_metadata().is_err() {
-        rest.push(existing.file_name().map(|name| name.to_os_string()).unwrap_or_default());
-        existing = existing.parent().ok_or_else(|| format!("{relative} is outside the project's folder."))?;
+        rest.push(
+            existing
+                .file_name()
+                .map(|name| name.to_os_string())
+                .unwrap_or_default(),
+        );
+        existing = existing
+            .parent()
+            .ok_or_else(|| format!("{relative} is outside the project's folder."))?;
     }
     let mut real = fs::canonicalize(existing).map_err(|_| format!("Could not open {relative}."))?;
     if !real.starts_with(root) {
@@ -78,8 +104,16 @@ pub fn inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn shown(root: &Path, path: &Path) -> String {
-    let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
-    if relative.is_empty() { ".".to_string() } else { relative }
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    if relative.is_empty() {
+        ".".to_string()
+    } else {
+        relative
+    }
 }
 
 /// A real folder, not a link to one, which could lead outside.
@@ -89,9 +123,18 @@ fn is_folder(entry: &fs::DirEntry) -> bool {
 
 fn sorted_entries(dir: &Path) -> Vec<fs::DirEntry> {
     let mut entries: Vec<fs::DirEntry> = fs::read_dir(dir)
-        .map(|read| read.flatten().filter(|entry| !skipped(&entry.file_name().to_string_lossy())).collect())
+        .map(|read| {
+            read.flatten()
+                .filter(|entry| !skipped(&entry.file_name().to_string_lossy()))
+                .collect()
+        })
         .unwrap_or_default();
-    entries.sort_by_key(|entry| (!is_folder(entry), entry.file_name().to_string_lossy().to_lowercase()));
+    entries.sort_by_key(|entry| {
+        (
+            !is_folder(entry),
+            entry.file_name().to_string_lossy().to_lowercase(),
+        )
+    });
     entries
 }
 
@@ -106,7 +149,11 @@ pub fn overview(root: &Path) -> String {
             more = true;
             break;
         }
-        lines.push(if dir { format!("{name}/") } else { name.clone() });
+        lines.push(if dir {
+            format!("{name}/")
+        } else {
+            name.clone()
+        });
         if dir {
             for inner in sorted_entries(&entry.path()) {
                 if lines.len() >= OVERVIEW_LIMIT {
@@ -114,14 +161,22 @@ pub fn overview(root: &Path) -> String {
                     break;
                 }
                 let inner_name = inner.file_name().to_string_lossy().to_string();
-                lines.push(if is_folder(&inner) { format!("  {inner_name}/") } else { format!("  {inner_name}") });
+                lines.push(if is_folder(&inner) {
+                    format!("  {inner_name}/")
+                } else {
+                    format!("  {inner_name}")
+                });
             }
         }
     }
     if more {
         lines.push("(more not shown; use list)".to_string());
     }
-    if lines.is_empty() { "(empty)".to_string() } else { lines.join("\n") }
+    if lines.is_empty() {
+        "(empty)".to_string()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn list(root: &Path, relative: &str) -> Result<String, String> {
@@ -135,13 +190,21 @@ fn list(root: &Path, relative: &str) -> Result<String, String> {
         .take(LIST_LIMIT)
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
-            if is_folder(entry) { format!("{name}/") } else { name }
+            if is_folder(entry) {
+                format!("{name}/")
+            } else {
+                name
+            }
         })
         .collect();
     if entries.len() > LIST_LIMIT {
         lines.push(format!("({} more not shown)", entries.len() - LIST_LIMIT));
     }
-    Ok(if lines.is_empty() { "(empty)".to_string() } else { lines.join("\n") })
+    Ok(if lines.is_empty() {
+        "(empty)".to_string()
+    } else {
+        lines.join("\n")
+    })
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -190,7 +253,12 @@ fn next_line(reader: &mut impl BufRead, keep: usize) -> io::Result<Option<(Vec<u
 }
 
 /// Lines `from` to `to` (counted from 1), numbered, within the caps.
-fn read(root: &Path, relative: &str, from: Option<usize>, to: Option<usize>) -> Result<String, String> {
+fn read(
+    root: &Path,
+    relative: &str,
+    from: Option<usize>,
+    to: Option<usize>,
+) -> Result<String, String> {
     let path = inside(root, relative)?;
     if !path.is_file() {
         return Err(format!("{relative} is not a file."));
@@ -198,21 +266,28 @@ fn read(root: &Path, relative: &str, from: Option<usize>, to: Option<usize>) -> 
     let unreadable = |_| format!("Could not read {relative}.");
     let mut file = fs::File::open(&path).map_err(unreadable)?;
     let mut head = Vec::new();
-    (&mut file).take(8_000).read_to_end(&mut head).map_err(unreadable)?;
+    (&mut file)
+        .take(8_000)
+        .read_to_end(&mut head)
+        .map_err(unreadable)?;
     if looks_binary(&head) {
         return Err(format!("{relative} is not a text file."));
     }
     // Only the lines asked for are kept; the rest are counted and let go.
     let mut reader = io::BufReader::new(fs::File::open(&path).map_err(unreadable)?);
     let start = from.unwrap_or(1).max(1);
-    let end = to.unwrap_or(start + READ_LINES - 1).min(start + READ_LINES - 1);
+    let end = to
+        .unwrap_or(start + READ_LINES - 1)
+        .min(start + READ_LINES - 1);
     let mut out = String::new();
     let mut last = start.saturating_sub(1);
     let mut total = 0;
     let mut full = false;
     loop {
-        let wanted = !full && total + 1 >= start && total + 1 <= end;
-        let Some((bytes, dropped)) = next_line(&mut reader, if wanted { READ_BYTES } else { 0 }).map_err(unreadable)? else {
+        let wanted = !full && (start..=end).contains(&(total + 1));
+        let Some((bytes, dropped)) =
+            next_line(&mut reader, if wanted { READ_BYTES } else { 0 }).map_err(unreadable)?
+        else {
             break;
         };
         total += 1;
@@ -248,7 +323,10 @@ fn read(root: &Path, relative: &str, from: Option<usize>, to: Option<usize>) -> 
         return Err(format!("{relative} has only {total} lines."));
     }
     if last < total {
-        out.push_str(&format!("(lines {start}-{last} of {total}; read again with from {} for more)", last + 1));
+        out.push_str(&format!(
+            "(lines {start}-{last} of {total}; read again with from {} for more)",
+            last + 1
+        ));
     }
     Ok(out)
 }
@@ -265,12 +343,17 @@ fn search(root: &Path, text: &str, relative: &str) -> Result<String, String> {
     'walk: while let Some(path) = stack.pop() {
         // Links are not followed: one could lead outside, or back round in
         // a loop. The starting place is already checked and resolved.
-        let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_type().is_symlink() {
             continue;
         }
         if meta.is_dir() {
-            let mut inner: Vec<PathBuf> = sorted_entries(&path).into_iter().map(|entry| entry.path()).collect();
+            let mut inner: Vec<PathBuf> = sorted_entries(&path)
+                .into_iter()
+                .map(|entry| entry.path())
+                .collect();
             inner.reverse();
             stack.extend(inner);
             continue;
@@ -282,7 +365,9 @@ fn search(root: &Path, text: &str, relative: &str) -> Result<String, String> {
         if !meta.is_file() || meta.len() > SEARCH_FILE_BYTES {
             continue;
         }
-        let Ok(body) = text_of(&path, "") else { continue };
+        let Ok(body) = text_of(&path, "") else {
+            continue;
+        };
         for (index, line) in body.lines().enumerate() {
             if line.to_lowercase().contains(&needle) {
                 let line: String = line.trim().chars().take(200).collect();
@@ -294,7 +379,11 @@ fn search(root: &Path, text: &str, relative: &str) -> Result<String, String> {
             }
         }
     }
-    Ok(if hits.is_empty() { format!("Nothing has \"{}\".", text.trim()) } else { hits.join("\n") })
+    Ok(if hits.is_empty() {
+        format!("Nothing has \"{}\".", text.trim())
+    } else {
+        hits.join("\n")
+    })
 }
 
 fn writable(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -315,11 +404,15 @@ fn write(root: &Path, relative: &str, content: &str) -> Result<String, String> {
     let path = writable(root, relative)?;
     let existed = path.exists();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|_| format!("Could not make the folder for {relative}."))?;
+        fs::create_dir_all(parent)
+            .map_err(|_| format!("Could not make the folder for {relative}."))?;
     }
     fs::write(&path, content).map_err(|_| format!("Could not write {relative}."))?;
     let lines = content.lines().count();
-    Ok(format!("{} {relative} ({lines} lines).", if existed { "Wrote" } else { "Made" }))
+    Ok(format!(
+        "{} {relative} ({lines} lines).",
+        if existed { "Wrote" } else { "Made" }
+    ))
 }
 
 fn edit(root: &Path, relative: &str, find: &str, replace: &str) -> Result<String, String> {
@@ -336,15 +429,23 @@ fn edit(root: &Path, relative: &str, find: &str, replace: &str) -> Result<String
     }
     // Written back whole, so a file that is not UTF-8 would be changed in
     // places nobody asked for.
-    let text = String::from_utf8(bytes)
-        .map_err(|_| format!("{relative} is not UTF-8 text, so edit would damage it. Use write to replace it whole."))?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        format!(
+            "{relative} is not UTF-8 text, so edit would damage it. Use write to replace it whole."
+        )
+    })?;
     match text.matches(find).count() {
-        0 => Err(format!("{relative} does not have that text. Read it again and copy the text exactly.")),
+        0 => Err(format!(
+            "{relative} does not have that text. Read it again and copy the text exactly."
+        )),
         1 => {
-            fs::write(&path, text.replacen(find, replace, 1)).map_err(|_| format!("Could not write {relative}."))?;
+            fs::write(&path, text.replacen(find, replace, 1))
+                .map_err(|_| format!("Could not write {relative}."))?;
             Ok(format!("Edited {relative}."))
         }
-        count => Err(format!("{relative} has that text {count} times. Include more lines so it is found once.")),
+        count => Err(format!(
+            "{relative} has that text {count} times. Include more lines so it is found once."
+        )),
     }
 }
 
@@ -378,13 +479,20 @@ pub fn run(root: &Path, call: &ToolCall) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn workspace_overview(projects: tauri::State<'_, Projects>, project: String) -> Result<String, String> {
+pub fn workspace_overview(
+    projects: tauri::State<'_, Projects>,
+    project: String,
+) -> Result<String, String> {
     let root = root_of(&projects.load(&project)?.folder)?;
     Ok(overview(&root))
 }
 
 #[tauri::command]
-pub fn workspace_tool(projects: tauri::State<'_, Projects>, project: String, call: ToolCall) -> Result<String, String> {
+pub fn workspace_tool(
+    projects: tauri::State<'_, Projects>,
+    project: String,
+    call: ToolCall,
+) -> Result<String, String> {
     let root = root_of(&projects.load(&project)?.folder)?;
     run(&root, &call)
 }
@@ -397,10 +505,16 @@ pub async fn pick_folder() -> Result<String, String> {
             return Err("Type the folder's path.".to_string());
         }
         let output = std::process::Command::new("/usr/bin/osascript")
-            .args(["-e", "POSIX path of (choose folder with prompt \"Choose the project's folder\")"])
+            .args([
+                "-e",
+                "POSIX path of (choose folder with prompt \"Choose the project's folder\")",
+            ])
             .output()
             .map_err(|_| "Could not open the folder picker.".to_string())?;
-        Ok(String::from_utf8_lossy(&output.stdout).trim().trim_end_matches('/').to_string())
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .trim_end_matches('/')
+            .to_string())
     })
     .await
     .map_err(|_| "Could not open the folder picker.".to_string())?
@@ -414,14 +528,21 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("rb-workspace-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
-        fs::write(dir.join("src/app.js"), "const a = 1;\nconst greeting = \"Hello\";\nexport default a;\n").unwrap();
+        fs::write(
+            dir.join("src/app.js"),
+            "const a = 1;\nconst greeting = \"Hello\";\nexport default a;\n",
+        )
+        .unwrap();
         fs::write(dir.join("README.md"), "# Demo\n").unwrap();
         fs::write(dir.join("node_modules/pkg/index.js"), "Hello").unwrap();
         fs::canonicalize(dir).unwrap()
     }
 
     fn call(tool: &str) -> ToolCall {
-        ToolCall { tool: tool.to_string(), ..ToolCall::default() }
+        ToolCall {
+            tool: tool.to_string(),
+            ..ToolCall::default()
+        }
     }
 
     #[test]
@@ -430,8 +551,14 @@ mod tests {
         assert!(inside(&root, "../etc/passwd").is_err());
         assert!(inside(&root, "/etc/passwd").is_err());
         assert!(inside(&root, "src/../../x").is_err());
-        assert_eq!(inside(&root, "src/app.js").unwrap(), root.join("src/app.js"));
-        assert_eq!(inside(&root, "new/dir/file.txt").unwrap(), root.join("new/dir/file.txt"));
+        assert_eq!(
+            inside(&root, "src/app.js").unwrap(),
+            root.join("src/app.js")
+        );
+        assert_eq!(
+            inside(&root, "new/dir/file.txt").unwrap(),
+            root.join("new/dir/file.txt")
+        );
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("/", root.join("escape")).unwrap();
@@ -448,7 +575,10 @@ mod tests {
         let read = read(&root, "src/app.js", Some(2), Some(2)).unwrap();
         assert!(read.starts_with("    2  const greeting"));
         assert!(read.contains("lines 2-2 of 3"));
-        assert_eq!(search(&root, "hello", "").unwrap(), "src/app.js:2: const greeting = \"Hello\";");
+        assert_eq!(
+            search(&root, "hello", "").unwrap(),
+            "src/app.js:2: const greeting = \"Hello\";"
+        );
     }
 
     #[test]
@@ -457,13 +587,20 @@ mod tests {
         let mut make = call("write");
         make.path = "src/new/thing.txt".to_string();
         make.content = "one\ntwo\n".to_string();
-        assert_eq!(run(&root, &make).unwrap(), "Made src/new/thing.txt (2 lines).");
+        assert_eq!(
+            run(&root, &make).unwrap(),
+            "Made src/new/thing.txt (2 lines)."
+        );
         let mut change = call("edit");
         change.path = "src/app.js".to_string();
         change.find = "const a = 1;".to_string();
         change.replace = "const a = 2;".to_string();
         assert_eq!(run(&root, &change).unwrap(), "Edited src/app.js.");
-        assert!(fs::read_to_string(root.join("src/app.js")).unwrap().starts_with("const a = 2;"));
+        assert!(
+            fs::read_to_string(root.join("src/app.js"))
+                .unwrap()
+                .starts_with("const a = 2;")
+        );
         change.find = "const".to_string();
         assert!(run(&root, &change).unwrap_err().contains("2 times"));
         let mut git = call("write");
@@ -493,8 +630,14 @@ mod tests {
         symlink(&root, root.join("src/again")).unwrap();
         assert!(!overview(&root).contains("secret.txt"));
         assert!(!overview(&root).contains("linked/"));
-        assert_eq!(search(&root, "secret word", "").unwrap(), "Nothing has \"secret word\".");
-        assert_eq!(search(&root, "hello", "").unwrap(), "src/app.js:2: const greeting = \"Hello\";");
+        assert_eq!(
+            search(&root, "secret word", "").unwrap(),
+            "Nothing has \"secret word\"."
+        );
+        assert_eq!(
+            search(&root, "hello", "").unwrap(),
+            "src/app.js:2: const greeting = \"Hello\";"
+        );
     }
 
     #[test]
@@ -513,15 +656,28 @@ mod tests {
     #[test]
     fn a_line_too_long_to_show_is_cut_and_the_read_moves_on() {
         let root = folder();
-        fs::write(root.join("long.txt"), format!("{}\nshort\n", "x".repeat(READ_BYTES * 3))).unwrap();
+        fs::write(
+            root.join("long.txt"),
+            format!("{}\nshort\n", "x".repeat(READ_BYTES * 3)),
+        )
+        .unwrap();
         let first = read(&root, "long.txt", None, None).unwrap();
         assert!(first.starts_with("    1  xxx"));
         assert!(first.len() < READ_BYTES + 300);
         assert!(first.contains("too long to show whole"));
         assert!(first.contains("lines 1-1 of 2; read again with from 2"));
-        assert_eq!(read(&root, "long.txt", Some(2), None).unwrap(), "    2  short\n");
-        assert_eq!(read(&root, "long.txt", Some(5), None).unwrap_err(), "long.txt has only 2 lines.");
+        assert_eq!(
+            read(&root, "long.txt", Some(2), None).unwrap(),
+            "    2  short\n"
+        );
+        assert_eq!(
+            read(&root, "long.txt", Some(5), None).unwrap_err(),
+            "long.txt has only 2 lines."
+        );
         fs::write(root.join("empty.txt"), "").unwrap();
-        assert_eq!(read(&root, "empty.txt", None, None).unwrap(), "empty.txt is empty.");
+        assert_eq!(
+            read(&root, "empty.txt", None, None).unwrap(),
+            "empty.txt is empty."
+        );
     }
 }

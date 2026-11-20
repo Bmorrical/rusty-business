@@ -13,6 +13,8 @@
 //
 // Needs Google Chrome or Chromium (CHROME names the binary when it is not in
 // a usual place) and the page built first. `make screenshots` does both.
+// Named pictures, as in `node scripts/screenshots.mjs settings.png`, are made
+// again on their own, and the rest are left as they are.
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -39,6 +41,7 @@ export const SCALE = 2;
  * One picture each. `open` is the id of the saved chat to show, `thinking`
  * opens that chat's thinking, `top` shows the chat from its first question
  * rather than its last answer, `page` opens the Installers or Settings page,
+ * `tab` opens one of Settings' tabs, by its name,
  * `engine: 'off'` is the app with no engine answering, and
  * `engine: 'first-run'` is the app on a computer with none of its models yet.
  */
@@ -50,7 +53,7 @@ export const SCENES = [
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
   { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers' },
-  { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings' },
+  { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings', tab: 'Models' },
 ];
 
 /** The button in the side bar that opens each page a picture shows. */
@@ -139,6 +142,7 @@ export function makersStatus(report, picked) {
         name: offer.name,
         license: offer.license,
         onDisk: report.onDisk.some((model) => model.name === offer.name),
+        ids: report.onDisk.filter((model) => model.name === offer.name).map((model) => model.id),
         offer,
       })),
   }));
@@ -199,14 +203,15 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the eight
+ * The script that stands in for Rust inside the page. It answers the ten
  * calls the pictures need and refuses the rest, a download and a change of
  * makers among them. Grok is not added. Asked to start the engine, it starts
  * nothing and gives the reason it was handed, by default that the engine's
  * program was not found. Asked to start the stack, it starts nothing and says
  * the stack is running. The outbound gate is off, as it is on a first run.
  * The makers are picked as the app picks them before the person does, and
- * the engine's report holds only their models.
+ * the engine's report holds only their models. No model is switched off, and
+ * Uninstall would move one to the Trash, as on a Mac.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
@@ -225,6 +230,8 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
+      deactivated_models: () => [],
+      uninstall_place: () => ({ trash: 'the Trash', sharedCache: true }),
       outside_status: () => outside,
       list_sessions: () =>
         sessions.map((entry) => ({
@@ -399,6 +406,11 @@ async function takePicture(send, address, scene, engine, sessions) {
   if (scene.page) {
     const label = JSON.stringify(PAGE_BUTTONS[scene.page]);
     await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${label}).click()`);
+    if (scene.tab) {
+      const name = JSON.stringify(scene.tab);
+      await until(send, tab, `document.querySelector('.settings-tabs') !== null`, "Settings' tabs");
+      await inPage(send, tab, `[...document.querySelectorAll('.settings-tabs button')].find((button) => button.textContent.trim() === ${name}).click()`);
+    }
     await until(send, tab, `document.querySelectorAll('.makers > li').length > 0`, 'the model makers');
     // Scrolled to the first maker, the picture holds every maker on the list.
     await inPage(send, tab, `document.querySelector('.makers > li').scrollIntoView({ block: 'start' })`);
@@ -417,7 +429,18 @@ async function takePicture(send, address, scene, engine, sessions) {
   await send('Target.closeTarget', { targetId });
 }
 
-async function main() {
+/** The scenes to make: the ones named, or every one when none is named. */
+export function scenesNamed(names) {
+  if (names.length === 0) return SCENES;
+  const unknown = names.filter((name) => !SCENES.some((scene) => scene.file === name));
+  if (unknown.length > 0) {
+    throw new Error(`No picture is called ${unknown.join(', ')}. The pictures are ${SCENES.map((scene) => scene.file).join(', ')}.`);
+  }
+  return SCENES.filter((scene) => names.includes(scene.file));
+}
+
+async function main(names) {
+  const scenes = scenesNamed(names);
   if (!existsSync(path.join(PAGE, 'index.html'))) {
     throw new Error('The page is not built. Run `make screenshots`, which builds it first.');
   }
@@ -428,7 +451,7 @@ async function main() {
   const { browser, closed, send } = startBrowser(findBrowser(), profile);
   try {
     const address = `http://127.0.0.1:${server.address().port}/`;
-    for (const scene of SCENES) {
+    for (const scene of scenes) {
       await takePicture(send, address, scene, engine, sessions);
       console.log(`docs/screenshots/${scene.file}`);
     }
@@ -444,5 +467,5 @@ async function main() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.chdir(REPO);
-  await main();
+  await main(process.argv.slice(2));
 }

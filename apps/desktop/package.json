@@ -1,7 +1,7 @@
 {
   "name": "rusty-business",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "homepage": "https://rusty.business",
   "repository": {
@@ -15,14 +15,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node --test src/chat.test.js"
+    "test": "node --test \"src/*.test.js\""
   },
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource/instrument-serif": "^5.3.0",
     "@tauri-apps/api": "^2",
-    "katex": "^0.16.47",
+    "katex": "^0.18.2",
     "markdown-it": "^14.3.3",
     "vue": "^3.5.13"
   },

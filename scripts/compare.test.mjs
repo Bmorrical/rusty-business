@@ -55,7 +55,7 @@ test('Rust keeps the tests that keep the turn, and a chat waits for its turn', (
   const stream = engine.slice(engine.indexOf('pub async fn chat_stream('), engine.indexOf('\n}\n', engine.indexOf('pub async fn chat_stream(')));
   assert.match(
     stream,
-    /match wait_for_turn\(&chats\.turn, &mut stopped\)\.await \{\s+None => Ok\(ChatDone \{ stopped: true, \.\.ChatDone::default\(\) \}\),\s+Some\(_turn\) => \{\s+run_chat\(/,
+    /match wait_for_turn\(&chats\.turn, &mut stopped\)\.await \{\s+None => Ok\(ChatDone \{\s+stopped: true,\s+\.\.ChatDone::default\(\)\s+\}\),\s+Some\(_turn\) => \{\s+run_chat\(/,
     'a chat no longer waits for the model before it, or lets the turn go before its answer ends',
   );
   assert.match(read(SESSIONS), /models: latest_answers\(&session\.messages\),/, 'the saved chats no longer name the models that answered');

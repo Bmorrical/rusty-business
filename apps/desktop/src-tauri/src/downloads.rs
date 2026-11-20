@@ -98,13 +98,15 @@ impl Pinned {
 
 /// The models the app can download on a Mac, as MLX models. The list is built
 /// into the app, and its tests check it.
-static PINNED: LazyLock<Vec<Pinned>> =
-    LazyLock::new(|| serde_json::from_str(include_str!("../pinned-models.json")).unwrap_or_default());
+static PINNED: LazyLock<Vec<Pinned>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../pinned-models.json")).unwrap_or_default()
+});
 
 /// The same models as GGUF files, which `llama-server` serves on Windows and
 /// Linux: from the maker's own copy first, then ggml-org's.
-static GGUF_PINNED: LazyLock<Vec<Pinned>> =
-    LazyLock::new(|| serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap_or_default());
+static GGUF_PINNED: LazyLock<Vec<Pinned>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap_or_default()
+});
 
 /// The list for this system's engine.
 fn pins_here() -> &'static [Pinned] {
@@ -123,12 +125,17 @@ fn pins_for(layout: models::Layout) -> &'static [Pinned] {
 /// is a whole commit, and plain file names, each with its size and SHA-256.
 fn usable(pin: &Pinned) -> bool {
     let hex_of = |text: &str, length: usize| {
-        text.len() == length && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        text.len() == length
+            && text
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
     };
     let plain = |text: &str| {
         !text.is_empty()
             && !text.starts_with('.')
-            && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
     };
     let mut parts = pin.id.split('/');
     let id = matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if plain(owner) && plain(name));
@@ -136,14 +143,17 @@ fn usable(pin: &Pinned) -> bool {
     id && hex_of(&pin.revision, 40)
         && !pin.files.is_empty()
         && names.len() == pin.files.len()
-        && pin.files.iter().all(|file| plain(&file.name) && file.bytes > 0 && hex_of(&file.sha256, 64))
+        && pin
+            .files
+            .iter()
+            .all(|file| plain(&file.name) && file.bytes > 0 && hex_of(&file.sha256, 64))
 }
 
 /// The pin with exactly this id, when it is usable and on the app's list.
 fn pinned<'a>(pins: &'a [Pinned], id: &str) -> Option<&'a Pinned> {
-    pins.iter()
-        .find(|pin| pin.id == id)
-        .filter(|pin| usable(pin) && !engine::allowed_models(std::slice::from_ref(&pin.id)).is_empty())
+    pins.iter().find(|pin| pin.id == id).filter(|pin| {
+        usable(pin) && !engine::allowed_models(std::slice::from_ref(&pin.id)).is_empty()
+    })
 }
 
 /// The name the app gives a model, or its id when it has none.
@@ -178,7 +188,13 @@ fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
         .filter_map(|model| {
             let bytes = pinned(pins, &model.id)?.bytes();
             let license = engine::license_of(&model.name)?.to_string();
-            Some(Offer { id: model.id, name: model.name, maker: model.maker, license, bytes })
+            Some(Offer {
+                id: model.id,
+                name: model.name,
+                maker: model.maker,
+                license,
+                bytes,
+            })
         })
         .collect()
 }
@@ -275,7 +291,13 @@ fn size(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f64 / 1e9)
 }
 
-fn facts(pin: Option<&Pinned>, layout: models::Layout, hub: Option<&Path>, staging: &Path, busy: bool) -> Facts {
+fn facts(
+    pin: Option<&Pinned>,
+    layout: models::Layout,
+    hub: Option<&Path>,
+    staging: &Path,
+    busy: bool,
+) -> Facts {
     let there = match (pin, hub) {
         (Some(pin), Some(hub)) => what_is_there(layout, &hub.join(layout.folder_name(&pin.id))),
         _ => There::Nothing,
@@ -310,7 +332,11 @@ fn nearest(folder: &Path) -> Option<&Path> {
 #[cfg(unix)]
 fn same_disk(one: &Path, other: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
-    let disk = |folder: &Path| nearest(folder).and_then(|found| fs::metadata(found).ok()).map(|found| found.dev());
+    let disk = |folder: &Path| {
+        nearest(folder)
+            .and_then(|found| fs::metadata(found).ok())
+            .map(|found| found.dev())
+    };
     matches!((disk(one), disk(other)), (Some(one), Some(other)) if one == other)
 }
 
@@ -351,16 +377,23 @@ fn free_bytes(_: &Path) -> Option<u64> {
 /// True for an https address on one of Hugging Face's hosts, with no account
 /// in it and no port of its own.
 fn from_hugging_face(url: &reqwest::Url) -> bool {
-    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
         return false;
     }
     // `domain` is empty for an address given as numbers.
     let Some(host) = url.domain() else {
         return false;
     };
-    HOSTS
-        .iter()
-        .any(|own| host == *own || host.strip_suffix(own).is_some_and(|above| above.ends_with('.')))
+    HOSTS.iter().any(|own| {
+        host == *own
+            || host
+                .strip_suffix(own)
+                .is_some_and(|above| above.ends_with('.'))
+    })
 }
 
 /// A redirect is followed only to Hugging Face, and only a few times.
@@ -427,11 +460,16 @@ fn open_url(client: reqwest::Client, url: String) -> Opening {
             return Err(SENT_ELSEWHERE.to_string());
         }
         if !response.status().is_success() {
-            return Err(format!("Hugging Face answered {}.", response.status().as_u16()));
+            return Err(format!(
+                "Hugging Face answered {}.",
+                response.status().as_u16()
+            ));
         }
-        let chunks = response
-            .bytes_stream()
-            .map(|chunk| chunk.map(|bytes| bytes.to_vec()).map_err(|error| error.to_string()));
+        let chunks = response.bytes_stream().map(|chunk| {
+            chunk
+                .map(|bytes| bytes.to_vec())
+                .map_err(|error| error.to_string())
+        });
         Ok(Box::pin(chunks) as Chunks)
     })
 }
@@ -477,10 +515,20 @@ async fn fetch_file(
     cancel: &mut watch::Receiver<bool>,
     moved: &mut impl FnMut(u64),
 ) -> Result<Fetched, String> {
-    let cannot_write = |error: std::io::Error| format!("The app could not write {}: {error}.", file.name);
-    let wrong_size = || format!("{} was not the size the app expects, so the download was thrown away.", file.name);
+    let cannot_write =
+        |error: std::io::Error| format!("The app could not write {}: {error}.", file.name);
+    let wrong_size = || {
+        format!(
+            "{} was not the size the app expects, so the download was thrown away.",
+            file.name
+        )
+    };
     let landing = snapshot.join(format!("{}.part", file.name));
-    let opened = OpenOptions::new().write(true).create_new(true).open(&landing).map_err(cannot_write)?;
+    let opened = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&landing)
+        .map_err(cannot_write)?;
     let mut out = BufWriter::with_capacity(1 << 20, opened);
     let mut hash = Sha256::new();
     let mut count: u64 = 0;
@@ -493,7 +541,12 @@ async fn fetch_file(
         let Some(chunk) = next else {
             break;
         };
-        let chunk = chunk.map_err(|_| format!("The connection to Hugging Face dropped during {}.", file.name))?;
+        let chunk = chunk.map_err(|_| {
+            format!(
+                "The connection to Hugging Face dropped during {}.",
+                file.name
+            )
+        })?;
         count = count.saturating_add(chunk.len() as u64);
         if count > file.bytes {
             return Err(wrong_size());
@@ -508,7 +561,10 @@ async fn fetch_file(
         return Err(wrong_size());
     }
     if hex(hash.finalize().as_slice()) != file.sha256 {
-        return Err(format!("{} did not match the checksum the app expects, so the download was thrown away.", file.name));
+        return Err(format!(
+            "{} did not match the checksum the app expects, so the download was thrown away.",
+            file.name
+        ));
     }
     fs::rename(&landing, snapshot.join(&file.name)).map_err(cannot_write)?;
     Ok(Fetched::Whole)
@@ -562,7 +618,9 @@ async fn fetch_model(
         fs::write(staged.join("refs").join("main"), &pin.revision).map_err(cannot)?;
     }
     if !layout.whole(staged) {
-        return Err("The download finished without a whole model, so it was thrown away.".to_string());
+        return Err(
+            "The download finished without a whole model, so it was thrown away.".to_string(),
+        );
     }
     Ok(Fetched::Whole)
 }
@@ -570,14 +628,26 @@ async fn fetch_model(
 /// Moves a finished model into the models folder in one step, and only where
 /// there is no folder for it yet.
 fn move_in(staged: &Path, hub: &Path, folder: &str, name: &str) -> Result<(), String> {
-    let cannot = |error: std::io::Error| format!("The app could not move {name} into the models folder: {error}.");
-    let taken = || format!("Something put a folder for {name} in the models folder while it downloaded, so the app left that folder as it is.");
+    let cannot = |error: std::io::Error| {
+        format!("The app could not move {name} into the models folder: {error}.")
+    };
+    let taken = || {
+        format!(
+            "Something put a folder for {name} in the models folder while it downloaded, so the app left that folder as it is."
+        )
+    };
     fs::create_dir_all(hub).map_err(cannot)?;
     let target = hub.join(folder);
     if fs::symlink_metadata(&target).is_ok() {
         return Err(taken());
     }
-    rename_new(staged, &target).map_err(|error| if error.kind() == ErrorKind::AlreadyExists { taken() } else { cannot(error) })
+    rename_new(staged, &target).map_err(|error| {
+        if error.kind() == ErrorKind::AlreadyExists {
+            taken()
+        } else {
+            cannot(error)
+        }
+    })
 }
 
 /// Renames `from` to `to`, and refuses when anything is at `to` already, even
@@ -635,11 +705,19 @@ impl Drop for Running<'_> {
 
 impl Downloads {
     pub fn new(staging: PathBuf) -> Self {
-        Self { staging, running: Mutex::new(None) }
+        Self {
+            staging,
+            running: Mutex::new(None),
+        }
     }
 
     fn slot(&self) -> MutexGuard<'_, Option<watch::Sender<bool>>> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// True while a download is running.
+    pub fn running(&self) -> bool {
+        self.slot().is_some()
     }
 
     /// Stops the download that is running, if one is.
@@ -657,7 +735,11 @@ impl Downloads {
             return;
         };
         for entry in entries.flatten() {
-            if entry.file_name().to_str().is_some_and(|name| name.starts_with(STAGED)) {
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(STAGED))
+            {
                 let _ = fs::remove_dir_all(entry.path());
             }
         }
@@ -678,7 +760,12 @@ impl Downloads {
             let mut slot = self.slot();
             let facts = facts(pin, layout, hub.as_deref(), &self.staging, slot.is_some());
             match plan(&facts) {
-                Step::Nothing => return Ok(DownloadReport { whole: true, stopped: false }),
+                Step::Nothing => {
+                    return Ok(DownloadReport {
+                        whole: true,
+                        stopped: false,
+                    });
+                }
                 Step::Cannot(why) => return Err(sentence(why, &name, facts.needed)),
                 Step::Fetch => {}
             }
@@ -697,8 +784,14 @@ impl Downloads {
         self.clear();
         let fetched = fetch_model(pin, layout, &staged, &mut open, &mut cancel, &mut report).await;
         let result = match fetched {
-            Ok(Fetched::Whole) => move_in(&staged, &hub, &folder, &name).map(|()| DownloadReport { whole: true, stopped: false }),
-            Ok(Fetched::Stopped) => Ok(DownloadReport { whole: false, stopped: true }),
+            Ok(Fetched::Whole) => move_in(&staged, &hub, &folder, &name).map(|()| DownloadReport {
+                whole: true,
+                stopped: false,
+            }),
+            Ok(Fetched::Stopped) => Ok(DownloadReport {
+                whole: false,
+                stopped: true,
+            }),
             Err(error) => Err(error),
         };
         self.clear();
@@ -708,6 +801,10 @@ impl Downloads {
 
 /// A download while the outbound gate stays on. Each file is asked for only
 /// while it is on, and a download stopped by turning it off says so.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the download's own arguments, plus the gate it waits on"
+)]
 async fn download_through(
     downloads: &Downloads,
     gate: &Gate,
@@ -722,8 +819,16 @@ async fn download_through(
         return Err(GATE_OFF.to_string());
     }
     let watching = gate.clone();
-    let gated = move |url: String| -> Opening { if watching.is_open() { open(url) } else { Box::pin(async { Err(GATE_TURNED_OFF.to_string()) }) } };
-    let done = downloads.download(id, pins, layout, hub, gated, report).await?;
+    let gated = move |url: String| -> Opening {
+        if watching.is_open() {
+            open(url)
+        } else {
+            Box::pin(async { Err(GATE_TURNED_OFF.to_string()) })
+        }
+    };
+    let done = downloads
+        .download(id, pins, layout, hub, gated, report)
+        .await?;
     if done.stopped && !gate.is_open() {
         return Err(GATE_TURNED_OFF.to_string());
     }
@@ -744,7 +849,17 @@ pub async fn download_model(
         let _ = on_progress.send(progress);
     };
     let layout = models::Layout::here();
-    let done = download_through(&downloads, &gate, &id, pins_here(), layout, hub, open, report).await?;
+    let done = download_through(
+        &downloads,
+        &gate,
+        &id,
+        pins_here(),
+        layout,
+        hub,
+        open,
+        report,
+    )
+    .await?;
     if reloads_after(layout, &done)
         && let Ok(base) = engine::base_url()
     {
@@ -790,7 +905,8 @@ mod tests {
     type Files = Vec<(String, Vec<u8>)>;
 
     fn scratch() -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
+        let folder =
+            std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
         folder
     }
@@ -803,9 +919,15 @@ mod tests {
     fn files() -> Files {
         vec![
             ("config.json".to_string(), b"{}".to_vec()),
-            ("model.safetensors.index.json".to_string(), br#"{"weight_map":{"layers.0.weight":"model.safetensors"}}"#.to_vec()),
+            (
+                "model.safetensors.index.json".to_string(),
+                br#"{"weight_map":{"layers.0.weight":"model.safetensors"}}"#.to_vec(),
+            ),
             ("tokenizer_config.json".to_string(), b"{}".to_vec()),
-            ("model.safetensors".to_string(), (0..300_000u32).map(|n| (n % 251) as u8).collect()),
+            (
+                "model.safetensors".to_string(),
+                (0..300_000u32).map(|n| (n % 251) as u8).collect(),
+            ),
         ]
     }
 
@@ -815,13 +937,29 @@ mod tests {
             revision: REVISION.to_string(),
             files: files
                 .iter()
-                .map(|(name, body)| PinnedFile { name: name.clone(), bytes: body.len() as u64, sha256: sha(body) })
+                .map(|(name, body)| PinnedFile {
+                    name: name.clone(),
+                    bytes: body.len() as u64,
+                    sha256: sha(body),
+                })
                 .collect(),
         }
     }
 
     fn with_body(files: &Files, name: &str, body: Vec<u8>) -> Files {
-        files.iter().map(|(file, old)| (file.clone(), if file == name { body.clone() } else { old.clone() })).collect()
+        files
+            .iter()
+            .map(|(file, old)| {
+                (
+                    file.clone(),
+                    if file == name {
+                        body.clone()
+                    } else {
+                        old.clone()
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Serves `files` from memory in small parts, and keeps every address it
@@ -830,11 +968,15 @@ mod tests {
     fn serving(files: Files, asked: Arc<Mutex<Vec<String>>>) -> impl FnMut(String) -> Opening {
         move |url: String| {
             let asked = asked.clone();
-            let body = files.iter().find(|(name, _)| url.ends_with(&format!("/{name}"))).map(|(_, body)| body.clone());
+            let body = files
+                .iter()
+                .find(|(name, _)| url.ends_with(&format!("/{name}")))
+                .map(|(_, body)| body.clone());
             Box::pin(async move {
                 asked.lock().unwrap().push(url);
                 let body = body.ok_or_else(|| "Hugging Face answered 404.".to_string())?;
-                let parts: Vec<Result<Vec<u8>, String>> = body.chunks(65_536).map(|part| Ok(part.to_vec())).collect();
+                let parts: Vec<Result<Vec<u8>, String>> =
+                    body.chunks(65_536).map(|part| Ok(part.to_vec())).collect();
                 Ok(Box::pin(futures_util::stream::iter(parts)) as Chunks)
             })
         }
@@ -860,7 +1002,11 @@ mod tests {
             };
             for entry in entries.flatten() {
                 let found = fs::symlink_metadata(entry.path()).unwrap();
-                seen.push(format!("{} {}", entry.path().strip_prefix(folder).unwrap().display(), found.len()));
+                seen.push(format!(
+                    "{} {}",
+                    entry.path().strip_prefix(folder).unwrap().display(),
+                    found.len()
+                ));
                 if found.is_dir() {
                     waiting.push(entry.path());
                 }
@@ -885,7 +1031,11 @@ mod tests {
     fn place() -> Place {
         let root = scratch();
         let staging = root.join("downloads");
-        Place { hub: root.join("hub"), downloads: Downloads::new(staging.clone()), staging }
+        Place {
+            hub: root.join("hub"),
+            downloads: Downloads::new(staging.clone()),
+            staging,
+        }
     }
 
     fn whole_model(hub: &Path, files: &Files) {
@@ -900,21 +1050,44 @@ mod tests {
     }
 
     fn base() -> Facts {
-        Facts { listed: true, hub: true, there: There::Nothing, busy: false, same_disk: true, free: Some(100), needed: 50 }
+        Facts {
+            listed: true,
+            hub: true,
+            there: There::Nothing,
+            busy: false,
+            same_disk: true,
+            free: Some(100),
+            needed: 50,
+        }
     }
 
     // -- The list ------------------------------------------------------------
 
     #[test]
     fn every_model_on_the_list_is_pinned_and_nothing_else_is() {
-        let read: Vec<Pinned> = serde_json::from_str(include_str!("../pinned-models.json")).unwrap();
+        let read: Vec<Pinned> =
+            serde_json::from_str(include_str!("../pinned-models.json")).unwrap();
         assert_eq!(read.len(), PINNED.len());
-        assert_eq!(names_of(&offers_from(&PINNED)), ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"]);
+        assert_eq!(
+            names_of(&offers_from(&PINNED)),
+            [
+                "Phi-4",
+                "gpt-oss 20B",
+                "Nemotron 3.5 Lightning",
+                "Gemma 4 26B",
+                "Llama 3.1 8B"
+            ]
+        );
         let ids: BTreeSet<&str> = PINNED.iter().map(|pin| pin.id.as_str()).collect();
         assert_eq!(ids.len(), PINNED.len(), "each model is pinned once");
         for pin in PINNED.iter() {
             assert!(usable(pin), "{} is not usable as pinned", pin.id);
-            assert_eq!(engine::allowed_models(std::slice::from_ref(&pin.id)).len(), 1, "{} is on the list", pin.id);
+            assert_eq!(
+                engine::allowed_models(std::slice::from_ref(&pin.id)).len(),
+                1,
+                "{} is on the list",
+                pin.id
+            );
         }
     }
 
@@ -926,30 +1099,68 @@ mod tests {
     fn each_pinned_model_has_the_files_the_engine_asks_for() {
         for pin in PINNED.iter() {
             let names: BTreeSet<&str> = pin.files.iter().map(|file| file.name.as_str()).collect();
-            for needed in ["config.json", "model.safetensors.index.json", "tokenizer_config.json"] {
+            for needed in [
+                "config.json",
+                "model.safetensors.index.json",
+                "tokenizer_config.json",
+            ] {
                 assert!(names.contains(needed), "{} has {needed}", pin.id);
             }
-            assert!(names.iter().any(|name| name.ends_with(".safetensors")), "{} has weights", pin.id);
+            assert!(
+                names.iter().any(|name| name.ends_with(".safetensors")),
+                "{} has weights",
+                pin.id
+            );
         }
     }
 
     #[test]
     fn the_sizes_offered_are_the_whole_downloads() {
-        let sizes: Vec<(&str, u64)> = PINNED.iter().map(|pin| (pin.id.as_str(), pin.bytes())).collect();
+        let sizes: Vec<(&str, u64)> = PINNED
+            .iter()
+            .map(|pin| (pin.id.as_str(), pin.bytes()))
+            .collect();
         assert_eq!(
             sizes,
             [
                 (PHI, 8_256_384_748),
                 ("mlx-community/gpt-oss-20b-MXFP4-Q8", 12_104_215_835),
-                ("mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit", 17_792_581_692),
+                (
+                    "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
+                    17_792_581_692
+                ),
                 ("mlx-community/gemma-4-26b-a4b-it-4bit", 15_373_586_252),
                 ("mlx-community/Llama-3.1-8B-Instruct-4bit", 4_534_808_112),
             ]
         );
-        let offered: Vec<u64> = offers_from(&PINNED).iter().map(|offer| offer.bytes).collect();
-        assert_eq!(offered, [8_256_384_748, 12_104_215_835, 17_792_581_692, 15_373_586_252, 4_534_808_112]);
-        let licenses: Vec<String> = offers_from(&PINNED).into_iter().map(|offer| offer.license).collect();
-        assert_eq!(licenses, ["MIT", "Apache 2.0", "OpenMDW 1.1", "Apache 2.0", "Llama 3.1 Community License"]);
+        let offered: Vec<u64> = offers_from(&PINNED)
+            .iter()
+            .map(|offer| offer.bytes)
+            .collect();
+        assert_eq!(
+            offered,
+            [
+                8_256_384_748,
+                12_104_215_835,
+                17_792_581_692,
+                15_373_586_252,
+                4_534_808_112
+            ]
+        );
+        let licenses: Vec<String> = offers_from(&PINNED)
+            .into_iter()
+            .map(|offer| offer.license)
+            .collect();
+        assert_eq!(
+            licenses,
+            [
+                "MIT",
+                "Apache 2.0",
+                "OpenMDW 1.1",
+                "Apache 2.0",
+                "Llama 3.1 Community License"
+            ]
+        );
     }
 
     #[test]
@@ -962,21 +1173,44 @@ mod tests {
             change(&mut pin);
             cases.push((what, pin));
         };
-        bad("a revision that is a branch", &|pin| pin.revision = "main".to_string());
-        bad("a revision in capitals", &|pin| pin.revision = pin.revision.to_uppercase());
-        bad("an id with two slashes", &|pin| pin.id = "mlx-community/phi-4/4bit".to_string());
-        bad("an id with no slash", &|pin| pin.id = "phi-4-4bit".to_string());
-        bad("a file in a folder", &|pin| pin.files[0].name = "nested/config.json".to_string());
-        bad("a file above the folder", &|pin| pin.files[0].name = "..".to_string());
-        bad("a hidden file", &|pin| pin.files[0].name = ".config.json".to_string());
-        bad("a file named twice", &|pin| pin.files[1].name = pin.files[0].name.clone());
+        bad("a revision that is a branch", &|pin| {
+            pin.revision = "main".to_string()
+        });
+        bad("a revision in capitals", &|pin| {
+            pin.revision = pin.revision.to_uppercase()
+        });
+        bad("an id with two slashes", &|pin| {
+            pin.id = "mlx-community/phi-4/4bit".to_string()
+        });
+        bad("an id with no slash", &|pin| {
+            pin.id = "phi-4-4bit".to_string()
+        });
+        bad("a file in a folder", &|pin| {
+            pin.files[0].name = "nested/config.json".to_string()
+        });
+        bad("a file above the folder", &|pin| {
+            pin.files[0].name = "..".to_string()
+        });
+        bad("a hidden file", &|pin| {
+            pin.files[0].name = ".config.json".to_string()
+        });
+        bad("a file named twice", &|pin| {
+            pin.files[1].name = pin.files[0].name.clone()
+        });
         bad("a file with no size", &|pin| pin.files[0].bytes = 0);
-        bad("a checksum in capitals", &|pin| pin.files[0].sha256 = pin.files[0].sha256.to_uppercase());
-        bad("a checksum cut short", &|pin| pin.files[0].sha256.truncate(40));
+        bad("a checksum in capitals", &|pin| {
+            pin.files[0].sha256 = pin.files[0].sha256.to_uppercase()
+        });
+        bad("a checksum cut short", &|pin| {
+            pin.files[0].sha256.truncate(40)
+        });
         bad("no files", &|pin| pin.files.clear());
         for (what, pin) in cases {
             assert!(!usable(&pin), "{what}");
-            assert!(pinned(&[pin], PHI).is_none() || what.starts_with("an id"), "{what}");
+            assert!(
+                pinned(&[pin], PHI).is_none() || what.starts_with("an id"),
+                "{what}"
+            );
         }
     }
 
@@ -984,24 +1218,55 @@ mod tests {
     // its models "Maker first, then ggml-org (Recommended)". On Windows and
     // Linux, the same five models come as GGUF files for `llama-server`.
 
-    const FIVE: [&str; 5] = ["Phi-4", "gpt-oss 20B", "Nemotron 3.5 Lightning", "Gemma 4 26B", "Llama 3.1 8B"];
+    const FIVE: [&str; 5] = [
+        "Phi-4",
+        "gpt-oss 20B",
+        "Nemotron 3.5 Lightning",
+        "Gemma 4 26B",
+        "Llama 3.1 8B",
+    ];
 
     #[test]
     fn every_gguf_model_is_pinned_from_the_maker_first_then_ggml_org() {
         // "Maker first, then ggml-org (Recommended)"
-        let read: Vec<Pinned> = serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap();
+        let read: Vec<Pinned> =
+            serde_json::from_str(include_str!("../pinned-gguf-models.json")).unwrap();
         assert_eq!(read.len(), GGUF_PINNED.len());
-        assert_eq!(names_of(&offers_from(&GGUF_PINNED)), FIVE, "the same five models as on a Mac");
-        let owners: Vec<&str> = GGUF_PINNED.iter().map(|pin| pin.id.split('/').next().unwrap()).collect();
-        assert_eq!(owners, ["microsoft", "ggml-org", "ggml-org", "google", "ggml-org"]);
-        let makers = [("Microsoft", "microsoft"), ("OpenAI", "openai"), ("NVIDIA", "nvidia"), ("Google", "google"), ("Meta", "meta-llama")];
+        assert_eq!(
+            names_of(&offers_from(&GGUF_PINNED)),
+            FIVE,
+            "the same five models as on a Mac"
+        );
+        let owners: Vec<&str> = GGUF_PINNED
+            .iter()
+            .map(|pin| pin.id.split('/').next().unwrap())
+            .collect();
+        assert_eq!(
+            owners,
+            ["microsoft", "ggml-org", "ggml-org", "google", "ggml-org"]
+        );
+        let makers = [
+            ("Microsoft", "microsoft"),
+            ("OpenAI", "openai"),
+            ("NVIDIA", "nvidia"),
+            ("Google", "google"),
+            ("Meta", "meta-llama"),
+        ];
         for pin in GGUF_PINNED.iter() {
             assert!(usable(pin), "{} is not usable as pinned", pin.id);
             let model = engine::allowed_models(std::slice::from_ref(&pin.id));
             assert_eq!(model.len(), 1, "{} is on the list", pin.id);
-            let maker = makers.iter().find(|(name, _)| *name == model[0].maker).map(|(_, owner)| *owner).expect("a maker the test knows");
+            let maker = makers
+                .iter()
+                .find(|(name, _)| *name == model[0].maker)
+                .map(|(_, owner)| *owner)
+                .expect("a maker the test knows");
             let owner = pin.id.split('/').next().unwrap();
-            assert!(owner == maker || owner == "ggml-org", "{} comes from {maker} or ggml-org", pin.id);
+            assert!(
+                owner == maker || owner == "ggml-org",
+                "{} comes from {maker} or ggml-org",
+                pin.id
+            );
         }
     }
 
@@ -1009,44 +1274,99 @@ mod tests {
     fn each_gguf_pin_is_a_model_llama_server_loads_whole() {
         // "add an engine to linux and windows distro's"
         for pin in GGUF_PINNED.iter() {
-            assert!(pin.files.iter().all(|file| file.name.ends_with(".gguf")), "{} is GGUF files only", pin.id);
+            assert!(
+                pin.files.iter().all(|file| file.name.ends_with(".gguf")),
+                "{} is GGUF files only",
+                pin.id
+            );
             let folder = scratch().join(Layout::Gguf.folder_name(&pin.id));
             fs::create_dir_all(&folder).unwrap();
             for file in &pin.files {
                 fs::write(folder.join(&file.name), "weights").unwrap();
             }
-            assert!(models::whole_gguf(&folder), "{} lands as a whole model", pin.id);
+            assert!(
+                models::whole_gguf(&folder),
+                "{} lands as a whole model",
+                pin.id
+            );
             // llama-server names the model by its folder, and the app knows
             // the model by that name.
             let by_folder = engine::allowed_models(&[Layout::Gguf.folder_name(&pin.id)]);
-            assert_eq!(by_folder.first().map(|model| model.name.clone()), Some(name_of(&pin.id)), "{}", pin.id);
+            assert_eq!(
+                by_folder.first().map(|model| model.name.clone()),
+                Some(name_of(&pin.id)),
+                "{}",
+                pin.id
+            );
         }
     }
 
     #[test]
     fn the_gguf_sizes_offered_are_the_whole_downloads() {
-        let offered: Vec<u64> = offers_from(&GGUF_PINNED).iter().map(|offer| offer.bytes).collect();
-        assert_eq!(offered, [9_053_114_560, 12_109_566_624, 18_898_091_584, 14_439_363_584, 6_036_116_480]);
-        let licenses: Vec<String> = offers_from(&GGUF_PINNED).into_iter().map(|offer| offer.license).collect();
-        assert_eq!(licenses, ["MIT", "Apache 2.0", "OpenMDW 1.1", "Apache 2.0", "Llama 3.1 Community License"]);
+        let offered: Vec<u64> = offers_from(&GGUF_PINNED)
+            .iter()
+            .map(|offer| offer.bytes)
+            .collect();
+        assert_eq!(
+            offered,
+            [
+                9_053_114_560,
+                12_109_566_624,
+                18_898_091_584,
+                14_439_363_584,
+                6_036_116_480
+            ]
+        );
+        let licenses: Vec<String> = offers_from(&GGUF_PINNED)
+            .into_iter()
+            .map(|offer| offer.license)
+            .collect();
+        assert_eq!(
+            licenses,
+            [
+                "MIT",
+                "Apache 2.0",
+                "OpenMDW 1.1",
+                "Apache 2.0",
+                "Llama 3.1 Community License"
+            ]
+        );
     }
 
     #[test]
     fn every_system_is_offered_the_five_models() {
         // Windows and Linux were offered nothing before llama-server.
         assert_eq!(names_of(&offers()), FIVE);
-        let gguf: Vec<&str> = pins_for(Layout::Gguf).iter().map(|pin| pin.id.as_str()).collect();
+        let gguf: Vec<&str> = pins_for(Layout::Gguf)
+            .iter()
+            .map(|pin| pin.id.as_str())
+            .collect();
         assert_eq!(gguf.len(), 5);
-        assert!(gguf.iter().all(|id| id.to_lowercase().contains("gguf")), "Windows and Linux get the GGUF list: {gguf:?}");
-        let mlx: Vec<&str> = pins_for(Layout::Hub).iter().map(|pin| pin.id.as_str()).collect();
-        assert!(mlx.iter().all(|id| id.starts_with("mlx-community/")), "a Mac gets the MLX list: {mlx:?}");
-        assert_eq!(names_of(&offers_from(pins_for(Layout::Hub))), names_of(&offers_from(pins_for(Layout::Gguf))));
+        assert!(
+            gguf.iter().all(|id| id.to_lowercase().contains("gguf")),
+            "Windows and Linux get the GGUF list: {gguf:?}"
+        );
+        let mlx: Vec<&str> = pins_for(Layout::Hub)
+            .iter()
+            .map(|pin| pin.id.as_str())
+            .collect();
+        assert!(
+            mlx.iter().all(|id| id.starts_with("mlx-community/")),
+            "a Mac gets the MLX list: {mlx:?}"
+        );
+        assert_eq!(
+            names_of(&offers_from(pins_for(Layout::Hub))),
+            names_of(&offers_from(pins_for(Layout::Gguf)))
+        );
     }
 
     #[test]
     fn only_a_model_on_the_list_is_offered() {
         let files = files();
-        let pins = vec![pin_for("mlx-community/some-other-model", &files), pin_for(PHI, &files)];
+        let pins = vec![
+            pin_for("mlx-community/some-other-model", &files),
+            pin_for(PHI, &files),
+        ];
         assert_eq!(names_of(&offers_from(&pins)), ["Phi-4"]);
         assert_eq!(offers_from(&pins)[0].bytes, pins[1].bytes());
     }
@@ -1057,26 +1377,117 @@ mod tests {
     fn the_whole_plan_is_checked_in_order() {
         assert_eq!(plan(&base()), Step::Fetch);
         let cases: [(&str, Facts, Step); 10] = [
-            ("not on the list", Facts { listed: false, ..base() }, Step::Cannot(Why::NotListed)),
-            ("not on the list beats all", Facts { listed: false, hub: false, busy: true, ..base() }, Step::Cannot(Why::NotListed)),
-            ("no models folder", Facts { hub: false, ..base() }, Step::Cannot(Why::NoModelsFolder)),
-            ("already whole", Facts { there: There::Whole, ..base() }, Step::Nothing),
-            ("already whole, while busy", Facts { there: There::Whole, busy: true, free: Some(0), ..base() }, Step::Nothing),
-            ("busy", Facts { busy: true, there: There::Part, ..base() }, Step::Cannot(Why::Busy)),
-            ("part there", Facts { there: There::Part, same_disk: false, ..base() }, Step::Cannot(Why::PartThere)),
-            ("another disk", Facts { same_disk: false, free: Some(0), ..base() }, Step::Cannot(Why::OtherDisk)),
-            ("no room", Facts { free: Some(49), ..base() }, Step::Cannot(Why::NoRoom)),
-            ("free space unknown", Facts { free: None, ..base() }, Step::Fetch),
+            (
+                "not on the list",
+                Facts {
+                    listed: false,
+                    ..base()
+                },
+                Step::Cannot(Why::NotListed),
+            ),
+            (
+                "not on the list beats all",
+                Facts {
+                    listed: false,
+                    hub: false,
+                    busy: true,
+                    ..base()
+                },
+                Step::Cannot(Why::NotListed),
+            ),
+            (
+                "no models folder",
+                Facts {
+                    hub: false,
+                    ..base()
+                },
+                Step::Cannot(Why::NoModelsFolder),
+            ),
+            (
+                "already whole",
+                Facts {
+                    there: There::Whole,
+                    ..base()
+                },
+                Step::Nothing,
+            ),
+            (
+                "already whole, while busy",
+                Facts {
+                    there: There::Whole,
+                    busy: true,
+                    free: Some(0),
+                    ..base()
+                },
+                Step::Nothing,
+            ),
+            (
+                "busy",
+                Facts {
+                    busy: true,
+                    there: There::Part,
+                    ..base()
+                },
+                Step::Cannot(Why::Busy),
+            ),
+            (
+                "part there",
+                Facts {
+                    there: There::Part,
+                    same_disk: false,
+                    ..base()
+                },
+                Step::Cannot(Why::PartThere),
+            ),
+            (
+                "another disk",
+                Facts {
+                    same_disk: false,
+                    free: Some(0),
+                    ..base()
+                },
+                Step::Cannot(Why::OtherDisk),
+            ),
+            (
+                "no room",
+                Facts {
+                    free: Some(49),
+                    ..base()
+                },
+                Step::Cannot(Why::NoRoom),
+            ),
+            (
+                "free space unknown",
+                Facts {
+                    free: None,
+                    ..base()
+                },
+                Step::Fetch,
+            ),
         ];
         for (what, facts, step) in cases {
             assert_eq!(plan(&facts), step, "{what}");
         }
-        assert_eq!(plan(&Facts { free: Some(50), ..base() }), Step::Fetch, "exactly enough room");
+        assert_eq!(
+            plan(&Facts {
+                free: Some(50),
+                ..base()
+            }),
+            Step::Fetch,
+            "exactly enough room"
+        );
     }
 
     #[test]
     fn each_reason_is_one_sentence() {
-        for why in [Why::NotListed, Why::NoModelsFolder, Why::Busy, Why::PartThere, Why::OtherDisk, Why::NoRoom] {
+        for why in [
+            Why::NotListed,
+            Why::NoModelsFolder,
+            Why::Busy,
+            Why::PartThere,
+            Why::OtherDisk,
+            Why::NoRoom,
+        ] {
             let said = sentence(why, "Phi-4", 10_256_384_748);
             assert!(said.ends_with('.') && !said.contains('\n'), "{said:?}");
             assert!(said.starts_with(char::is_uppercase), "{said:?}");
@@ -1143,7 +1554,10 @@ mod tests {
         assert!(may_follow(&home, MOST_HOPS));
         assert!(!may_follow(&home, MOST_HOPS + 1));
         assert!(!may_follow(&away, 1));
-        assert_eq!(file_url(&pin_for(PHI, &files()), &pin_for(PHI, &files()).files[0]), format!("https://huggingface.co/{PHI}/resolve/{REVISION}/config.json"));
+        assert_eq!(
+            file_url(&pin_for(PHI, &files()), &pin_for(PHI, &files()).files[0]),
+            format!("https://huggingface.co/{PHI}/resolve/{REVISION}/config.json")
+        );
     }
 
     /// Answers every caller with `answer`, and counts the callers.
@@ -1167,7 +1581,11 @@ mod tests {
         // The stand-in speaks plain http, which the app's own client refuses
         // outright, so this client has the app's redirect rule and nothing
         // else. Each refusal comes before anything is asked of the new place.
-        let client = reqwest::Client::builder().no_proxy().redirect(redirect_policy()).build().unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(redirect_policy())
+            .build()
+            .unwrap();
         for place in [
             "https://example.com/model.safetensors",
             "http://huggingface.co/model.safetensors",
@@ -1178,11 +1596,18 @@ mod tests {
             let port = listener.local_addr().unwrap().port();
             let callers = answer_at(
                 listener,
-                format!("HTTP/1.1 302 Found\r\nLocation: {place}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {place}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                ),
             );
-            let error = block_on(client.get(format!("http://127.0.0.1:{port}/start")).send()).unwrap_err();
+            let error =
+                block_on(client.get(format!("http://127.0.0.1:{port}/start")).send()).unwrap_err();
             assert!(error.is_redirect(), "{place}: {error:?}");
-            assert_eq!(callers.load(Ordering::SeqCst), 1, "{place}: the stand-in was asked once");
+            assert_eq!(
+                callers.load(Ordering::SeqCst),
+                1,
+                "{place}: the stand-in was asked once"
+            );
         }
     }
 
@@ -1190,8 +1615,16 @@ mod tests {
     fn the_apps_client_refuses_plain_http_before_it_connects() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let callers = answer_at(listener, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string());
-        let error = block_on(open_client().get(format!("http://127.0.0.1:{port}/")).send()).unwrap_err();
+        let callers = answer_at(
+            listener,
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+        );
+        let error = block_on(
+            open_client()
+                .get(format!("http://127.0.0.1:{port}/"))
+                .send(),
+        )
+        .unwrap_err();
         assert!(error.is_builder(), "{error:?}");
         thread::sleep(Duration::from_millis(100));
         assert_eq!(callers.load(Ordering::SeqCst), 0);
@@ -1200,11 +1633,25 @@ mod tests {
     #[test]
     fn the_apps_client_uses_no_proxy_and_the_redirect_rule_and_sends_no_referer() {
         // A client cannot be asked how it was built, so this reads the builder.
-        let built =
-            include_str!("downloads.rs").split_once("fn client(gate: &Gate)").and_then(|(_, rest)| rest.split_once("\n}\n")).expect("the app's client").0;
-        assert!(built.contains("gate.client(GATE_OFF,"), "the client does not go through the gate: {built}");
-        for setting in [".no_proxy()", ".https_only(true)", ".redirect(redirect_policy())", ".referer(false)"] {
-            assert!(built.contains(setting), "{setting} is missing from: {built}");
+        let built = include_str!("downloads.rs")
+            .split_once("fn client(gate: &Gate)")
+            .and_then(|(_, rest)| rest.split_once("\n}\n"))
+            .expect("the app's client")
+            .0;
+        assert!(
+            built.contains("gate.client(GATE_OFF,"),
+            "the client does not go through the gate: {built}"
+        );
+        for setting in [
+            ".no_proxy()",
+            ".https_only(true)",
+            ".redirect(redirect_policy())",
+            ".referer(false)",
+        ] {
+            assert!(
+                built.contains(setting),
+                "{setting} is missing from: {built}"
+            );
         }
     }
 
@@ -1213,17 +1660,30 @@ mod tests {
         // Brad, 2026-11-19: "add an engine to linux and windows distro's".
         // `llama-server` reads its models folder when it starts, so a model
         // downloaded while it runs would not be listed until then.
-        let whole = DownloadReport { whole: true, stopped: false };
-        let stopped = DownloadReport { whole: false, stopped: true };
+        let whole = DownloadReport {
+            whole: true,
+            stopped: false,
+        };
+        let stopped = DownloadReport {
+            whole: false,
+            stopped: true,
+        };
         assert!(reloads_after(models::Layout::Gguf, &whole));
         assert!(!reloads_after(models::Layout::Gguf, &stopped));
-        assert!(!reloads_after(models::Layout::Hub, &whole), "mlx_lm.server looks in the cache each time");
+        assert!(
+            !reloads_after(models::Layout::Hub, &whole),
+            "mlx_lm.server looks in the cache each time"
+        );
         let command = include_str!("downloads.rs")
             .split_once("pub async fn download_model(")
             .and_then(|(_, rest)| rest.split_once("\n}\n"))
             .expect("the download command")
             .0;
-        assert!(command.contains("reloads_after(layout, &done)") && command.contains("engine::reload_models(&base).await"), "{command}");
+        assert!(
+            command.contains("reloads_after(layout, &done)")
+                && command.contains("engine::reload_models(&base).await"),
+            "{command}"
+        );
     }
 
     #[test]
@@ -1232,9 +1692,16 @@ mod tests {
         // left to stop it.
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let callers = answer_at(listener, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi".to_string());
+        let callers = answer_at(
+            listener,
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi".to_string(),
+        );
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
-        let error = block_on(open_url(client, format!("http://127.0.0.1:{port}/model.safetensors"))).err();
+        let error = block_on(open_url(
+            client,
+            format!("http://127.0.0.1:{port}/model.safetensors"),
+        ))
+        .err();
         assert_eq!(error.as_deref(), Some(SENT_ELSEWHERE));
         assert_eq!(callers.load(Ordering::SeqCst), 1);
     }
@@ -1248,21 +1715,56 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         let asked = Arc::new(Mutex::new(Vec::new()));
         let mut told = Vec::new();
-        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), serving(files.clone(), asked.clone()), |progress| told.push(progress)))
-            .unwrap();
-        assert_eq!(report, DownloadReport { whole: true, stopped: false });
+        let report = block_on(place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            serving(files.clone(), asked.clone()),
+            |progress| told.push(progress),
+        ))
+        .unwrap();
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: true,
+                stopped: false
+            }
+        );
         assert_eq!(names(&models::models_in(&place.hub)), ["Phi-4"]);
 
-        let wanted: Vec<String> = files.iter().map(|(name, _)| format!("https://huggingface.co/{PHI}/resolve/{REVISION}/{name}")).collect();
-        assert_eq!(*asked.lock().unwrap(), wanted, "each pinned file is asked for once, in order");
+        let wanted: Vec<String> = files
+            .iter()
+            .map(|(name, _)| format!("https://huggingface.co/{PHI}/resolve/{REVISION}/{name}"))
+            .collect();
+        assert_eq!(
+            *asked.lock().unwrap(),
+            wanted,
+            "each pinned file is asked for once, in order"
+        );
 
         let folder = place.hub.join(models::folder_name(PHI));
-        assert_eq!(fs::read_to_string(folder.join("refs").join("main")).unwrap(), REVISION, "no line ending");
+        assert_eq!(
+            fs::read_to_string(folder.join("refs").join("main")).unwrap(),
+            REVISION,
+            "no line ending"
+        );
         for (name, body) in &files {
-            assert_eq!(&fs::read(folder.join("snapshots").join(REVISION).join(name)).unwrap(), body, "{name}");
+            assert_eq!(
+                &fs::read(folder.join("snapshots").join(REVISION).join(name)).unwrap(),
+                body,
+                "{name}"
+            );
         }
-        assert!(!everything_in(&folder).iter().any(|seen| seen.contains(".part")));
-        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+        assert!(
+            !everything_in(&folder)
+                .iter()
+                .any(|seen| seen.contains(".part"))
+        );
+        assert!(
+            everything_in(&place.staging).is_empty(),
+            "nothing is left in the app's folder"
+        );
         assert!(place.downloads.slot().is_none(), "the slot is free again");
 
         let total = pins[0].bytes();
@@ -1274,7 +1776,10 @@ mod tests {
     const PHI_GGUF: &str = "microsoft/phi-4-gguf";
 
     fn gguf_files() -> Files {
-        vec![("phi-4-Q4_K.gguf".to_string(), (0..300_000u32).map(|n| (n % 241) as u8).collect())]
+        vec![(
+            "phi-4-Q4_K.gguf".to_string(),
+            (0..300_000u32).map(|n| (n % 241) as u8).collect(),
+        )]
     }
 
     #[test]
@@ -1284,21 +1789,63 @@ mod tests {
         let files = gguf_files();
         let pins = vec![pin_for(PHI_GGUF, &files)];
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let report = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), serving(files.clone(), asked.clone()), |_| {}))
-            .unwrap();
-        assert_eq!(report, DownloadReport { whole: true, stopped: false });
+        let report = block_on(place.downloads.download(
+            PHI_GGUF,
+            &pins,
+            Layout::Gguf,
+            Some(place.hub.clone()),
+            serving(files.clone(), asked.clone()),
+            |_| {},
+        ))
+        .unwrap();
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: true,
+                stopped: false
+            }
+        );
         assert_eq!(names(&models::gguf_models_in(&place.hub)), ["Phi-4"]);
-        assert_eq!(*asked.lock().unwrap(), [format!("https://huggingface.co/{PHI_GGUF}/resolve/{REVISION}/phi-4-Q4_K.gguf")]);
+        assert_eq!(
+            *asked.lock().unwrap(),
+            [format!(
+                "https://huggingface.co/{PHI_GGUF}/resolve/{REVISION}/phi-4-Q4_K.gguf"
+            )]
+        );
 
         let folder = place.hub.join("microsoft--phi-4-gguf");
-        assert_eq!(fs::read(folder.join("phi-4-Q4_K.gguf")).unwrap(), files[0].1);
-        assert_eq!(everything_in(&folder), ["phi-4-Q4_K.gguf 300000"], "the file alone: no refs, no snapshots, nothing part way");
-        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+        assert_eq!(
+            fs::read(folder.join("phi-4-Q4_K.gguf")).unwrap(),
+            files[0].1
+        );
+        assert_eq!(
+            everything_in(&folder),
+            ["phi-4-Q4_K.gguf 300000"],
+            "the file alone: no refs, no snapshots, nothing part way"
+        );
+        assert!(
+            everything_in(&place.staging).is_empty(),
+            "nothing is left in the app's folder"
+        );
 
         // Once it is whole, nothing is asked for again.
         let (asked, open) = never_asked();
-        let again = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), open, |_| {})).unwrap();
-        assert_eq!(again, DownloadReport { whole: true, stopped: false });
+        let again = block_on(place.downloads.download(
+            PHI_GGUF,
+            &pins,
+            Layout::Gguf,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap();
+        assert_eq!(
+            again,
+            DownloadReport {
+                whole: true,
+                stopped: false
+            }
+        );
         assert!(asked.lock().unwrap().is_empty());
     }
 
@@ -1308,10 +1855,21 @@ mod tests {
         let pins = vec![pin_for(PHI_GGUF, &gguf_files())];
         let served = with_body(&gguf_files(), "phi-4-Q4_K.gguf", vec![7; 300_000]);
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let error = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), serving(served, asked), |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(
+            PHI_GGUF,
+            &pins,
+            Layout::Gguf,
+            Some(place.hub.clone()),
+            serving(served, asked),
+            |_| {},
+        ))
+        .unwrap_err();
         assert!(error.contains("checksum"), "{error}");
         assert!(everything_in(&place.hub).is_empty(), "nothing moved in");
-        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+        assert!(
+            everything_in(&place.staging).is_empty(),
+            "nothing is left in the app's folder"
+        );
     }
 
     #[test]
@@ -1323,7 +1881,15 @@ mod tests {
         fs::write(folder.join("phi-4-Q4_K.gguf.part"), "half").unwrap();
         let before = everything_in(&place.hub);
         let (asked, open) = never_asked();
-        let error = block_on(place.downloads.download(PHI_GGUF, &pins, Layout::Gguf, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        let error = block_on(place.downloads.download(
+            PHI_GGUF,
+            &pins,
+            Layout::Gguf,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap_err();
         assert_eq!(error, sentence(Why::PartThere, "Phi-4", 0));
         assert!(asked.lock().unwrap().is_empty());
         assert_eq!(everything_in(&place.hub), before);
@@ -1331,10 +1897,27 @@ mod tests {
 
     fn refused(place: &Place, served: Files, pins: &[Pinned]) -> String {
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let error = block_on(place.downloads.download(PHI, pins, Layout::Hub, Some(place.hub.clone()), serving(served, asked), |_| {})).unwrap_err();
-        assert!(everything_in(&place.hub).is_empty(), "the models folder is not changed: {error}");
-        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder: {error}");
-        assert!(place.downloads.slot().is_none(), "the slot is free again: {error}");
+        let error = block_on(place.downloads.download(
+            PHI,
+            pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            serving(served, asked),
+            |_| {},
+        ))
+        .unwrap_err();
+        assert!(
+            everything_in(&place.hub).is_empty(),
+            "the models folder is not changed: {error}"
+        );
+        assert!(
+            everything_in(&place.staging).is_empty(),
+            "nothing is left in the app's folder: {error}"
+        );
+        assert!(
+            place.downloads.slot().is_none(),
+            "the slot is free again: {error}"
+        );
         error
     }
 
@@ -1344,8 +1927,15 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         let mut changed = files[3].1.clone();
         changed[1000] ^= 1;
-        let error = refused(&place(), with_body(&files, "model.safetensors", changed), &pins);
-        assert_eq!(error, "model.safetensors did not match the checksum the app expects, so the download was thrown away.");
+        let error = refused(
+            &place(),
+            with_body(&files, "model.safetensors", changed),
+            &pins,
+        );
+        assert_eq!(
+            error,
+            "model.safetensors did not match the checksum the app expects, so the download was thrown away."
+        );
     }
 
     #[test]
@@ -1355,9 +1945,15 @@ mod tests {
         let short = files[3].1[..299_999].to_vec();
         let mut long = files[3].1.clone();
         long.extend_from_slice(&[0; 70_000]);
-        for served in [with_body(&files, "model.safetensors", short), with_body(&files, "model.safetensors", long)] {
+        for served in [
+            with_body(&files, "model.safetensors", short),
+            with_body(&files, "model.safetensors", long),
+        ] {
             let error = refused(&place(), served, &pins);
-            assert_eq!(error, "model.safetensors was not the size the app expects, so the download was thrown away.");
+            assert_eq!(
+                error,
+                "model.safetensors was not the size the app expects, so the download was thrown away."
+            );
         }
     }
 
@@ -1367,11 +1963,25 @@ mod tests {
         let pin = pin_for(PHI, &files);
         let snapshot = scratch();
         let (_keep, mut cancel) = watch::channel(false);
-        let chunks: Chunks = Box::pin(futures_util::stream::iter(vec![Ok(files[0].1.clone()), Ok(b"and more".to_vec())]));
-        let error = block_on(fetch_file(chunks, &pin.files[0], &snapshot, &mut cancel, &mut |_| {})).unwrap_err();
+        let chunks: Chunks = Box::pin(futures_util::stream::iter(vec![
+            Ok(files[0].1.clone()),
+            Ok(b"and more".to_vec()),
+        ]));
+        let error = block_on(fetch_file(
+            chunks,
+            &pin.files[0],
+            &snapshot,
+            &mut cancel,
+            &mut |_| {},
+        ))
+        .unwrap_err();
         assert!(error.contains("was not the size"), "{error}");
         assert!(!snapshot.join("config.json").exists());
-        assert_eq!(fs::read(snapshot.join("config.json.part")).unwrap(), b"{}", "the extra part was never written");
+        assert_eq!(
+            fs::read(snapshot.join("config.json.part")).unwrap(),
+            b"{}",
+            "the extra part was never written"
+        );
     }
 
     #[test]
@@ -1381,7 +1991,11 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         // Every file comes whole but the weights, which stop part way.
         let open = move |url: String| -> Opening {
-            let body = files.iter().find(|(name, _)| url.ends_with(&format!("/{name}"))).map(|(_, body)| body.clone()).unwrap();
+            let body = files
+                .iter()
+                .find(|(name, _)| url.ends_with(&format!("/{name}")))
+                .map(|(_, body)| body.clone())
+                .unwrap();
             let parts = if url.ends_with("/model.safetensors") {
                 vec![Ok(body[..1000].to_vec()), Err("reset".to_string())]
             } else {
@@ -1389,8 +2003,19 @@ mod tests {
             };
             Box::pin(async move { Ok(Box::pin(futures_util::stream::iter(parts)) as Chunks) })
         };
-        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
-        assert_eq!(error, "The connection to Hugging Face dropped during model.safetensors.");
+        let error = block_on(place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "The connection to Hugging Face dropped during model.safetensors."
+        );
         assert!(everything_in(&place.hub).is_empty());
         assert!(everything_in(&place.staging).is_empty());
         assert!(place.downloads.slot().is_none());
@@ -1400,8 +2025,15 @@ mod tests {
     fn a_file_hugging_face_does_not_have_stops_the_download() {
         let files = files();
         let pins = vec![pin_for(PHI, &files)];
-        let served: Files = files.iter().filter(|(name, _)| name != "tokenizer_config.json").cloned().collect();
-        assert_eq!(refused(&place(), served, &pins), "Hugging Face answered 404.");
+        let served: Files = files
+            .iter()
+            .filter(|(name, _)| name != "tokenizer_config.json")
+            .cloned()
+            .collect();
+        assert_eq!(
+            refused(&place(), served, &pins),
+            "Hugging Face answered 404."
+        );
     }
 
     #[test]
@@ -1409,13 +2041,20 @@ mod tests {
         // Every file matches its pin, but the pin leaves out a file the engine
         // asks for, or a weights file the index names.
         let files = files();
-        let no_tokenizer: Files = files.iter().filter(|(name, _)| name != "tokenizer_config.json").cloned().collect();
+        let no_tokenizer: Files = files
+            .iter()
+            .filter(|(name, _)| name != "tokenizer_config.json")
+            .cloned()
+            .collect();
         let index = br#"{"weight_map":{"layers.0.weight":"model.safetensors","layers.1.weight":"model-2.safetensors"}}"#.to_vec();
         let weights_left_out = with_body(&files, "model.safetensors.index.json", index);
         for served in [no_tokenizer, weights_left_out] {
             let pins = vec![pin_for(PHI, &served)];
             let error = refused(&place(), served, &pins);
-            assert_eq!(error, "The download finished without a whole model, so it was thrown away.");
+            assert_eq!(
+                error,
+                "The download finished without a whole model, so it was thrown away."
+            );
         }
     }
 
@@ -1432,7 +2071,11 @@ mod tests {
         let open = move |url: String| -> Opening {
             let stopper = stopper.clone();
             let seen = seen.clone();
-            let body = files.iter().find(|(name, _)| url.ends_with(&format!("/{name}"))).map(|(_, body)| body.clone()).unwrap();
+            let body = files
+                .iter()
+                .find(|(name, _)| url.ends_with(&format!("/{name}")))
+                .map(|(_, body)| body.clone())
+                .unwrap();
             let weights = url.ends_with("/model.safetensors");
             Box::pin(async move {
                 if !weights {
@@ -1449,12 +2092,38 @@ mod tests {
         };
         // If Cancel went unheard, the rest would never come, so the test gives
         // up after a while instead of waiting with it.
-        let stopping = place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {});
-        let report = block_on(async { tokio::time::timeout(Duration::from_secs(30), stopping).await }).expect("Cancel was not heard").unwrap();
-        assert_eq!(report, DownloadReport { whole: false, stopped: true });
-        assert_eq!(parts_seen.load(Ordering::SeqCst), 1, "Cancel came part way through the weights");
-        assert!(everything_in(&place.hub).is_empty(), "the models folder is not changed");
-        assert!(everything_in(&place.staging).is_empty(), "nothing is left in the app's folder");
+        let stopping = place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        );
+        let report =
+            block_on(async { tokio::time::timeout(Duration::from_secs(30), stopping).await })
+                .expect("Cancel was not heard")
+                .unwrap();
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: false,
+                stopped: true
+            }
+        );
+        assert_eq!(
+            parts_seen.load(Ordering::SeqCst),
+            1,
+            "Cancel came part way through the weights"
+        );
+        assert!(
+            everything_in(&place.hub).is_empty(),
+            "the models folder is not changed"
+        );
+        assert!(
+            everything_in(&place.staging).is_empty(),
+            "nothing is left in the app's folder"
+        );
         assert!(place.downloads.slot().is_none(), "the slot is free again");
     }
 
@@ -1464,9 +2133,22 @@ mod tests {
         let files = files();
         let pins = vec![pin_for(PHI, &files)];
         let asked = Arc::new(Mutex::new(Vec::new()));
-        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), serving(files, asked.clone()), |_| place.downloads.stop()))
-            .unwrap();
-        assert_eq!(report, DownloadReport { whole: false, stopped: true });
+        let report = block_on(place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            serving(files, asked.clone()),
+            |_| place.downloads.stop(),
+        ))
+        .unwrap();
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: false,
+                stopped: true
+            }
+        );
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&place.staging).is_empty());
     }
@@ -1479,7 +2161,17 @@ mod tests {
         let files = files();
         let pins = vec![pin_for(PHI, &files)];
         let (asked, open) = never_asked();
-        let error = block_on(download_through(&place.downloads, &Gate::at(false), PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+        let error = block_on(download_through(
+            &place.downloads,
+            &Gate::at(false),
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap_err();
         assert_eq!(error, "The gate is off. Turn it on to download a model.");
         assert_eq!(client(&Gate::at(false)).unwrap_err(), GATE_OFF);
         assert!(asked.lock().unwrap().is_empty());
@@ -1500,8 +2192,17 @@ mod tests {
             let _ = switch.set(false);
             first.downloads.stop();
         };
-        let error = block_on(download_through(&first.downloads, &gate, PHI, &pins, Layout::Hub, Some(first.hub.clone()), serving(files.clone(), asked.clone()), turn_off))
-            .unwrap_err();
+        let error = block_on(download_through(
+            &first.downloads,
+            &gate,
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(first.hub.clone()),
+            serving(files.clone(), asked.clone()),
+            turn_off,
+        ))
+        .unwrap_err();
         assert_eq!(error, GATE_TURNED_OFF);
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&first.hub).is_empty());
@@ -1512,9 +2213,18 @@ mod tests {
         let second = place();
         let gate = Gate::at(true);
         let switch = gate.clone();
-        let error = block_on(download_through(&second.downloads, &gate, PHI, &pins, Layout::Hub, Some(second.hub.clone()), serving(files, asked.clone()), |_| {
-            let _ = switch.set(false);
-        }))
+        let error = block_on(download_through(
+            &second.downloads,
+            &gate,
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(second.hub.clone()),
+            serving(files, asked.clone()),
+            |_| {
+                let _ = switch.set(false);
+            },
+        ))
         .unwrap_err();
         assert_eq!(error, GATE_TURNED_OFF);
         assert!(asked.lock().unwrap().is_empty());
@@ -1522,11 +2232,26 @@ mod tests {
 
         // Cancel with the gate on is still a plain stop.
         let third = place();
-        let report = block_on(download_through(&third.downloads, &Gate::at(true), PHI, &pins, Layout::Hub, Some(third.hub.clone()), never_asked().1, |_| {
-            third.downloads.stop();
-        }))
+        let report = block_on(download_through(
+            &third.downloads,
+            &Gate::at(true),
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(third.hub.clone()),
+            never_asked().1,
+            |_| {
+                third.downloads.stop();
+            },
+        ))
         .unwrap();
-        assert_eq!(report, DownloadReport { whole: false, stopped: true });
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: false,
+                stopped: true
+            }
+        );
     }
 
     #[test]
@@ -1536,10 +2261,24 @@ mod tests {
         let pins = vec![pin_for(PHI, &files)];
         *place.downloads.slot() = Some(watch::channel(false).0);
         let (asked, open) = never_asked();
-        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
-        assert_eq!(error, "Another model is downloading, and the app downloads one at a time.");
+        let error = block_on(place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Another model is downloading, and the app downloads one at a time."
+        );
         assert!(asked.lock().unwrap().is_empty());
-        assert!(place.downloads.slot().is_some(), "the running download keeps its slot");
+        assert!(
+            place.downloads.slot().is_some(),
+            "the running download keeps its slot"
+        );
     }
 
     #[test]
@@ -1550,8 +2289,22 @@ mod tests {
         whole_model(&place.hub, &files);
         let before = everything_in(&place.hub);
         let (asked, open) = never_asked();
-        let report = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap();
-        assert_eq!(report, DownloadReport { whole: true, stopped: false });
+        let report = block_on(place.downloads.download(
+            PHI,
+            &pins,
+            Layout::Hub,
+            Some(place.hub.clone()),
+            open,
+            |_| {},
+        ))
+        .unwrap();
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: true,
+                stopped: false
+            }
+        );
         assert!(asked.lock().unwrap().is_empty());
         assert_eq!(everything_in(&place.hub), before);
     }
@@ -1564,9 +2317,17 @@ mod tests {
         let parts: [(&str, Make); 4] = [
             ("a download that stopped", &|hub| {
                 whole_model(hub, &files);
-                fs::remove_file(hub.join(models::folder_name(PHI)).join("snapshots").join(REVISION).join("model.safetensors")).unwrap();
+                fs::remove_file(
+                    hub.join(models::folder_name(PHI))
+                        .join("snapshots")
+                        .join(REVISION)
+                        .join("model.safetensors"),
+                )
+                .unwrap();
             }),
-            ("an empty folder", &|hub| fs::create_dir_all(hub.join(models::folder_name(PHI))).unwrap()),
+            ("an empty folder", &|hub| {
+                fs::create_dir_all(hub.join(models::folder_name(PHI))).unwrap()
+            }),
             ("a file", &|hub| {
                 fs::create_dir_all(hub).unwrap();
                 fs::write(hub.join(models::folder_name(PHI)), "").unwrap();
@@ -1574,7 +2335,8 @@ mod tests {
             ("a link to nothing", &|hub| {
                 fs::create_dir_all(hub).unwrap();
                 #[cfg(unix)]
-                std::os::unix::fs::symlink(hub.join("gone"), hub.join(models::folder_name(PHI))).unwrap();
+                std::os::unix::fs::symlink(hub.join("gone"), hub.join(models::folder_name(PHI)))
+                    .unwrap();
                 #[cfg(not(unix))]
                 fs::write(hub.join(models::folder_name(PHI)), "").unwrap();
             }),
@@ -1584,8 +2346,20 @@ mod tests {
             make(&place.hub);
             let before = everything_in(&place.hub);
             let (asked, open) = never_asked();
-            let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
-            assert_eq!(error, "The models folder already holds part of Phi-4, and the app does not change what is there.", "{what}");
+            let error = block_on(place.downloads.download(
+                PHI,
+                &pins,
+                Layout::Hub,
+                Some(place.hub.clone()),
+                open,
+                |_| {},
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error,
+                "The models folder already holds part of Phi-4, and the app does not change what is there.",
+                "{what}"
+            );
             assert!(asked.lock().unwrap().is_empty(), "{what}");
             assert_eq!(everything_in(&place.hub), before, "{what}");
         }
@@ -1595,16 +2369,40 @@ mod tests {
     fn a_model_not_on_the_list_or_with_no_models_folder_is_refused() {
         let place = place();
         let files = files();
-        let pins = vec![pin_for(PHI, &files), pin_for("mlx-community/some-other-model", &files)];
-        for id in ["mlx-community/some-other-model", "mlx-community/phi-4-8bit", "mlx-community/PHI-4-4bit", ""] {
+        let pins = vec![
+            pin_for(PHI, &files),
+            pin_for("mlx-community/some-other-model", &files),
+        ];
+        for id in [
+            "mlx-community/some-other-model",
+            "mlx-community/phi-4-8bit",
+            "mlx-community/PHI-4-4bit",
+            "",
+        ] {
             let (asked, open) = never_asked();
-            let error = block_on(place.downloads.download(id, &pins, Layout::Hub, Some(place.hub.clone()), open, |_| {})).unwrap_err();
+            let error = block_on(place.downloads.download(
+                id,
+                &pins,
+                Layout::Hub,
+                Some(place.hub.clone()),
+                open,
+                |_| {},
+            ))
+            .unwrap_err();
             assert_eq!(error, "That model is not on this app's list.", "{id}");
             assert!(asked.lock().unwrap().is_empty(), "{id}");
         }
         let (asked, open) = never_asked();
-        let error = block_on(place.downloads.download(PHI, &pins, Layout::Hub, None, open, |_| {})).unwrap_err();
-        assert_eq!(error, "The app could not work out where the models folder is.");
+        let error = block_on(
+            place
+                .downloads
+                .download(PHI, &pins, Layout::Hub, None, open, |_| {}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "The app could not work out where the models folder is."
+        );
         assert!(asked.lock().unwrap().is_empty());
         assert!(everything_in(&place.hub).is_empty());
     }
@@ -1617,9 +2415,18 @@ mod tests {
         let target = place.hub.join(models::folder_name(PHI));
         fs::create_dir_all(&target).unwrap();
         let error = move_in(&staged, &place.hub, &models::folder_name(PHI), "Phi-4").unwrap_err();
-        assert_eq!(error, "Something put a folder for Phi-4 in the models folder while it downloaded, so the app left that folder as it is.");
-        assert!(staged.join("refs").is_dir(), "the download stays where it was");
-        assert!(everything_in(&target).is_empty(), "the folder that appeared is not changed");
+        assert_eq!(
+            error,
+            "Something put a folder for Phi-4 in the models folder while it downloaded, so the app left that folder as it is."
+        );
+        assert!(
+            staged.join("refs").is_dir(),
+            "the download stays where it was"
+        );
+        assert!(
+            everything_in(&target).is_empty(),
+            "the folder that appeared is not changed"
+        );
     }
 
     #[test]
@@ -1629,7 +2436,13 @@ mod tests {
         fs::create_dir_all(staged.join("refs")).unwrap();
         assert!(!place.hub.exists());
         move_in(&staged, &place.hub, &models::folder_name(PHI), "Phi-4").unwrap();
-        assert!(place.hub.join(models::folder_name(PHI)).join("refs").is_dir());
+        assert!(
+            place
+                .hub
+                .join(models::folder_name(PHI))
+                .join("refs")
+                .is_dir()
+        );
         assert!(!staged.exists());
     }
 
@@ -1660,21 +2473,45 @@ mod tests {
         Downloads::new(staging.clone()).clear();
         assert!(!staging.join(models::folder_name(PHI)).exists());
         assert!(staging.join("notes.txt").is_file());
-        assert!(staging.join("kept").join("inside").is_dir(), "a folder no download made is kept");
-        assert!(outside.join("keep").is_dir(), "a link is removed, not followed");
+        assert!(
+            staging.join("kept").join("inside").is_dir(),
+            "a folder no download made is kept"
+        );
+        assert!(
+            outside.join("keep").is_dir(),
+            "a link is removed, not followed"
+        );
         Downloads::new(root.join("not-there")).clear();
     }
 
     #[test]
     fn what_a_download_left_when_the_app_quit_is_thrown_away_at_the_next_start() {
         let put_together = include_str!("lib.rs");
-        let setup = put_together.split_once(".setup(").and_then(|(_, rest)| rest.split_once("Ok(())")).expect("the app's setup").0;
-        let made = setup.find("downloads::Downloads::new(data.join(\"downloads\"))").expect("the app keeps its downloads beside its chats");
-        let cleared = setup.find("downloads.clear();").expect("and clears them at the start");
-        let kept = setup.find("app.manage(downloads);").expect("the commands need the downloads the app keeps");
+        let setup = put_together
+            .split_once(".setup(")
+            .and_then(|(_, rest)| rest.split_once("Ok(())"))
+            .expect("the app's setup")
+            .0;
+        let made = setup
+            .find("downloads::Downloads::new(data.join(\"downloads\"))")
+            .expect("the app keeps its downloads beside its chats");
+        let cleared = setup
+            .find("downloads.clear();")
+            .expect("and clears them at the start");
+        let kept = setup
+            .find("app.manage(downloads);")
+            .expect("the commands need the downloads the app keeps");
         assert!(made < cleared && cleared < kept, "{setup}");
-        let commands = put_together.split_once("generate_handler![").and_then(|(_, rest)| rest.split_once(']')).expect("the list of commands").0;
-        assert!(commands.contains("downloads::download_model,") && commands.contains("downloads::stop_download,"), "{commands}");
+        let commands = put_together
+            .split_once("generate_handler![")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .expect("the list of commands")
+            .0;
+        assert!(
+            commands.contains("downloads::download_model,")
+                && commands.contains("downloads::stop_download,"),
+            "{commands}"
+        );
     }
 
     #[test]
@@ -1682,18 +2519,37 @@ mod tests {
         let temp = std::env::temp_dir();
         if cfg!(unix) {
             assert!(free_bytes(&temp).is_some_and(|free| free > 0));
-            assert!(free_bytes(&temp.join("not-there-yet").join("below")).is_some(), "the nearest folder is asked");
+            assert!(
+                free_bytes(&temp.join("not-there-yet").join("below")).is_some(),
+                "the nearest folder is asked"
+            );
         }
         assert!(same_disk(&temp, &temp.join("not-there-yet")));
     }
 
     #[test]
     fn the_page_is_told_under_the_names_it_reads() {
-        let offer = Offer { id: PHI.to_string(), name: "Phi-4".to_string(), maker: "Microsoft".to_string(), license: "MIT".to_string(), bytes: 8 };
-        assert_eq!(serde_json::to_value(&offer).unwrap(), serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "license": "MIT", "bytes": 8 }));
-        assert_eq!(serde_json::to_value(Progress { done: 1, total: 2 }).unwrap(), serde_json::json!({ "done": 1, "total": 2 }));
+        let offer = Offer {
+            id: PHI.to_string(),
+            name: "Phi-4".to_string(),
+            maker: "Microsoft".to_string(),
+            license: "MIT".to_string(),
+            bytes: 8,
+        };
         assert_eq!(
-            serde_json::to_value(DownloadReport { whole: false, stopped: true }).unwrap(),
+            serde_json::to_value(&offer).unwrap(),
+            serde_json::json!({ "id": PHI, "name": "Phi-4", "maker": "Microsoft", "license": "MIT", "bytes": 8 })
+        );
+        assert_eq!(
+            serde_json::to_value(Progress { done: 1, total: 2 }).unwrap(),
+            serde_json::json!({ "done": 1, "total": 2 })
+        );
+        assert_eq!(
+            serde_json::to_value(DownloadReport {
+                whole: false,
+                stopped: true
+            })
+            .unwrap(),
             serde_json::json!({ "whole": false, "stopped": true })
         );
     }
@@ -1712,15 +2568,23 @@ mod tests {
             let folder = scratch();
             for file in pin.files.iter().filter(|file| file.bytes < 30_000_000) {
                 let chunks = block_on(open_url(client.clone(), file_url(pin, file))).unwrap();
-                let fetched = block_on(fetch_file(chunks, file, &folder, &mut cancel, &mut |_| {})).unwrap();
+                let fetched =
+                    block_on(fetch_file(chunks, file, &folder, &mut cancel, &mut |_| {})).unwrap();
                 assert_eq!(fetched, Fetched::Whole, "{} {}", pin.id, file.name);
                 println!("{} {} checked", pin.id, file.name);
             }
-            let index: serde_json::Value =
-                serde_json::from_slice(&fs::read(folder.join("model.safetensors.index.json")).unwrap()).unwrap();
-            let pinned_names: BTreeSet<&str> = pin.files.iter().map(|file| file.name.as_str()).collect();
+            let index: serde_json::Value = serde_json::from_slice(
+                &fs::read(folder.join("model.safetensors.index.json")).unwrap(),
+            )
+            .unwrap();
+            let pinned_names: BTreeSet<&str> =
+                pin.files.iter().map(|file| file.name.as_str()).collect();
             for weights in index["weight_map"].as_object().unwrap().values() {
-                assert!(pinned_names.contains(weights.as_str().unwrap()), "{} pins {weights}", pin.id);
+                assert!(
+                    pinned_names.contains(weights.as_str().unwrap()),
+                    "{} pins {weights}",
+                    pin.id
+                );
             }
             fs::remove_dir_all(&folder).unwrap();
         }
@@ -1731,21 +2595,41 @@ mod tests {
     #[test]
     #[ignore = "downloads 8.3 GB from Hugging Face"]
     fn a_whole_model_downloads_from_hugging_face() {
-        let to = PathBuf::from(std::env::var("RUSTY_DOWNLOAD_TO").expect("RUSTY_DOWNLOAD_TO names an empty folder"));
+        let to = PathBuf::from(
+            std::env::var("RUSTY_DOWNLOAD_TO").expect("RUSTY_DOWNLOAD_TO names an empty folder"),
+        );
         let hub = to.join("hub");
         let downloads = Downloads::new(to.join("downloads"));
         let client = open_client();
         let started = Instant::now();
         let mut last = Instant::now();
-        let report = block_on(downloads.download(PHI, &PINNED, Layout::Hub, Some(hub.clone()), move |url| open_url(client.clone(), url), |progress| {
-            if last.elapsed() >= Duration::from_secs(15) {
-                last = Instant::now();
-                println!("{} of {} bytes after {:?}", progress.done, progress.total, started.elapsed());
-            }
-        }))
+        let report = block_on(downloads.download(
+            PHI,
+            &PINNED,
+            Layout::Hub,
+            Some(hub.clone()),
+            move |url| open_url(client.clone(), url),
+            |progress| {
+                if last.elapsed() >= Duration::from_secs(15) {
+                    last = Instant::now();
+                    println!(
+                        "{} of {} bytes after {:?}",
+                        progress.done,
+                        progress.total,
+                        started.elapsed()
+                    );
+                }
+            },
+        ))
         .unwrap();
         println!("finished after {:?}", started.elapsed());
-        assert_eq!(report, DownloadReport { whole: true, stopped: false });
+        assert_eq!(
+            report,
+            DownloadReport {
+                whole: true,
+                stopped: false
+            }
+        );
         assert_eq!(names(&models::models_in(&hub)), ["Phi-4"]);
         assert!(everything_in(&to.join("downloads")).is_empty());
     }

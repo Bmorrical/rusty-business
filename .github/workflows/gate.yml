@@ -1,12 +1,13 @@
 # The gate. Nothing is released or deployed unless this run is green.
 #
-# It runs once on each push to main, on request (Run workflow), and when
-# another workflow calls it. It never runs on a pull request push: a change
-# is tested on the author's computer before it is pushed (`make test`, then
-# `make e2e`), and this run judges what actually landed.
+# It runs on every pull request, once on each push to main, on request (Run
+# workflow), and when another workflow calls it. A pull request merges only
+# when this run is green on it, and the run on main judges what landed. A
+# pull request from a fork runs it with read access alone and no secret.
 name: Gate
 
 on:
+  pull_request:
   push:
     branches: [main]
   workflow_dispatch:
@@ -42,7 +43,7 @@ jobs:
         run: make test-repo
 
   desktop:
-    name: Desktop app (page tests, build, Rust tests)
+    name: Desktop app (page tests, build, Rust format, lint, and tests)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -53,8 +54,8 @@ jobs:
         with:
           node-version: 22
       - name: Rust toolchain
-        run: rustup toolchain install stable --profile minimal && rustup default stable
-      - name: Page tests, page build, and Rust tests
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy && rustup default stable
+      - name: Page tests, page build, and Rust format, lint, and tests
         run: make test-desktop
 
   e2e:

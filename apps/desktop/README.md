@@ -41,6 +41,14 @@ Select the picture to open it full size. The rest of the set is in
   download size. Install downloads one, with the gate on, then adds its
   maker so it shows at the top of the window. A model already here whose
   maker is not added has a Show button instead.
+- **A switch for each model**, in Settings under Models, for the models on
+  this computer and the outside engines' alike. A model switched off is left
+  out of questions, grading, and comparisons, and its files stay. Saved
+  chats still name it.
+- **Uninstall**, beside the switch for a model on this computer. It asks
+  first, then moves the model's files to the Trash (the Recycle Bin on
+  Windows), where you can take them back. On a Mac, the question also says
+  that other apps that use the Hugging Face cache lose the model too.
 - **Grok, by xAI**, added on the Installers page under Outside engines with
   the path to a file that holds your own xAI key. With the gate on, the app
   finds Grok's models, and they join the buttons at the top of the window,
@@ -119,7 +127,7 @@ page (Vue)  --IPC-->  Rust  --http, this computer only-->  engine
 ```
 
 The page never talks to the network, and Rust reaches past this computer only
-through the gate. Rust owns ten things:
+through the gate. Rust owns twelve things:
 
 - [src-tauri/src/gate.rs](src-tauri/src/gate.rs), the outbound gate. It
   keeps the switch, off until the person turns it on, and makes every client
@@ -158,6 +166,13 @@ through the gate. Rust owns ten things:
   always keeps one, and starts with Microsoft and the maker of any model
   already on this computer. The models shown, on the disk, and offered for
   download are only those of the makers picked.
+- [src-tauri/src/deactivated.rs](src-tauri/src/deactivated.rs), the models
+  switched off. It keeps their ids in the app's data folder, and only ids of
+  models the app could offer.
+- [src-tauri/src/uninstall.rs](src-tauri/src/uninstall.rs), Uninstall. It
+  moves one model's folder or file from the folder the engine reads to the
+  Trash, and deletes nothing. A model not on the list, or a name that steps
+  out of the folder, is refused.
 - [src-tauri/src/outside.rs](src-tauri/src/outside.rs), the engines outside
   this computer: Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and
   Gemini, by Google. It
@@ -200,7 +215,7 @@ that program is the only one tried, even in an app that carries its own.
 | Path                   | What it is                                              |
 | ---------------------- | ------------------------------------------------------- |
 | [src](src)             | The page: one Vue component and its helpers             |
-| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the stack's start, saved chats |
+| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the models switched off, Uninstall, the stack's start, saved chats |
 | [engine](engine)       | The engine the Mac app carries: the one package asked for, and every package under it, pinned by hash |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |
@@ -255,23 +270,41 @@ npm run build
 ```
 
 ```bash
-cd src-tauri && cargo test
+cd src-tauri && cargo fmt --check
 ```
-
-The page is built before the Rust tests because Tauri reads the built page
-(`dist`) when it compiles.
-
-Five more tests are run by hand. One asks the running engine for 2+2, one
-looks for the app's models on this computer, one starts a second engine on
-a free port and stops it again, one starts a stack of its own on a free port
-and removes it again (it needs Docker running), and one checks the small
-pinned files against Hugging Face:
 
 ```bash
-cd src-tauri && cargo test -- --ignored --skip a_whole_model_downloads_from_hugging_face
+cd src-tauri && cargo clippy --all-targets --locked -- -D warnings
 ```
 
-A sixth downloads Phi-4 whole, 8.3 GB, into an empty folder you name:
+```bash
+cd src-tauri && cargo test --locked
+```
+
+`npm test` runs every `src/*.test.js`. The page is built before the Rust
+checks because Tauri reads the built page (`dist`) when it compiles.
+
+Eleven more tests are run by hand, because each needs an engine, a model,
+Docker, a key, or the internet. Six need only this computer and the
+internet. One asks the running engine for 2+2, one looks for the app's
+models on this computer, one starts a second engine on a free port and
+stops it again, one starts a stack of its own on a free port and removes it
+again (it needs Docker running), one checks the small pinned files against
+Hugging Face, and one asks GitHub for the newest release:
+
+```bash
+cd src-tauri && cargo test -- --ignored --skip a_whole_model_downloads_from_hugging_face --skip answers_two_plus_two
+```
+
+Four ask an outside engine for 2+2, each with the key in a file you name in
+`RUSTY_XAI_KEY_FILE`, `RUSTY_OPENAI_KEY_FILE`, `RUSTY_ANTHROPIC_KEY_FILE`,
+or `RUSTY_GOOGLE_KEY_FILE`. Run one at a time, for example:
+
+```bash
+cd src-tauri && RUSTY_ANTHROPIC_KEY_FILE=<the key file> cargo test -- --ignored claude_answers_two_plus_two
+```
+
+The last downloads Phi-4 whole, 8.3 GB, into an empty folder you name:
 
 ```bash
 cd src-tauri && RUSTY_DOWNLOAD_TO=<an empty folder> cargo test -- --ignored a_whole_model_downloads_from_hugging_face

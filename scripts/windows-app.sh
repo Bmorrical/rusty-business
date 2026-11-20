@@ -17,8 +17,9 @@
 # installer maker Tauri fetches and checks itself, which it keeps in this
 # account's local app data folder.
 #
-# The window has no engine on Windows yet, so the installer carries none, and
-# the window says so.
+# The installer carries no model engine yet. The app starts llama.cpp's
+# llama-server when it finds it on the computer, and otherwise the window
+# says so.
 #
 # Safe to run again: what is already fetched and still matches its pin is
 # kept.

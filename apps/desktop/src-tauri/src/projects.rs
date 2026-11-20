@@ -51,12 +51,19 @@ pub struct Projects {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|since| since.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Letters, digits, and hyphens only, so an id never names a file elsewhere.
 pub fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 64 && id.chars().all(|character| character.is_ascii_alphanumeric() || character == '-')
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
 fn failed(what: &str) -> impl Fn(std::io::Error) -> String + '_ {
@@ -84,9 +91,11 @@ fn write_whole(path: &PathBuf, text: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(failed("Could not save"))?;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(failed("Could not save"))?;
     }
-    file.write_all(text.as_bytes()).map_err(failed("Could not save"))?;
+    file.write_all(text.as_bytes())
+        .map_err(failed("Could not save"))?;
     file.sync_all().map_err(failed("Could not save"))?;
     drop(file);
     fs::rename(&partial, path).map_err(failed("Could not save"))
@@ -99,9 +108,15 @@ pub fn with_facts(memory: &str, facts: &[String]) -> String {
     let known = text.to_lowercase();
     let mut added: Vec<String> = Vec::new();
     for fact in facts.iter().take(FACTS_AT_ONCE) {
-        let line = cut(fact.trim().trim_start_matches(['-', '*', ' ']).trim(), FACT_LIMIT);
+        let line = cut(
+            fact.trim().trim_start_matches(['-', '*', ' ']).trim(),
+            FACT_LIMIT,
+        );
         let lower = line.to_lowercase();
-        if line.is_empty() || known.contains(&lower) || added.iter().any(|seen| seen.to_lowercase() == lower) {
+        if line.is_empty()
+            || known.contains(&lower)
+            || added.iter().any(|seen| seen.to_lowercase() == lower)
+        {
             continue;
         }
         added.push(line);
@@ -118,7 +133,11 @@ pub fn with_facts(memory: &str, facts: &[String]) -> String {
 
 impl Projects {
     pub fn new(dir: PathBuf, memory: PathBuf) -> Self {
-        Projects { dir, memory, writing: Mutex::new(()) }
+        Projects {
+            dir,
+            memory,
+            writing: Mutex::new(()),
+        }
     }
 
     fn ready(&self) -> Result<(), String> {
@@ -142,13 +161,20 @@ impl Projects {
     pub fn list(&self) -> Result<Vec<Project>, String> {
         self.ready()?;
         let mut projects = Vec::new();
-        for entry in fs::read_dir(&self.dir).map_err(failed("Could not read the projects folder"))?.flatten() {
+        for entry in fs::read_dir(&self.dir)
+            .map_err(failed("Could not read the projects folder"))?
+            .flatten()
+        {
             let path = entry.path();
             if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
                 continue;
             }
-            let Ok(text) = fs::read_to_string(&path) else { continue };
-            let Ok(project) = serde_json::from_str::<Project>(&text) else { continue };
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(project) = serde_json::from_str::<Project>(&text) else {
+                continue;
+            };
             if valid_id(&project.id) {
                 projects.push(project);
             }
@@ -158,19 +184,28 @@ impl Projects {
     }
 
     pub fn load(&self, id: &str) -> Result<Project, String> {
-        let text = fs::read_to_string(self.path(id)?).map_err(failed("Could not open that project"))?;
-        serde_json::from_str(&text).map_err(|_| "That project's file could not be read.".to_string())
+        let text =
+            fs::read_to_string(self.path(id)?).map_err(failed("Could not open that project"))?;
+        serde_json::from_str(&text)
+            .map_err(|_| "That project's file could not be read.".to_string())
     }
 
     pub fn save(&self, mut project: Project) -> Result<Project, String> {
-        let _held = self.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _held = self
+            .writing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.ready()?;
         if project.id.is_empty() {
             project.id = uuid::Uuid::new_v4().to_string();
         }
         let path = self.path(&project.id)?;
         let name = cut(project.name.trim(), NAME_LIMIT);
-        project.name = if name.is_empty() { "New project".to_string() } else { name };
+        project.name = if name.is_empty() {
+            "New project".to_string()
+        } else {
+            name
+        };
         project.memory = cut(&project.memory, MEMORY_LIMIT);
         project.folder = project.folder.trim().trim_end_matches('/').to_string();
         if !project.folder.is_empty() && !std::path::Path::new(&project.folder).is_dir() {
@@ -181,7 +216,8 @@ impl Projects {
             project.created_at = now;
         }
         project.updated_at = now;
-        let text = serde_json::to_string_pretty(&project).map_err(|_| "Could not write the project.".to_string())?;
+        let text = serde_json::to_string_pretty(&project)
+            .map_err(|_| "Could not write the project.".to_string())?;
         write_whole(&path, &text)?;
         Ok(project)
     }
@@ -190,7 +226,8 @@ impl Projects {
         let path = self.path(id)?;
         let trash = self.dir.join("trash");
         fs::create_dir_all(&trash).map_err(failed("Could not open the trash folder"))?;
-        fs::rename(&path, trash.join(format!("{id}-{}.json", now_ms()))).map_err(failed("Could not move that project to the trash"))
+        fs::rename(&path, trash.join(format!("{id}-{}.json", now_ms())))
+            .map_err(failed("Could not move that project to the trash"))
     }
 
     /// The memory that goes with every chat. None yet is an empty one.
@@ -203,7 +240,10 @@ impl Projects {
     }
 
     pub fn save_memory(&self, text: &str) -> Result<String, String> {
-        let _held = self.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _held = self
+            .writing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.write_memory(text)
     }
 
@@ -219,7 +259,10 @@ impl Projects {
     /// Adds facts to the global memory, or to a project's when one is named.
     /// Facts past what the memory can hold are not added.
     pub fn remember(&self, facts: &[String], project: Option<&str>) -> Result<(), String> {
-        let _held = self.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _held = self
+            .writing
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         match project {
             None => {
                 let text = with_facts(&self.memory()?, facts);
@@ -233,7 +276,8 @@ impl Projects {
                 if text.chars().count() <= MEMORY_LIMIT {
                     kept.memory = text;
                     kept.updated_at = now_ms();
-                    let json = serde_json::to_string_pretty(&kept).map_err(|_| "Could not write the project.".to_string())?;
+                    let json = serde_json::to_string_pretty(&kept)
+                        .map_err(|_| "Could not write the project.".to_string())?;
                     write_whole(&self.path(id)?, &json)?;
                 }
             }
@@ -248,7 +292,10 @@ pub fn list_projects(projects: tauri::State<'_, Projects>) -> Result<Vec<Project
 }
 
 #[tauri::command]
-pub fn save_project(projects: tauri::State<'_, Projects>, project: Project) -> Result<Project, String> {
+pub fn save_project(
+    projects: tauri::State<'_, Projects>,
+    project: Project,
+) -> Result<Project, String> {
     projects.save(project)
 }
 
@@ -268,7 +315,11 @@ pub fn save_memory(projects: tauri::State<'_, Projects>, text: String) -> Result
 }
 
 #[tauri::command]
-pub fn remember(projects: tauri::State<'_, Projects>, facts: Vec<String>, project: Option<String>) -> Result<(), String> {
+pub fn remember(
+    projects: tauri::State<'_, Projects>,
+    facts: Vec<String>,
+    project: Option<String>,
+) -> Result<(), String> {
     projects.remember(&facts, project.as_deref().filter(|id| !id.is_empty()))
 }
 
@@ -277,7 +328,8 @@ mod tests {
     use super::*;
 
     fn scratch() -> Projects {
-        let dir = std::env::temp_dir().join(format!("rusty-business-projects-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("rusty-business-projects-{}", uuid::Uuid::new_v4()));
         Projects::new(dir.join("projects"), dir.join("memory.md"))
     }
 
@@ -288,23 +340,47 @@ mod tests {
     #[test]
     fn a_saved_project_comes_back_and_lists_by_name() {
         let store = scratch();
-        let zebra = store.save(Project { name: "Zebra".into(), ..Project::default() }).unwrap();
-        store.save(Project { name: "apple".into(), instructions: "Be brief.".into(), ..Project::default() }).unwrap();
+        let zebra = store
+            .save(Project {
+                name: "Zebra".into(),
+                ..Project::default()
+            })
+            .unwrap();
+        store
+            .save(Project {
+                name: "apple".into(),
+                instructions: "Be brief.".into(),
+                ..Project::default()
+            })
+            .unwrap();
         assert!(valid_id(&zebra.id));
         assert_eq!(store.load(&zebra.id).unwrap(), zebra);
-        let names: Vec<String> = store.list().unwrap().into_iter().map(|project| project.name).collect();
+        let names: Vec<String> = store
+            .list()
+            .unwrap()
+            .into_iter()
+            .map(|project| project.name)
+            .collect();
         assert_eq!(names, ["apple", "Zebra"]);
     }
 
     #[test]
     fn a_blank_name_gets_one() {
-        assert_eq!(scratch().save(Project::default()).unwrap().name, "New project");
+        assert_eq!(
+            scratch().save(Project::default()).unwrap().name,
+            "New project"
+        );
     }
 
     #[test]
     fn trash_moves_the_project_and_deletes_nothing() {
         let store = scratch();
-        let saved = store.save(Project { name: "Odd".into(), ..Project::default() }).unwrap();
+        let saved = store
+            .save(Project {
+                name: "Odd".into(),
+                ..Project::default()
+            })
+            .unwrap();
         store.trash(&saved.id).unwrap();
         assert!(store.list().unwrap().is_empty());
         assert_eq!(fs::read_dir(store.dir.join("trash")).unwrap().count(), 1);
@@ -332,13 +408,40 @@ mod tests {
     fn remembered_facts_land_as_bullets_once_each() {
         let store = scratch();
         store.save_memory("Lives in Jacksonville.").unwrap();
-        store.remember(&facts(&["Prefers Rust", " ", "- prefers rust", "lives in jacksonville."]), None).unwrap();
-        assert_eq!(store.memory().unwrap(), "Lives in Jacksonville.\n- Prefers Rust");
+        store
+            .remember(
+                &facts(&[
+                    "Prefers Rust",
+                    " ",
+                    "- prefers rust",
+                    "lives in jacksonville.",
+                ]),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            store.memory().unwrap(),
+            "Lives in Jacksonville.\n- Prefers Rust"
+        );
 
-        let project = store.save(Project { name: "Gledit".into(), ..Project::default() }).unwrap();
-        store.remember(&facts(&["Targets small businesses"]), Some(&project.id)).unwrap();
-        assert_eq!(store.load(&project.id).unwrap().memory, "- Targets small businesses");
-        assert_eq!(store.memory().unwrap(), "Lives in Jacksonville.\n- Prefers Rust", "the global memory is untouched");
+        let project = store
+            .save(Project {
+                name: "Gledit".into(),
+                ..Project::default()
+            })
+            .unwrap();
+        store
+            .remember(&facts(&["Targets small businesses"]), Some(&project.id))
+            .unwrap();
+        assert_eq!(
+            store.load(&project.id).unwrap().memory,
+            "- Targets small businesses"
+        );
+        assert_eq!(
+            store.memory().unwrap(),
+            "Lives in Jacksonville.\n- Prefers Rust",
+            "the global memory is untouched"
+        );
     }
 
     #[test]

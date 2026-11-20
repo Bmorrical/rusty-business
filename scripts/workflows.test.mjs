@@ -6,6 +6,7 @@
 // it means nothing has to be installed to run them.
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -303,18 +304,24 @@ test('Deploy builds each kind of image on its own kind of computer, then joins t
   );
 });
 
-test('no workflow runs on a pull request', () => {
+// Brad, 2026-11-19, for CONTRIBUTING.md: "all checks pass pr's before
+// merge". So the gate runs on every pull request, and only the gate does: a
+// pull request from a fork gets read access and no secret, and nothing on a
+// pull request deploys or releases.
+test('only the gate runs on a pull request, and never with the base branch\'s rights', () => {
   for (const { name, text } of workflows) {
     for (const trigger of triggersOf(text)) {
-      assert.doesNotMatch(trigger, /^pull_request/, `${name} runs on ${trigger}`);
+      assert.notEqual(trigger, 'pull_request_target', `${name} runs on ${trigger}`);
+      if (trigger.startsWith('pull_request')) assert.equal(name, 'gate.yml', `${name} runs on ${trigger}`);
     }
   }
 });
 
-test('the gate runs on each push to main, on request, and when called', () => {
-  const text = workflow('gate.yml');
-  assert.deepEqual(triggersOf(text), ['push', 'workflow_call', 'workflow_dispatch']);
-  assert.match(withoutComments(text), /^ {2}push:\n {4}branches: \[main\]\n/m);
+test('the gate runs on every pull request, on each push to main, on request, and when called', () => {
+  const text = withoutComments(workflow('gate.yml'));
+  assert.deepEqual(triggersOf(text), ['pull_request', 'push', 'workflow_call', 'workflow_dispatch']);
+  assert.match(text, /^ {2}pull_request:\n {2}push:\n/m, 'the gate runs on only some pull requests');
+  assert.match(text, /^ {2}push:\n {4}branches: \[main\]\n/m);
 });
 
 test('the gate is green only when every other job is green', () => {
@@ -528,4 +535,95 @@ test('permissions and run lines are read from the text', () => {
     '',
   ].join('\n');
   assert.deepEqual(runsOf(text), ['echo one', '          echo two\n          # ${{ hidden }}\n']);
+});
+
+const REPO = fileURLToPath(new URL('..', import.meta.url));
+
+/** Every file git tracks or would track. */
+function projectFiles() {
+  return execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+    cwd: REPO,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean);
+}
+
+/** One Makefile target: what it runs first, and its own commands, each without its tab. */
+export function target(makefile, name) {
+  const lines = makefile.split('\n');
+  const start = lines.findIndex((line) => line.startsWith(`${name}:`));
+  if (start === -1) return null;
+  const before = lines[start].slice(name.length + 1).split('##')[0].trim();
+  const commands = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith('\t')) break;
+    commands.push(line.slice(1));
+  }
+  return { before: before ? before.split(/\s+/) : [], commands };
+}
+
+// Brad, 2026-11-19: "I want to ensure all the tests run before the build goes
+// out at the start of the "release" workflow.  Manual trigger is perfect, and
+// doesn't go out until green, this is backend + e2e + anything else."
+//
+// Release starts only on request, and its first job is the gate (the test
+// above). These fail when the gate stops running any test there is: a test
+// file nothing runs, a crate nothing formats, lints, or tests, or a part of
+// the stack nothing checks end to end. The desktop app's tests marked
+// `#[ignore]` need a model engine on this computer or the internet, and are
+// run by hand, as its README says.
+test('the gate runs every test there is, so a release waits on all of them', () => {
+  const makefile = readFileSync(path.join(REPO, 'Makefile'), 'utf8');
+  const files = projectFiles();
+
+  assert.deepEqual(target(makefile, 'test').before, ['test-services', 'test-repo', 'test-desktop']);
+
+  // Every crate is formatted, linted, and tested: the workspace's, and the
+  // desktop app's, which the workspace leaves out.
+  const crates = files.filter((file) => path.posix.basename(file) === 'Cargo.toml').map(path.posix.dirname);
+  const members = JSON.parse(/^members = (\[.*\])$/m.exec(readFileSync(path.join(REPO, 'Cargo.toml'), 'utf8'))[1]);
+  assert.deepEqual(crates.sort(), ['.', 'apps/desktop/src-tauri', ...members].sort(), 'a crate is in neither the workspace nor the desktop app');
+  assert.deepEqual(target(makefile, 'test-services').commands, [
+    'cargo fmt --all --check',
+    'cargo clippy --workspace --all-targets --locked -- -D warnings',
+    'cargo test --workspace --locked',
+  ]);
+  assert.deepEqual(target(makefile, 'test-desktop').commands, [
+    'cd apps/desktop && { [ -d node_modules ] || npm ci; } && npm test && npm run build',
+    'cd apps/desktop/src-tauri && cargo fmt --check',
+    'cd apps/desktop/src-tauri && cargo clippy --all-targets --locked -- -D warnings',
+    'cd apps/desktop/src-tauri && cargo test --locked',
+  ]);
+  assert.deepEqual(target(makefile, 'test-live').commands, ['scripts/stack-env.sh cargo test --package rusty-api --locked -- --ignored']);
+
+  // Every test file is one that a command runs.
+  assert.deepEqual(target(makefile, 'test-repo').commands, ['node --test scripts/*.test.mjs']);
+  assert.deepEqual(target(makefile, 'e2e').commands, ['scripts/stack-env.sh node --test e2e/*.test.mjs']);
+  const page = JSON.parse(readFileSync(path.join(REPO, 'apps/desktop/package.json'), 'utf8')).scripts.test;
+  assert.equal(page, 'node --test "src/*.test.js"', 'npm test does not run every page test');
+  const reached = [/^scripts\/[^/]+\.test\.mjs$/, /^e2e\/[^/]+\.test\.mjs$/, /^apps\/desktop\/src\/[^/]+\.test\.js$/];
+  const tests = files.filter((file) => /\.(test|spec)\.[cm]?[jt]sx?$/.test(path.posix.basename(file)));
+  assert.ok(tests.includes('apps/desktop/src/markdown.test.js'), 'the check no longer sees the page tests');
+  for (const file of tests) {
+    assert.ok(reached.some((rule) => rule.test(file)), `nothing runs ${file}`);
+  }
+
+  // The gate's jobs run those commands, with the tools each one needs.
+  const runs = Object.fromEntries(jobsOf(workflow('gate.yml')).map((job) => [job.id, runsOf(withoutComments(job.body))]));
+  const tools = 'rustup toolchain install stable --profile minimal --component rustfmt --component clippy && rustup default stable';
+  assert.deepEqual(runs.services, [tools, 'make test-services', 'make test-repo']);
+  assert.deepEqual(runs.desktop, [tools, 'make test-desktop']);
+  for (const command of ['scripts/bootstrap.sh', 'make test-live', 'make e2e']) {
+    assert.ok(runs.e2e.includes(command), `the end-to-end job does not run ${command}`);
+  }
+});
+
+test('a Makefile target is read with what it runs first and its own commands', () => {
+  const makefile = ['all: one two ## Both', '\techo all', '', 'one: ## One', '\techo one', '\techo again', 'two:', ''].join('\n');
+  assert.deepEqual(target(makefile, 'all'), { before: ['one', 'two'], commands: ['echo all'] });
+  assert.deepEqual(target(makefile, 'one'), { before: [], commands: ['echo one', 'echo again'] });
+  assert.deepEqual(target(makefile, 'two'), { before: [], commands: [] });
+  assert.equal(target(makefile, 'three'), null);
 });

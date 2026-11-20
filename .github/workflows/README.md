@@ -4,7 +4,7 @@ What GitHub runs for this repository.
 
 | File          | When it runs                                                        | What it does                                             |
 | ------------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
-| `gate.yml`    | Once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
+| `gate.yml`    | On every pull request, once on each push to `main`, on request, and when Deploy or Release calls it | Runs every test this repository has             |
 | `deploy.yml`  | Only on request, only from `main`                                   | Runs the gate, then puts the API and worker images on GitHub's container registry |
 | `release.yml` | Only on request, only from `main`                                   | Runs the gate, then builds the Mac app on a Mac, the Windows installer on Windows, and the Linux packages on Linux, and puts them all on a GitHub release, where the README's download links find them |
 
@@ -19,7 +19,7 @@ around it and no "just this once".
 | Job        | Machine | What it runs                                                              |
 | ---------- | ------- | ------------------------------------------------------------------------- |
 | `services` | Linux   | `make test-services` (format, lint, unit tests) and `make test-repo`      |
-| `desktop`  | macOS   | `make test-desktop` (page tests, page build, the app's Rust tests)        |
+| `desktop`  | macOS   | `make test-desktop` (page tests, page build, and format, lint, and tests for the app's Rust) |
 | `e2e`      | Linux   | `scripts/bootstrap.sh`, then `make test-live` and `make e2e` against the whole stack in Docker |
 | `gate`     | Linux   | Green only when the three above are green. This is the one result to read |
 
@@ -58,7 +58,7 @@ Release puts the app on a GitHub release named for its version, such as
 `v0.3.0`: `Rusty-Business-mac-arm64.dmg`, with the model engine inside,
 `Rusty-Business-windows-x64-setup.exe`, and for Linux
 `Rusty-Business-linux-x64.deb`, `Rusty-Business-linux-x64.rpm`, and
-`Rusty-Business-linux-x64.tar.gz`, those four with no engine yet, and a
+`Rusty-Business-linux-x64.tar.gz`, those four with no engine inside yet, and a
 checksum for each. It is marked as the newest release, which is the one the README's
 download links find.
 
@@ -110,7 +110,10 @@ released by a test.
 
 ## Pull requests
 
-The gate does not run on pull request pushes. Before you push, run:
+The gate runs on every pull request, and a pull request merges only when it
+is green there. A pull request from a fork runs it with read access alone and
+no secret. [CONTRIBUTING.md](../../CONTRIBUTING.md) has the rest of the
+rules. Before you push, run:
 
 ```bash
 make test

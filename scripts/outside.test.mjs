@@ -140,13 +140,13 @@ test("each engine is asked at its maker's API alone, over https, and only while 
   assert.deepEqual(reads, ['env::var_os("HOME")', 'env::var_os("USERPROFILE")'], `${OUTSIDE} reads a setting that could move an engine`);
   assert.equal(source.match(/format!\("\{\}\/[^"]*", engine\.base\(\)\)/g)?.length, 1, 'a list is asked at an address not built on its base');
   assert.equal(source.match(/engine\.base\(\)/g)?.length, 1, 'a list is asked at an address built some other way');
-  assert.equal(source.match(/format!\("\{\}\/[^"]*", self\.base\(\)\)/g)?.length, 3, 'a chat is asked at an address not built on its base');
+  assert.equal(source.match(/format!\(\s*"\{\}\/[^"]*",\s+self\.base\(\),?\s*\)/g)?.length, 3, 'a chat is asked at an address not built on its base');
   assert.equal(source.match(/self\.base\(\)/g)?.length, 3, 'a chat is asked at an address built some other way');
   // Where a chat is asked is fixed in the code, one path for each engine.
   // Google names the model in the path, so only a model it listed goes there.
   assert.match(
     rustFunction(source, 'chat_url'),
-    /Self::Xai \| Self::OpenAi => format!\("\{\}\/chat\/completions", self\.base\(\)\),\s+Self::Anthropic => format!\("\{\}\/messages", self\.base\(\)\),\s+Self::Google => format!\("\{\}\/models\/\{model\}:streamGenerateContent\?alt=sse", self\.base\(\)\),\s+\}/,
+    /Self::Xai \| Self::OpenAi => format!\("\{\}\/chat\/completions", self\.base\(\)\),\s+Self::Anthropic => format!\("\{\}\/messages", self\.base\(\)\),\s+Self::Google => format!\(\s*"\{\}\/models\/\{model\}:streamGenerateContent\?alt=sse",\s+self\.base\(\),?\s*\),\s+\}/,
     'a chat is asked at another path',
   );
   // So is where each list is asked. Anthropic gives 20 models a page and
@@ -214,10 +214,12 @@ test('an outside engine waits for no turn, and the app knows its commands', () =
 test('the page sends only the path, keeps none of it, and offers an engine only with the gate on', () => {
   const app = read(APP);
   assert.ok(
-    app.includes('const outsideModels = computed(() => (gate.value ? outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []) : []));'),
+    app.includes('const outsideListed = computed(() => outside.value.filter((entry) => entry.added).flatMap((entry) => entry.models ?? []));') &&
+      app.includes('const outsideModels = computed(() => (gate.value ? outsideListed.value : []));'),
     "an outside engine's models are offered with the gate off, or before it is added",
   );
-  assert.match(app, /const models = computed\(\(\) => \[\.\.\.\(engine\.value\?\.models \?\? \[\]\), \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.\(engine\.value\?\.models \?\? \[\]\), \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  assert.ok(app.includes('const models = computed(() => switchedOn(onHand.value, off.value));'), 'an outside engine switched off is still asked');
   // Rust gives every engine, as a list.
   assert.ok(pageFunction(app, 'readOutside').includes('outside.value = Array.isArray(listed) ? listed : [];'), 'the page no longer reads the engines as a list');
 

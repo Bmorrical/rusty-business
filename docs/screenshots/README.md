@@ -70,16 +70,18 @@ off, so Install waits. A model already on this computer whose maker is not
 added has a Show button instead. Grok, GPT, Claude, and Gemini are added below,
 under Outside engines, each on its own card.
 
-## Settings: the model makers
+## Settings: the models, and their makers
 
-[![Settings in the light theme, with the five model makers: Microsoft, OpenAI, and NVIDIA picked, each with a Remove button and its model on this computer, and Google and Meta not picked, each with an Add button and its model's license and download size](settings.png)](settings.png?raw=true)
+[![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, and Google and Meta not picked, each with an Add button and its model's license and download size](settings.png)](settings.png?raw=true)
 
-Settings, opened from the foot of the window, lists every maker on the app's
-list with its models. Add and Remove pick a maker with one click. Here the
+Settings, opened from the foot of the window, lists under Models every maker
+on the app's list with its models. Add and Remove pick a maker with one click. Here the
 makers picked are the three whose models are on this computer, as the app
 picks them before you do. Removing one hides its models and deletes nothing,
-and saved chats still name them. To download a model, Settings points to
-the Installers page.
+and saved chats still name them. Each model on this computer has a switch:
+switched off, it is left out of questions, grading, and comparisons, and its
+files stay. Uninstall asks first, then moves the model to the Trash. To
+download a model, Settings points to the Installers page.
 
 ## How these were made
 
@@ -132,5 +134,5 @@ nowhere else.
 | `engine-off.png` | The app with no engine answering                               |
 | `first-run.png`  | The first run, with none of the app's models on this computer  |
 | `installers.png` | The Installers page, with every maker's models                 |
-| `settings.png`   | Settings, with the five model makers                           |
+| `settings.png`   | Settings, Models, with a switch and Uninstall for each model   |
 | `chats.json`     | What the pictures are made from: the engine's report, the models offered, and five recorded chats |

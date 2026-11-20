@@ -29,7 +29,9 @@ pub struct Attachment {
     pub cut: bool,
 }
 
-const IMAGES: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tiff", "svg"];
+const IMAGES: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tiff", "svg",
+];
 
 fn kind_of(extension: &str) -> String {
     match extension {
@@ -43,9 +45,21 @@ fn kind_of(extension: &str) -> String {
 }
 
 /// The text of the XML parts of an Office file, a paragraph to a line.
-fn office_text(bytes: &[u8], parts: impl Fn(&str) -> bool, paragraph: &str, text_tag: &str) -> Result<String, String> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| "The file could not be opened.".to_string())?;
-    let mut names: Vec<String> = archive.file_names().filter(|name| parts(name)).map(str::to_string).collect();
+fn office_text(
+    bytes: &[u8],
+    parts: impl Fn(&str) -> bool,
+    paragraph: &str,
+    text_tag: &str,
+) -> Result<String, String> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
+        .map_err(|_| "The file could not be opened.".to_string())?;
+    // A name that can't be read can't be one of the parts, so it is passed over.
+    let mut names: Vec<String> = archive
+        .file_names()
+        .filter_map(Result::ok)
+        .filter(|name| parts(name))
+        .map(|name| name.into_owned())
+        .collect();
     // Slides in order: slide2 before slide10.
     names.sort_by_key(|name| {
         let digits: String = name.chars().filter(char::is_ascii_digit).collect();
@@ -65,15 +79,20 @@ fn office_parts<R: Read + std::io::Seek>(
     let too_big = || "The file unpacks to more than the app can read.".to_string();
     let mut out = String::new();
     for (index, name) in names.iter().enumerate() {
-        let part = archive.by_name(name).map_err(|_| "The file could not be read.".to_string())?;
+        let part = archive
+            .by_name(name)
+            .map_err(|_| "The file could not be read.".to_string())?;
         let mut bytes = Vec::new();
         // One byte past the budget shows a part that would go over it.
-        part.take(budget + 1).read_to_end(&mut bytes).map_err(|_| "The file could not be read.".to_string())?;
+        part.take(budget + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "The file could not be read.".to_string())?;
         if bytes.len() as u64 > budget {
             return Err(too_big());
         }
         budget -= bytes.len() as u64;
-        let xml = String::from_utf8(bytes).map_err(|_| "The file could not be read.".to_string())?;
+        let xml =
+            String::from_utf8(bytes).map_err(|_| "The file could not be read.".to_string())?;
         if names.len() > 1 {
             out.push_str(&format!("--- Slide {} ---\n", index + 1));
         }
@@ -102,7 +121,9 @@ pub fn xml_text(xml: &str, paragraph: &str, text_tag: &str) -> String {
         } else if rest.starts_with("<w:br/>") || rest.starts_with("<a:br/>") {
             out.push('\n');
             rest = &rest[1..];
-        } else if rest.starts_with(&open) && matches!(rest.as_bytes().get(open.len()), Some(b'>') | Some(b' ')) {
+        } else if rest.starts_with(&open)
+            && matches!(rest.as_bytes().get(open.len()), Some(b'>') | Some(b' '))
+        {
             let Some(start) = rest.find('>') else { break };
             if rest[..start].ends_with('/') {
                 rest = &rest[start + 1..];
@@ -120,16 +141,23 @@ pub fn xml_text(xml: &str, paragraph: &str, text_tag: &str) -> String {
 }
 
 fn unescape(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Each sheet as CSV under its name.
 fn sheet_text(bytes: Vec<u8>) -> Result<String, String> {
-    use calamine::{open_workbook_auto_from_rs, Reader};
-    let mut book = open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|_| "The spreadsheet could not be opened.".to_string())?;
+    use calamine::{Reader, open_workbook_auto_from_rs};
+    let mut book = open_workbook_auto_from_rs(Cursor::new(bytes))
+        .map_err(|_| "The spreadsheet could not be opened.".to_string())?;
     let mut out = String::new();
     for name in book.sheet_names() {
-        let Ok(range) = book.worksheet_range(&name) else { continue };
+        let Ok(range) = book.worksheet_range(&name) else {
+            continue;
+        };
         out.push_str(&format!("## {name}\n"));
         for (index, row) in range.rows().enumerate() {
             if index >= SHEET_ROWS {
@@ -140,7 +168,11 @@ fn sheet_text(bytes: Vec<u8>) -> Result<String, String> {
                 .iter()
                 .map(|cell| {
                     let text = cell.to_string();
-                    if text.contains([',', '"', '\n']) { format!("\"{}\"", text.replace('"', "\"\"")) } else { text }
+                    if text.contains([',', '"', '\n']) {
+                        format!("\"{}\"", text.replace('"', "\"\""))
+                    } else {
+                        text
+                    }
                 })
                 .collect();
             out.push_str(&cells.join(","));
@@ -157,19 +189,33 @@ fn pdf_text(bytes: &[u8]) -> Result<String, String> {
     let bytes = bytes.to_vec();
     std::panic::catch_unwind(move || pdf_extract::extract_text_from_mem(&bytes))
         .map_err(|_| "This PDF could not be read.".to_string())?
-        .map_err(|_| "This PDF could not be read. It may be scanned pages, which have no text to read.".to_string())
+        .map_err(|_| {
+            "This PDF could not be read. It may be scanned pages, which have no text to read."
+                .to_string()
+        })
 }
 
 /// The text of `bytes`, read as the kind of file `name` says it is.
 pub fn read_bytes(name: &str, bytes: Vec<u8>) -> Result<Attachment, String> {
-    let extension = Path::new(name).extension().and_then(|ext| ext.to_str()).unwrap_or("").to_lowercase();
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     if IMAGES.contains(&extension.as_str()) {
-        return Err(format!("{name} is an image. Reading images needs a model that can see, which the app does not have yet."));
+        return Err(format!(
+            "{name} is an image. Reading images needs a model that can see, which the app does not have yet."
+        ));
     }
     let text = match extension.as_str() {
         "pdf" => pdf_text(&bytes)?,
         "docx" => office_text(&bytes, |part| part == "word/document.xml", "w:p", "w:t")?,
-        "pptx" => office_text(&bytes, |part| part.starts_with("ppt/slides/slide") && part.ends_with(".xml"), "a:p", "a:t")?,
+        "pptx" => office_text(
+            &bytes,
+            |part| part.starts_with("ppt/slides/slide") && part.ends_with(".xml"),
+            "a:p",
+            "a:t",
+        )?,
         "xlsx" | "xlsm" | "xls" | "ods" => sheet_text(bytes)?,
         _ => {
             if bytes.iter().take(8_000).any(|byte| *byte == 0) {
@@ -197,15 +243,23 @@ pub fn read_bytes(name: &str, bytes: Vec<u8>) -> Result<Attachment, String> {
 pub async fn read_attachment(path: String) -> Result<Attachment, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path = Path::new(&path);
-        let name = path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
         let meta = fs::metadata(path).map_err(|_| format!("{name} could not be opened."))?;
         if meta.is_dir() {
-            return Err(format!("{name} is a folder. Point a project at it to work with its files."));
+            return Err(format!(
+                "{name} is a folder. Point a project at it to work with its files."
+            ));
         }
         if meta.len() > FILE_LIMIT {
             return Err(format!("{name} is larger than 50 MB."));
         }
-        read_bytes(&name, fs::read(path).map_err(|_| format!("{name} could not be read."))?)
+        read_bytes(
+            &name,
+            fs::read(path).map_err(|_| format!("{name} could not be read."))?,
+        )
     })
     .await
     .map_err(|_| "The file could not be read.".to_string())?
@@ -244,7 +298,8 @@ mod tests {
         {
             let mut zip = zip::ZipWriter::new(&mut buffer);
             for (name, body) in parts {
-                zip.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+                zip.start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
                 zip.write_all(body.as_bytes()).unwrap();
             }
             zip.finish().unwrap();
@@ -258,9 +313,21 @@ mod tests {
         assert_eq!(read.text, "region,total\nwest,10");
         assert_eq!(read.kind, "CSV");
         assert!(!read.cut);
-        assert!(read_bytes("blob.bin", vec![0, 1, 2]).unwrap_err().contains("not a kind of file"));
-        assert!(read_bytes("photo.PNG", vec![1]).unwrap_err().contains("is an image"));
-        assert!(read_bytes("empty.txt", b"  \n".to_vec()).unwrap_err().contains("no text"));
+        assert!(
+            read_bytes("blob.bin", vec![0, 1, 2])
+                .unwrap_err()
+                .contains("not a kind of file")
+        );
+        assert!(
+            read_bytes("photo.PNG", vec![1])
+                .unwrap_err()
+                .contains("is an image")
+        );
+        assert!(
+            read_bytes("empty.txt", b"  \n".to_vec())
+                .unwrap_err()
+                .contains("no text")
+        );
     }
 
     #[test]
@@ -281,19 +348,65 @@ mod tests {
         assert_eq!(read.text, "Fish & chips\t today\nLine two");
         assert_eq!(read.kind, "Word");
         let deck = office(&[
-            ("ppt/slides/slide10.xml", "<p:sld><a:p><a:r><a:t>Ten</a:t></a:r></a:p></p:sld>"),
-            ("ppt/slides/slide2.xml", "<p:sld><a:p><a:r><a:t>Two</a:t></a:r></a:p></p:sld>"),
+            (
+                "ppt/slides/slide10.xml",
+                "<p:sld><a:p><a:r><a:t>Ten</a:t></a:r></a:p></p:sld>",
+            ),
+            (
+                "ppt/slides/slide2.xml",
+                "<p:sld><a:p><a:r><a:t>Two</a:t></a:r></a:p></p:sld>",
+            ),
         ]);
-        assert_eq!(read_bytes("deck.pptx", deck).unwrap().text, "--- Slide 1 ---\nTwo\n\n--- Slide 2 ---\nTen");
+        assert_eq!(
+            read_bytes("deck.pptx", deck).unwrap().text,
+            "--- Slide 1 ---\nTwo\n\n--- Slide 2 ---\nTen"
+        );
         assert!(read_bytes("broken.docx", b"not a zip".to_vec()).is_err());
+    }
+
+    // Spreadsheets are read by calamine, so moving it to a new version is
+    // checked here: each sheet comes back as CSV under its name.
+    #[test]
+    fn a_spreadsheet_gives_each_sheet_as_csv() {
+        let book = office(&[
+            (
+                "_rels/.rels",
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>",
+            ),
+            (
+                "xl/workbook.xml",
+                "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Sales\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>",
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Region</t></is></c><c r=\"B1\" t=\"inlineStr\"><is><t>Note</t></is></c></row><row r=\"2\"><c r=\"A2\" t=\"inlineStr\"><is><t>West</t></is></c><c r=\"B2\" t=\"inlineStr\"><is><t>Fish, \"fresh\"</t></is></c></row><row r=\"3\"><c r=\"A3\"><v>10</v></c></row></sheetData></worksheet>",
+            ),
+        ]);
+        let read = read_bytes("sales.xlsx", book).unwrap();
+        assert_eq!(
+            read.text,
+            "## Sales\nRegion,Note\nWest,\"Fish, \"\"fresh\"\"\"\n10,"
+        );
+        assert_eq!(read.kind, "Spreadsheet");
+        assert!(read_bytes("broken.xlsx", b"not a zip".to_vec()).is_err());
     }
 
     #[test]
     fn an_office_file_that_unpacks_too_far_is_turned_away() {
         let body = format!("<w:p><w:t>{}</w:t></w:p>", "a".repeat(1_000));
-        let doc = office(&[("ppt/slides/slide1.xml", body.as_str()), ("ppt/slides/slide2.xml", body.as_str())]);
+        let doc = office(&[
+            ("ppt/slides/slide1.xml", body.as_str()),
+            ("ppt/slides/slide2.xml", body.as_str()),
+        ]);
         let mut archive = zip::ZipArchive::new(Cursor::new(doc)).unwrap();
-        let names = vec!["ppt/slides/slide1.xml".to_string(), "ppt/slides/slide2.xml".to_string()];
+        let names = vec![
+            "ppt/slides/slide1.xml".to_string(),
+            "ppt/slides/slide2.xml".to_string(),
+        ];
         assert!(office_parts(&mut archive, &names, 4_000, "w:p", "w:t").is_ok());
         let error = office_parts(&mut archive, &names, 1_500, "w:p", "w:t").unwrap_err();
         assert!(error.contains("unpacks to more"), "{error}");
@@ -301,6 +414,10 @@ mod tests {
 
     #[test]
     fn a_broken_pdf_is_turned_away_without_a_crash() {
-        assert!(read_bytes("broken.pdf", b"%PDF-1.4 nonsense".to_vec()).unwrap_err().contains("PDF could not be read"));
+        assert!(
+            read_bytes("broken.pdf", b"%PDF-1.4 nonsense".to_vec())
+                .unwrap_err()
+                .contains("PDF could not be read")
+        );
     }
 }

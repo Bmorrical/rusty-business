@@ -50,6 +50,7 @@ import {
   makersOf,
   makersStatus,
   pickedAtFirst,
+  scenesNamed,
   sessionsFrom,
   standIn,
 } from './screenshots.mjs';
@@ -164,7 +165,7 @@ function offPanel() {
 
 /** The app's allow-list, read from the Rust source. */
 function catalog() {
-  const entry = /CatalogEntry \{ needle: "([^"]+)", name: "([^"]+)", maker: "([^"]+)", license: "([^"]+)", context: ([\d_]+) \}/g;
+  const entry = /CatalogEntry \{\s+needle: "([^"]+)",\s+name: "([^"]+)",\s+maker: "([^"]+)",\s+license: "([^"]+)",\s+context: ([\d_]+),?\s+\}/g;
   return [...read(ENGINE).matchAll(entry)].map(([, needle, name, maker, license, context]) => ({
     needle,
     name,
@@ -282,6 +283,14 @@ test('each scene is a picture the script can make', () => {
       assert.ok(scene.page in PAGE_BUTTONS, `${scene.file} opens a page the side bar has a button for`);
       assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
     }
+    if (scene.tab) {
+      assert.equal(scene.page, 'settings', `${scene.file} opens a tab, and only Settings has tabs`);
+      assert.match(
+        read('apps/desktop/src/App.vue'),
+        new RegExp(`@click="settingsTab = '[a-z]+'">${scene.tab}</button>`),
+        `${scene.file} opens a tab Settings has`,
+      );
+    }
     if (scene.thinking) {
       const chat = chats.find((entry) => entry.id === scene.open);
       assert.ok(
@@ -290,6 +299,15 @@ test('each scene is a picture the script can make', () => {
       );
     }
   }
+});
+
+test('named pictures are made on their own, and a name that is not a picture is refused', () => {
+  assert.deepEqual(scenesNamed([]), SCENES);
+  assert.deepEqual(
+    scenesNamed(['settings.png']).map((scene) => scene.file),
+    ['settings.png'],
+  );
+  assert.throws(() => scenesNamed(['settings.png', 'nope.png']), /No picture is called nope\.png\./);
 });
 
 test('the recorded engine offers only models on the app\'s list', () => {
@@ -655,7 +673,7 @@ test('the stand-in picks the makers as the app does before the person picks', ()
   );
 });
 
-test('the stand-in answers the eight calls the pictures need, and refuses the rest', async () => {
+test('the stand-in answers the ten calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -696,6 +714,10 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   // The outbound gate is off, as on a first run, and the pictures leave it so.
   assert.equal(await invoke('gate_status'), false);
 
+  // No model is switched off, and Uninstall would move one to the Trash, as on a Mac.
+  assert.deepEqual(plain(await invoke('deactivated_models')), []);
+  assert.deepEqual(plain(await invoke('uninstall_place')), { trash: 'the Trash', sharedCache: true });
+
   // No outside engine is added, and each comes in the fields outside.rs gives
   // the page, in the order it gives them.
   assert.deepEqual(plain(await invoke('outside_status')), OUTSIDE_NOT_ADDED);
@@ -714,8 +736,9 @@ test('the stand-in answers the eight calls the pictures need, and refuses the re
   assert.ok(read(OUTSIDE).includes(`pub const ANTHROPIC_HOST: &str = "${OUTSIDE_NOT_ADDED[2].host}";`), 'the stand-in gives Claude a host outside.rs does not ask');
   assert.ok(read(OUTSIDE).includes(`pub const GOOGLE_HOST: &str = "${OUTSIDE_NOT_ADDED[3].host}";`), 'the stand-in gives Gemini a host outside.rs does not ask');
 
-  // A call that would send, save, trash, or download has no place in a picture.
-  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside']) {
+  // A call that would send, save, trash, download, switch a model off, or
+  // uninstall one has no place in a picture.
+  for (const command of ['send_message', 'save_session', 'trash_session', 'download_model', 'stop_download', 'set_gate', 'set_makers', 'add_outside', 'remove_outside', 'refresh_outside', 'set_model_active', 'uninstall_model']) {
     await assert.rejects(invoke(command, {}), /is not part of the pictures/);
   }
 

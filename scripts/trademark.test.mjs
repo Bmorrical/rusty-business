@@ -7,9 +7,10 @@
 // README, the roadmap, the pages for each folder, the window's title, the
 // page, the tests, and the banner's words and its drawn name.
 //
-// One place is left plain, on purpose: the app's productName in
-// tauri.conf.json. It is the name of the app's file and of its installers,
-// where a ™ would turn into %E2%84%A2 in every download link.
+// Two places are left plain, on purpose: the app's productName in
+// tauri.conf.json, and the app's file name in the README's command for
+// opening the Mac app. productName is the name of the app's file and of its
+// installers, where a ™ would turn into %E2%84%A2 in every download link.
 //
 // This file quotes Brad's words as he wrote them, so it is the one file the
 // check skips.
@@ -27,7 +28,12 @@ const BANNER = 'docs/rusty-business.svg';
 
 // Each line that may name the app without the mark, by file, written out in
 // full. A line that differs in any way is checked like any other.
-const PLAIN = new Map([['apps/desktop/src-tauri/tauri.conf.json', ['  "productName": "Rusty Business",']]]);
+const PLAIN = new Map([
+  ['apps/desktop/src-tauri/tauri.conf.json', ['  "productName": "Rusty Business",']],
+  // The app's file name, in the command that opens the Mac app (see the last
+  // test below). A ™ there would name a file that is not there.
+  ['README.md', ['   xattr -dr com.apple.quarantine "/Applications/Rusty Business.app"']],
+]);
 
 /** Each use of the name with no ™ after it, as its line number, even when the name runs across two lines. */
 export function plainNames(text) {
@@ -129,4 +135,26 @@ test("only the app's file name may stay plain, and only this file is skipped", (
     'README.md:1',
     'scripts/other.test.mjs:1',
   ]);
+});
+
+// Brad, 2026-11-19: "give me the bypass command for mac and ensure it's in
+// the readme for now", "to run the self-signed install". The app is signed
+// only on the computer that built it, so macOS stops the download until the
+// mark it puts on a download is cleared. This goes once pin 1 signs the app.
+test("the README gives the command that opens the Mac app, with the app's own file name", () => {
+  const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
+  const { productName } = JSON.parse(read('apps/desktop/src-tauri/tauri.conf.json'));
+  const readme = read('README.md');
+  const start = readme.indexOf('\n## Run the chat window (macOS)\n');
+  assert.ok(start >= 0, 'the Mac section is missing');
+  const mac = readme.slice(start, readme.indexOf('\n## ', start + 1));
+  const command = `xattr -dr com.apple.quarantine "/Applications/${productName}.app"`;
+  assert.ok(mac.includes(`   \`\`\`bash\n   ${command}\n   \`\`\`\n`), `the Mac section does not give: ${command}`);
+  assert.deepEqual(PLAIN.get('README.md'), [`   ${command}`], 'the line let off is not the command');
+  assert.ok(mac.includes('choose Open Anyway'), 'the Mac section no longer gives the System Settings way');
+  const limits = readme.replace(/\s+/g, ' ');
+  assert.ok(
+    limits.includes('until you choose Open Anyway in System Settings or run the command in [Run the chat window (macOS)](#run-the-chat-window-macos).'),
+    "the README's limits no longer point to the command",
+  );
 });

@@ -1,4 +1,5 @@
 mod attachments;
+mod deactivated;
 mod downloads;
 mod engine;
 mod gate;
@@ -9,6 +10,7 @@ mod projects;
 mod sessions;
 mod stack;
 mod starter;
+mod uninstall;
 mod update;
 mod workspace;
 
@@ -31,11 +33,19 @@ pub fn run() {
             // Windows and Linux. A Mac's engine reads the Hugging Face cache.
             models::use_own_folder(data.join("models"));
             app.manage(sessions::Store::new(data.join("sessions")));
-            app.manage(projects::Projects::new(data.join("projects"), data.join("memory.md")));
+            app.manage(projects::Projects::new(
+                data.join("projects"),
+                data.join("memory.md"),
+            ));
             app.manage(starter::Starter::new(data.join("engine.log")));
             // The outbound gate: off until the person turns it on.
             let gate = gate::Gate::new(data.join("gate"));
-            app.manage(stack::Stack::new(data.join("stack"), data.join("stack.log"), stack::FRONT_DOOR_PORT, gate.clone()));
+            app.manage(stack::Stack::new(
+                data.join("stack"),
+                data.join("stack.log"),
+                stack::FRONT_DOOR_PORT,
+                gate.clone(),
+            ));
             app.manage(gate);
             // What a download left when the app last quit part way is thrown away.
             let downloads = downloads::Downloads::new(data.join("downloads"));
@@ -45,6 +55,8 @@ pub fn run() {
             app.manage(makers::Makers::new(data.join("makers"), &models::on_disk()));
             // Engines outside this computer: the path to each key, never the key.
             app.manage(outside::Outside::new(data.join("outside.json")));
+            // The models switched off: on this computer, or outside it.
+            app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -83,6 +95,10 @@ pub fn run() {
             outside::add_outside,
             outside::refresh_outside,
             outside::remove_outside,
+            deactivated::deactivated_models,
+            deactivated::set_model_active,
+            uninstall::uninstall_model,
+            uninstall::uninstall_place,
         ])
         .build(context)
         .expect("error while building tauri application");
