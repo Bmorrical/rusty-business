@@ -98,13 +98,21 @@ I want to hear about:
 - The `board` command, run in a terminal, reads and writes one board file
   at a path you type. The path never comes from the page. The file is read
   as a plain file of at most 4 MB, never through a link, and checked
-  against board v1 before it is used. A push makes a new file, or replaces
+  against the file's ruleset, [BOARD.md](BOARD.md), before it is used. A push makes a new file, or replaces
   a file of the same board, and leaves any other file as it is. It writes
   first to a plain file beside that one, named for it and ending
   `.json.partial`, then moves it into place: a plain file already under
   that name is written over, and anything else there stops the push. The
   command asks nothing of the network, starts no program, deletes nothing,
   and leaves your notes as they are.
+- **No direct API connection to a board's backend, for now.** The app
+  holds no address, no token, and no key for one, and a change that adds
+  one is refused. A board moves as a file: exported on one side, and
+  imported on the other. Why: the app is offline first, and at most LAN. A
+  file crosses only when a person moves it, so nothing about a board leaves
+  this computer by itself, and the app has no door for a backend to be
+  reached through. "For now" is meant: the rule stands until a pull request
+  changes [BOARD.md](BOARD.md), which has it in full.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.

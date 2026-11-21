@@ -25,14 +25,18 @@ import {
   sliceSteps,
   startSlice,
   startStory,
+  statusName,
   storiesOf,
   storyLine,
   storyMove,
 } from "./board.js";
 
 // The same made-up board the app carries, so the page's reading of it and
-// Rust's never drift apart.
-const sample = JSON.parse(readFileSync(new URL("../src-tauri/sample-board.json", import.meta.url), "utf8"));
+// Rust's never drift apart. The file has a `meta` block and a `data` block.
+// Rust hands the page one flat board, the same for both lines of the format:
+// what `meta` holds, and the releases as `epics`.
+const file = JSON.parse(readFileSync(new URL("../src-tauri/sample-board.json", import.meta.url), "utf8"));
+const sample = { ...file.meta, epics: file.data.releases };
 const story = (number) => findStory(sample, number);
 
 test("there are five lanes, in the order a slice goes through them", () => {
@@ -265,9 +269,11 @@ test("the board says it is a copy on this computer, and from when", () => {
 });
 
 test("the sample board names nobody and no address", () => {
-  const text = JSON.stringify(sample);
+  const text = JSON.stringify(file);
   assert.ok(!/https?:|www\.|@/.test(text), "the sample board holds an address");
-  assert.equal(sample.format, "board v1");
+  assert.deepEqual(Object.keys(file), ["meta", "data"]);
+  assert.equal(sample.format, "board");
+  assert.equal(sample.version, "2.0");
   assert.equal(sample.id, "sample");
   for (const lane of LANES) {
     assert.ok(
@@ -275,4 +281,45 @@ test("the sample board names nobody and no address", () => {
       `the sample shows no slice at ${lane.id}`,
     );
   }
+});
+
+// "dynamic would be good rather than static, so myself and others can do more
+// flexibility with less code changes."
+test("a status reads as the board's own list names it", () => {
+  // The sample lists its statuses, and every row points at one by id.
+  assert.equal(statusName(sample, story(413)), "Ready to slice");
+  assert.equal(statusName(sample, story(409)), "On main");
+  assert.equal(statusName(sample, sample.epics[0], "releases"), "Building");
+  assert.equal(statusName(sample, sample.epics[1], "releases"), "Scheduled");
+  for (const entry of storiesOf(sample)) {
+    assert.ok(sample.statuses.stories.some((status) => status.id === entry.statusId), `#${entry.number}`);
+    assert.equal(statusName(sample, entry), entry.status);
+  }
+
+  // Rename a status in the list, and every row that points at it reads the
+  // new name, with no row changed.
+  const renamed = {
+    ...sample,
+    statuses: {
+      ...sample.statuses,
+      stories: sample.statuses.stories.map((status) =>
+        status.id === "building" ? { ...status, name: "In progress" } : status,
+      ),
+    },
+  };
+  assert.equal(story(412).status, "Building");
+  assert.equal(statusName(renamed, story(412)), "In progress");
+  assert.equal(statusName(renamed, story(413)), "Ready to slice");
+
+  // The two lists are apart: a story's id is never looked up among releases.
+  assert.equal(statusName(sample, { status: "As written", statusId: "on-main" }, "releases"), "As written");
+  assert.equal(statusName(sample, { status: "As written", statusId: "out" }, "releases"), "Out");
+
+  // An id the list does not have, no id, or no list: the row's own words.
+  assert.equal(statusName(sample, { status: "Parked", statusId: "parked" }), "Parked");
+  assert.equal(statusName(sample, { status: "Parked" }), "Parked");
+  assert.equal(statusName({ epics: [] }, { status: "Parked", statusId: "building" }), "Parked");
+  assert.equal(statusName(null, { status: "Parked", statusId: "building" }), "Parked");
+  assert.equal(statusName(sample, { statusId: "nowhere" }), "");
+  assert.equal(statusName(sample, null), "");
 });

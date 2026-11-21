@@ -11,6 +11,12 @@
 //! the board as it was when the two last agreed, and where that file is.
 //! Reading and writing that file happens here, under the same rules as every
 //! other board file. Working out what changed happens in `sync.rs`.
+//!
+//! A board file is on one of two lines of the format. Line 1 is "board v1":
+//! one flat object. Line 2 has a `meta` block and a `data` block, and a
+//! version, `2.0`, whose second number goes up when the line gains
+//! something. A key this version does not know is kept, at every level, and
+//! written back. `BOARD.md` at the root of the repository is the ruleset.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -21,8 +27,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-/// The open format a board file names in its `format` field.
-pub const FORMAT: &str = "board v1";
+/// What a board file on line 2 names in `meta.format`.
+pub const FORMAT: &str = "board";
+/// What a board file on line 1 names in its `format` field.
+pub const FORMAT_V1: &str = "board v1";
+/// The newest line of the format this app reads.
+const LINE: u32 = 2;
 /// The format of the file that holds the person's own drafts for a board.
 pub const DRAFTS_FORMAT: &str = "board drafts v1";
 /// The format of the file that says where a board's shared file is kept.
@@ -49,6 +59,21 @@ const DETAIL_LIMIT: usize = 20_000;
 const NOTE_LIMIT: usize = 4_000;
 /// The most revs a board's `history` holds. Older ones fall off the end.
 pub const HISTORY_LIMIT: usize = 50;
+/// The most statuses one of a board's two lists holds.
+const STATUS_LIMIT: usize = 100;
+const STAMP_LIMIT: usize = 40;
+const VERSION_LIMIT: usize = 16;
+
+/// What a file says when it is no board at all.
+const NOT_A_BOARD: &str = "This is not a board file.";
+
+/// The keys of an object that this version does not know. They are kept as
+/// they came and written back, so a newer file loses nothing here.
+pub type Extra = BTreeMap<String, serde_json::Value>;
+
+fn zero(number: &u64) -> bool {
+    *number == 0
+}
 
 /// The made-up board the app carries, so the view has something to show
 /// before a board of the person's own arrives.
@@ -68,6 +93,10 @@ fn story() -> String {
 pub struct Slice {
     #[serde(default)]
     pub id: String,
+    /// The number its backend knows it by, when it has one. Never the match:
+    /// a slice is known by its id.
+    #[serde(default, skip_serializing_if = "zero")]
+    pub number: u64,
     #[serde(default)]
     pub title: String,
     /// The brief: the goal, the files it may touch, and done-when.
@@ -81,6 +110,8 @@ pub struct Slice {
     pub turn: String,
     #[serde(default)]
     pub notes: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 
 /// A story or a bug, with the slices it has been cut into.
@@ -95,14 +126,21 @@ pub struct Story {
     pub title: String,
     #[serde(default)]
     pub detail: String,
+    /// The status as words. It is shown when `status_id` names no status
+    /// on the board's list, so it is never held to a list.
     #[serde(default)]
     pub status: String,
+    /// The id of a status on the board's list of story statuses, or empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status_id: String,
     #[serde(default, rename = "move", skip_serializing_if = "String::is_empty")]
     pub turn: String,
     #[serde(default)]
     pub notes: Vec<String>,
     #[serde(default)]
     pub slices: Vec<Slice>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 
 /// An epic: one release on the road, and the stories under it.
@@ -117,32 +155,175 @@ pub struct Epic {
     pub detail: String,
     #[serde(default)]
     pub status: String,
+    /// The id of a status on the board's list of release statuses, or empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub status_id: String,
     #[serde(default)]
     pub stories: Vec<Story>,
+    #[serde(flatten)]
+    pub extra: Extra,
 }
 
-/// A board's snapshot, as it was when it was pulled.
+/// One status a board's stories, or its releases, can be in. The board
+/// brings its own list, so a new status is a change to a file, not to code.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Board {
-    #[serde(default)]
-    pub format: String,
+pub struct Status {
+    /// What a row's `statusId` holds. It never changes, so a status can be
+    /// renamed without touching a row.
     #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub name: String,
+    /// Whether work in this status is done.
+    #[serde(default)]
+    pub finished: bool,
+    /// The ids of the statuses this one may move to. None means any, and an
+    /// empty list means no move. The app shows them and enforces nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moves: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+/// A board's two lists of statuses. Each is in the order the board shows.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Statuses {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stories: Vec<Status>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub releases: Vec<Status>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Statuses {
+    pub fn is_empty(&self) -> bool {
+        self.stories.is_empty() && self.releases.is_empty() && self.extra.is_empty()
+    }
+}
+
+/// A board's snapshot, as it was when it was pulled. This is the board as
+/// the app holds it and as the page gets it, the same for both lines of the
+/// format. The file's own shape is `FileV1` or `FileV2`, below.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Board {
+    /// "board v1" on line 1, and "board" on line 2.
+    pub format: String,
+    /// The file's version on line 2, such as "2.0". Empty on line 1. A copy
+    /// keeps the version its file had, so a newer file is never written back
+    /// as an older one.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub version: String,
+    pub id: String,
+    pub name: String,
+    /// The program that last wrote the shared copy, and when. For a person
+    /// to read: nothing is decided by either.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub written_by: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub written_at: String,
     /// The name of this state of the board, given by whoever last wrote the
     /// copy that is shared. A file nobody keeps in step has none.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub rev: String,
     /// The revs this state came from, the newest first.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub history: Vec<String>,
+    /// The statuses this board's stories and releases can be in.
+    pub statuses: Statuses,
     /// When this copy was taken, in milliseconds. The app stamps it.
-    #[serde(default)]
     pub pulled_at: u64,
-    #[serde(default)]
     pub epics: Vec<Epic>,
+    /// What the file held that this version does not know: beside `meta`
+    /// and `data`, inside `meta`, and inside `data`. On line 1, the first
+    /// holds the unknown keys of the file's one object.
+    #[serde(skip)]
+    pub extra: Extra,
+    #[serde(skip)]
+    pub meta: Extra,
+    #[serde(skip)]
+    pub data: Extra,
+}
+
+/// A board file on line 1: "board v1", one flat object.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileV1 {
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    rev: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    history: Vec<String>,
+    #[serde(default)]
+    pulled_at: u64,
+    #[serde(default)]
+    epics: Vec<Epic>,
+    #[serde(flatten)]
+    extra: Extra,
+}
+
+/// A board file on line 2: what the file is, then what it holds.
+#[derive(Deserialize, Serialize)]
+struct FileV2 {
+    #[serde(default)]
+    meta: Meta,
+    #[serde(default)]
+    data: Data,
+    #[serde(flatten)]
+    extra: Extra,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Meta {
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    written_by: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    written_at: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    rev: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    history: Vec<String>,
+    #[serde(default, skip_serializing_if = "Statuses::is_empty")]
+    statuses: Statuses,
+    #[serde(default, skip_serializing_if = "zero")]
+    pulled_at: u64,
+    #[serde(flatten)]
+    extra: Extra,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct Data {
+    #[serde(default)]
+    releases: Vec<Epic>,
+    #[serde(flatten)]
+    extra: Extra,
+}
+
+/// What a file's top level holds, read before anything else is, to tell
+/// which line the file is on.
+#[derive(Deserialize)]
+struct Probe {
+    #[serde(default)]
+    meta: Option<serde::de::IgnoredAny>,
+    #[serde(default)]
+    format: Option<serde_json::Value>,
 }
 
 /// Where a board's shared file is, as the person last named it.
@@ -196,6 +377,41 @@ pub struct Summary {
     pub problem: Option<String>,
 }
 
+/// A version as its line and its step: "2.7" is line 2, step 7.
+fn version(text: &str) -> Option<(u32, u32)> {
+    if text.len() > VERSION_LIMIT {
+        return None;
+    }
+    let (line, step) = text.split_once('.')?;
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    if !digits(line) || !digits(step) {
+        return None;
+    }
+    Some((line.parse().ok()?, step.parse().ok()?))
+}
+
+/// A time as a board file writes it: UTC, to the second.
+fn utc(seconds: u64) -> String {
+    let (days, rest) = (seconds / 86_400, seconds % 86_400);
+    // Days since 1970 to a date, by the era of 400 years it falls in.
+    let shifted = days + 719_468;
+    let era = shifted / 146_097;
+    let day_of_era = shifted % 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let turned = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * turned + 2) / 5 + 1;
+    let month = if turned < 10 { turned + 3 } else { turned - 9 };
+    let year = year_of_era + era * 400 + u64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60
+    )
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -206,6 +422,17 @@ fn now_ms() -> u64 {
 /// Letters, digits, and hyphens only, so an id can never name a path.
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// A status's id may hold underscores too. It names a row's status and never
+/// a file, and a backend's ids are its own: it should not have to rename one
+/// to write a board file.
+fn valid_status_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn failed(what: &str) -> impl Fn(std::io::Error) -> String + '_ {
@@ -258,6 +485,56 @@ fn one_of(what: &str, value: &str, known: &[&str], named: &str) -> Result<(), St
     Ok(())
 }
 
+/// One of a board's lists of statuses. `kind` is "story" or "release".
+fn statuses_fit(kind: &str, list: &[Status]) -> Result<(), String> {
+    too_many(
+        &format!("The board has {kind} statuses,"),
+        list.len(),
+        STATUS_LIMIT,
+    )?;
+    let mut ids = BTreeSet::new();
+    for status in list {
+        if !valid_status_id(&status.id) {
+            return Err(format!(
+                "The id of a {kind} status is up to 64 letters, digits, hyphens, and underscores."
+            ));
+        }
+        // A row names its status by this id, so no two may share one.
+        if !ids.insert(status.id.as_str()) {
+            return Err(format!("Two {kind} statuses have the id {}.", status.id));
+        }
+        too_long(
+            &format!("The name of the {kind} status {}", status.id),
+            &status.name,
+            NAME_LIMIT,
+        )?;
+        let moves = status.moves.as_deref().unwrap_or_default();
+        too_many(
+            &format!("The {kind} status {} has moves,", status.id),
+            moves.len(),
+            STATUS_LIMIT,
+        )?;
+        if !moves.iter().all(|to| valid_status_id(to)) {
+            return Err(format!(
+                "A move of the {kind} status {} is a status's id: up to 64 letters, digits, hyphens, and underscores.",
+                status.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The id a row gives for its status. Empty is none. It is held to the shape
+/// of an id and to nothing else: an id no list has is not an error.
+fn status_id_fits(at: &str, id: &str) -> Result<(), String> {
+    if !id.is_empty() && !valid_status_id(id) {
+        return Err(format!(
+            "{at}: the status id is up to 64 letters, digits, hyphens, and underscores."
+        ));
+    }
+    Ok(())
+}
+
 fn notes_fit(what: &str, notes: &[String]) -> Result<(), String> {
     too_many(&format!("{what} has notes,"), notes.len(), NOTES_LIMIT)?;
     for note in notes {
@@ -299,6 +576,9 @@ impl Slice {
             ));
         }
         let at = format!("Slice {} of story #{story}", self.id);
+        if self.number > NUMBER_LIMIT {
+            return Err(format!("{at}: its number is between 1 and 999,999,999."));
+        }
         too_long(&format!("{at}: the title"), &self.title, TITLE_LIMIT)?;
         too_long(&format!("{at}: the detail"), &self.detail, DETAIL_LIMIT)?;
         if !self.lane.is_empty() {
@@ -321,6 +601,7 @@ impl Story {
         too_long(&format!("{at}: the title"), &self.title, TITLE_LIMIT)?;
         too_long(&format!("{at}: the detail"), &self.detail, DETAIL_LIMIT)?;
         too_long(&format!("{at}: the status"), &self.status, NAME_LIMIT)?;
+        status_id_fits(&at, &self.status_id)?;
         if !self.turn.is_empty() {
             one_of(&at, &self.turn, &MOVES, "a move")?;
         }
@@ -340,10 +621,28 @@ impl Story {
 impl Board {
     /// Why this is not a board the app can keep, in words for a person.
     pub fn check(&self) -> Result<(), String> {
-        if self.format != FORMAT {
-            return Err(format!("This is not a \"{FORMAT}\" file."));
+        match self.level() {
+            Some((line, _)) if line > LINE => {
+                return Err(format!(
+                    "This board file is on line {line} of the format, and this app reads lines 1 and {LINE}. Nothing was changed."
+                ));
+            }
+            Some((1 | LINE, _)) => {}
+            _ => return Err(NOT_A_BOARD.to_string()),
         }
         too_long("The board's name", &self.name, NAME_LIMIT)?;
+        too_long(
+            "The name of the program that wrote the board",
+            &self.written_by,
+            NAME_LIMIT,
+        )?;
+        too_long(
+            "The time the board was written",
+            &self.written_at,
+            STAMP_LIMIT,
+        )?;
+        statuses_fit("story", &self.statuses.stories)?;
+        statuses_fit("release", &self.statuses.releases)?;
         if !self.rev.is_empty() && !valid_id(&self.rev) {
             return Err("The board's rev is up to 64 letters, digits, and hyphens.".to_string());
         }
@@ -374,6 +673,7 @@ impl Board {
             too_long(&format!("{at}: the title"), &epic.title, TITLE_LIMIT)?;
             too_long(&format!("{at}: the detail"), &epic.detail, DETAIL_LIMIT)?;
             too_long(&format!("{at}: the status"), &epic.status, NAME_LIMIT)?;
+            status_id_fits(&at, &epic.status_id)?;
             for story in &epic.stories {
                 story.check()?;
                 if !numbers.insert(story.number) {
@@ -383,6 +683,28 @@ impl Board {
             too_many("The board has stories,", numbers.len(), STORY_LIMIT)?;
         }
         Ok(())
+    }
+
+    /// The line of the format this board is on, and its step on that line.
+    /// `None` when its format and version name no line.
+    pub fn level(&self) -> Option<(u32, u32)> {
+        if self.format == FORMAT_V1 {
+            return self.version.is_empty().then_some((1, 0));
+        }
+        if self.format != FORMAT {
+            return None;
+        }
+        version(&self.version).filter(|(line, _)| *line >= LINE)
+    }
+
+    /// The board, saying this app wrote it just now. Line 1 has no place
+    /// for either, so a board on line 1 comes back as it is.
+    pub fn signed(mut self) -> Board {
+        if self.format == FORMAT {
+            self.written_by = format!("rusty-business {}", env!("CARGO_PKG_VERSION"));
+            self.written_at = utc(now_ms() / 1_000);
+        }
+        self
     }
 
     fn has(&self, number: u64) -> bool {
@@ -500,20 +822,107 @@ impl Boards {
         Ok(text)
     }
 
-    /// A board from the text of a file, checked against the format.
-    fn parse(text: &str) -> Result<Board, String> {
-        let board: Board = serde_json::from_str(text)
-            .map_err(|error| format!("This file is not a board: {error}."))?;
+    /// A board from the text of a file, on either line of the format,
+    /// checked against it. A file with a `meta` block is on line 2 or above.
+    pub(crate) fn parse(text: &str) -> Result<Board, String> {
+        let unread = |error: serde_json::Error| format!("This file is not a board: {error}.");
+        // A board file is one object. Anything else is never read as one.
+        if !text.trim_start().starts_with('{') {
+            serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(unread)?;
+            return Err(NOT_A_BOARD.to_string());
+        }
+        let probe: Probe = serde_json::from_str(text).map_err(unread)?;
+        let board = if probe.meta.is_some() {
+            let file: FileV2 = serde_json::from_str(text).map_err(unread)?;
+            if file.meta.format != FORMAT {
+                return Err(NOT_A_BOARD.to_string());
+            }
+            Board {
+                format: file.meta.format,
+                version: file.meta.version,
+                id: file.meta.id,
+                name: file.meta.name,
+                written_by: file.meta.written_by,
+                written_at: file.meta.written_at,
+                rev: file.meta.rev,
+                history: file.meta.history,
+                statuses: file.meta.statuses,
+                pulled_at: file.meta.pulled_at,
+                epics: file.data.releases,
+                extra: file.extra,
+                meta: file.meta.extra,
+                data: file.data.extra,
+            }
+        } else {
+            if probe.format.as_ref().and_then(|format| format.as_str()) != Some(FORMAT_V1) {
+                return Err(NOT_A_BOARD.to_string());
+            }
+            let file: FileV1 = serde_json::from_str(text).map_err(unread)?;
+            Board {
+                format: file.format,
+                id: file.id,
+                name: file.name,
+                rev: file.rev,
+                history: file.history,
+                pulled_at: file.pulled_at,
+                epics: file.epics,
+                extra: file.extra,
+                ..Board::default()
+            }
+        };
         board.check()?;
         Ok(board)
+    }
+
+    /// A board as the text of a file, on the line its copy is on. Nothing is
+    /// checked here: `json` is the way to write a board.
+    pub(crate) fn written(board: &Board) -> Result<String, String> {
+        let board = board.clone();
+        let text = if board.format == FORMAT_V1 {
+            serde_json::to_string_pretty(&FileV1 {
+                format: board.format,
+                id: board.id,
+                name: board.name,
+                rev: board.rev,
+                history: board.history,
+                pulled_at: board.pulled_at,
+                epics: board.epics,
+                extra: board.extra,
+            })
+        } else {
+            let mut extra = board.extra;
+            // A key a line 1 file had beside its own may be named for one of
+            // line 2's two blocks. The block is written, and that key is not.
+            extra.retain(|key, _| key != "meta" && key != "data");
+            serde_json::to_string_pretty(&FileV2 {
+                meta: Meta {
+                    format: board.format,
+                    version: board.version,
+                    id: board.id,
+                    name: board.name,
+                    written_by: board.written_by,
+                    written_at: board.written_at,
+                    rev: board.rev,
+                    history: board.history,
+                    statuses: board.statuses,
+                    pulled_at: board.pulled_at,
+                    extra: board.meta,
+                },
+                data: Data {
+                    releases: board.epics,
+                    extra: board.data,
+                },
+                extra,
+            })
+        };
+        text.map_err(|_| "Could not write the board.".to_string())
     }
 
     /// A board as the text of a file. It is checked first, and is never more
     /// than a file may be.
     fn json(board: &Board) -> Result<String, String> {
         board.check()?;
-        let text = serde_json::to_string_pretty(board)
-            .map_err(|_| "Could not write the board.".to_string())?;
+        let text = Self::written(board)?;
         if text.len() as u64 > SIZE_LIMIT {
             return Err("That board is larger than 4 MB.".to_string());
         }
@@ -682,11 +1091,7 @@ impl Boards {
         let path = self.snapshot(&board.id)?;
         board.check()?;
         board.pulled_at = now_ms();
-        let text = serde_json::to_string_pretty(&board)
-            .map_err(|_| "Could not write the board.".to_string())?;
-        if text.len() as u64 > SIZE_LIMIT {
-            return Err("That board is larger than 4 MB.".to_string());
-        }
+        let text = Self::json(&board)?;
         self.ready()?;
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         write(&path, &text, "Could not save the board")?;
@@ -781,8 +1186,8 @@ impl Boards {
     /// folder as a pull would. A file already under the sample's name is
     /// opened as it is, or its problem is said: it is never written over.
     pub fn sample(&self) -> Result<Local, String> {
-        let board: Board = serde_json::from_str(SAMPLE)
-            .map_err(|_| "Could not read the sample board.".to_string())?;
+        let board =
+            Self::parse(SAMPLE).map_err(|_| "Could not read the sample board.".to_string())?;
         if Self::found(&self.snapshot(&board.id)?) {
             return self.load(&board.id);
         }
@@ -821,6 +1226,9 @@ pub fn save_board_note(
 mod tests {
     use super::*;
 
+    /// The version of the sample, and of a board this app makes new: line 2, step 0.
+    const VERSION: &str = "2.0";
+
     fn scratch() -> (Boards, PathBuf) {
         let dir =
             std::env::temp_dir().join(format!("rusty-business-test-{}", uuid::Uuid::new_v4()));
@@ -828,18 +1236,97 @@ mod tests {
     }
 
     fn sample() -> Board {
-        serde_json::from_str(SAMPLE).unwrap()
+        Boards::parse(SAMPLE).unwrap()
     }
+
+    /// A board as the text of its file, as the store writes it.
+    fn text(board: &Board) -> String {
+        Boards::written(board).unwrap()
+    }
+
+    fn value(text: &str) -> serde_json::Value {
+        serde_json::from_str(text).unwrap()
+    }
+
+    /// The example file in `BOARD.md`, the ruleset at the root of the
+    /// repository.
+    fn ruleset_example() -> &'static str {
+        let page = include_str!("../../../../BOARD.md");
+        let from = page.find("```json\n").unwrap() + "```json\n".len();
+        let to = from + page[from..].find("\n```").unwrap();
+        &page[from..to]
+    }
+
+    /// A file as a backend that writes board v1 writes it.
+    const V1: &str = r#"{
+      "format": "board v1",
+      "id": "errands",
+      "name": "Errands",
+      "rev": "r-7",
+      "history": ["r-6", "r-5"],
+      "epics": [
+        {
+          "release": "3.1.0",
+          "title": "Lists",
+          "detail": "",
+          "status": "Planned",
+          "stories": [
+            {
+              "number": 12,
+              "kind": "bug",
+              "title": "A sort that loses a row",
+              "detail": "",
+              "status": "Looking into it",
+              "move": "you",
+              "notes": ["Seen twice."],
+              "slices": [
+                {
+                  "id": "a",
+                  "number": 7001,
+                  "title": "A failing test",
+                  "detail": "",
+                  "lane": "sliced",
+                  "move": "model",
+                  "notes": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }"#;
 
     fn first_story(board: &mut Board) -> &mut Story {
         &mut board.epics[0].stories[0]
     }
 
     #[test]
-    fn the_sample_board_is_a_board_v1_file() {
+    fn the_sample_board_is_a_board_file_on_this_apps_line() {
         let board = sample();
         assert_eq!(board.format, FORMAT);
+        assert_eq!(board.version, VERSION);
+        assert_eq!(board.level(), Some((LINE, 0)));
         assert_eq!(board.check(), Ok(()));
+        // Its statuses are data, and every row names one of them by its id.
+        assert!(!board.statuses.stories.is_empty() && !board.statuses.releases.is_empty());
+        for epic in &board.epics {
+            let status = board
+                .statuses
+                .releases
+                .iter()
+                .find(|status| status.id == epic.status_id)
+                .unwrap_or_else(|| panic!("{} names no release status", epic.release));
+            assert_eq!(status.name, epic.status);
+            for story in &epic.stories {
+                let status = board
+                    .statuses
+                    .stories
+                    .iter()
+                    .find(|status| status.id == story.status_id)
+                    .unwrap_or_else(|| panic!("#{} names no story status", story.number));
+                assert_eq!(status.name, story.status);
+            }
+        }
         assert_eq!(board.id, "sample");
         assert!(board.stories() >= 5);
         let lanes: BTreeSet<&str> = board
@@ -1077,7 +1564,7 @@ mod tests {
         );
         assert_eq!(
             listed[2].problem.as_deref(),
-            Some("This is not a \"board v1\" file.")
+            Some("This is not a board file.")
         );
         assert!(boards.load("other").is_err());
         assert_eq!(
@@ -1094,7 +1581,7 @@ mod tests {
         let mut board = sample();
         board.id = "something/else".to_string();
         board.name = " ".to_string();
-        let text = serde_json::to_string(&board).unwrap();
+        let text = text(&board);
         fs::write(dir.join("boards").join("my-road.json"), text).unwrap();
 
         let local = boards.load("my-road").unwrap();
@@ -1107,7 +1594,7 @@ mod tests {
     fn a_board_too_large_is_not_read() {
         let (boards, dir) = scratch();
         boards.ready().unwrap();
-        let mut text = serde_json::to_string(&sample()).unwrap();
+        let mut text = text(&sample());
         text.push_str(&" ".repeat(SIZE_LIMIT as usize));
         fs::write(dir.join("boards").join("big.json"), text).unwrap();
         assert_eq!(
@@ -1122,7 +1609,7 @@ mod tests {
         let (boards, dir) = scratch();
         boards.ready().unwrap();
         let elsewhere = dir.join("elsewhere.json");
-        fs::write(&elsewhere, serde_json::to_string(&sample()).unwrap()).unwrap();
+        fs::write(&elsewhere, text(&sample())).unwrap();
         std::os::unix::fs::symlink(&elsewhere, dir.join("boards").join("linked.json")).unwrap();
         assert_eq!(
             boards.load("linked").err().unwrap(),
@@ -1188,15 +1675,389 @@ mod tests {
     }
 
     #[test]
-    fn a_story_with_no_kind_is_a_story_and_what_the_format_does_not_name_is_left_out() {
-        let text = r#"{"format":"board v1","id":"small","secret":"x","epics":[
-            {"release":"1.0","stories":[{"number":1,"title":"One","extra":true}]}]}"#;
-        let board: Board = serde_json::from_str(text).unwrap();
-        assert_eq!(board.check(), Ok(()));
+    fn a_story_with_no_kind_is_a_story() {
+        let text = r#"{"format":"board v1","id":"small","epics":[
+            {"release":"1.0","stories":[{"number":1,"title":"One"}]}]}"#;
+        let board = Boards::parse(text).unwrap();
         assert_eq!(board.epics[0].stories[0].kind, "story");
-        let written = serde_json::to_string(&board).unwrap();
-        assert!(!written.contains("secret") && !written.contains("extra"));
-        assert!(!written.contains("\"move\""));
+        assert!(!self::text(&board).contains("\"move\""));
+    }
+
+    #[test]
+    fn the_rulesets_example_is_a_board_file() {
+        let board = Boards::parse(ruleset_example()).unwrap();
+        assert_eq!(board.level(), Some((2, 0)));
+        assert_eq!(board.id, "list-app");
+        assert_eq!(board.written_by, "my-tracker 3.1");
+        assert_eq!(board.written_at, "2026-11-21T15:04:05Z");
+        assert_eq!(board.rev, "export-12");
+        assert_eq!(board.history, ["export-11", "export-10"]);
+        let names = |list: &[Status]| -> Vec<String> {
+            list.iter().map(|status| status.name.clone()).collect()
+        };
+        assert_eq!(
+            names(&board.statuses.stories),
+            ["Planned", "Building", "Done"]
+        );
+        assert_eq!(names(&board.statuses.releases), ["Ahead", "Out"]);
+        let building = &board.statuses.stories[1];
+        assert_eq!(building.id, "building");
+        assert!(!building.finished);
+        assert_eq!(
+            building.moves,
+            Some(vec!["planned".to_string(), "done".to_string()])
+        );
+        // No moves named is any move. An empty list is none.
+        assert_eq!(board.statuses.stories[0].moves, None);
+        assert_eq!(board.statuses.stories[2].moves, Some(Vec::new()));
+        assert!(board.statuses.stories[2].finished);
+        let story = &board.epics[0].stories[0];
+        assert_eq!(
+            (story.status.as_str(), story.status_id.as_str()),
+            ("Building", "building")
+        );
+        assert_eq!(board.epics[0].status_id, "ahead");
+        assert_eq!(story.slices[0].number, 9001);
+        // What the store writes reads back as the same board.
+        assert_eq!(Boards::parse(&text(&board)).unwrap(), board);
+    }
+
+    #[test]
+    fn a_file_is_a_meta_block_and_a_data_block() {
+        let written = value(&text(&sample()));
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            value.as_object().unwrap().keys().cloned().collect()
+        };
+        assert_eq!(keys(&written), ["data", "meta"]);
+        assert_eq!(keys(&written["data"]), ["releases"]);
+        assert_eq!(
+            keys(&written["meta"]),
+            ["format", "id", "name", "statuses", "version"]
+        );
+        assert_eq!(written["meta"]["format"], "board");
+        assert_eq!(written["meta"]["version"], "2.0");
+        assert_eq!(written["data"]["releases"][0]["statusId"], "building");
+        assert_eq!(
+            written["data"]["releases"][0]["stories"][0]["statusId"],
+            "on-main"
+        );
+    }
+
+    #[test]
+    fn a_board_v1_file_is_still_read_and_is_written_back_as_board_v1() {
+        let board = Boards::parse(V1).unwrap();
+        assert_eq!(board.level(), Some((1, 0)));
+        assert_eq!(board.format, FORMAT_V1);
+        assert_eq!((board.id.as_str(), board.rev.as_str()), ("errands", "r-7"));
+        assert_eq!(board.history, ["r-6", "r-5"]);
+        assert!(board.statuses.is_empty());
+        let story = &board.epics[0].stories[0];
+        assert_eq!((story.kind.as_str(), story.turn.as_str()), ("bug", "you"));
+        assert_eq!(story.status, "Looking into it");
+        assert_eq!(story.status_id, "");
+        // A slice's number comes in with it and goes back out with it.
+        assert_eq!(story.slices[0].number, 7001);
+
+        // The copy stays on the line its file came on, so the program that
+        // wrote the file can read it back.
+        let written = value(&text(&board.clone().signed()));
+        assert_eq!(written["format"], "board v1");
+        assert!(written.get("meta").is_none() && written.get("data").is_none());
+        assert!(written.get("writtenBy").is_none() && written.get("version").is_none());
+        assert_eq!(
+            written["epics"][0]["stories"][0]["slices"][0]["number"],
+            7001
+        );
+        assert_eq!(written["epics"][0]["stories"][0]["move"], "you");
+        assert_eq!(Boards::parse(&text(&board)).unwrap(), board);
+
+        // And through the store.
+        let (boards, _) = scratch();
+        boards.pull(board.clone()).unwrap();
+        let kept = boards.load("errands").unwrap().board;
+        assert_eq!(kept.level(), Some((1, 0)));
+        assert_eq!(kept.epics, board.epics);
+    }
+
+    #[test]
+    fn what_a_reader_does_not_know_is_kept_and_written_back() {
+        // "so someone doesn't have to remap when the next party wants to
+        // iterate it's logic ahead."
+        let ahead = r#"{
+          "meta": {
+            "format": "board", "version": "2.7", "id": "ahead", "name": "Ahead",
+            "owner": {"team": "garden"},
+            "statuses": {
+              "stories": [{"id": "new", "name": "New", "finished": false, "colour": "green"}],
+              "sprints": [{"id": "s1"}]
+            }
+          },
+          "data": {
+            "people": ["a", "b"],
+            "releases": [{
+              "release": "1.0", "status": "Open", "due": "soon",
+              "stories": [{
+                "number": 1, "title": "One", "status": "New", "statusId": "new", "points": 3,
+                "slices": [{"id": "a", "title": "First", "lane": "sliced", "estimate": {"hours": 2}}]
+              }]
+            }]
+          },
+          "signature": "abc"
+        }"#;
+        let board = Boards::parse(ahead).unwrap();
+        // The file's own step is kept, never lowered to this app's.
+        assert_eq!(board.level(), Some((2, 7)));
+        let written = value(&text(&board.clone().signed()));
+        assert_eq!(written["meta"]["version"], "2.7");
+        assert_eq!(written["signature"], "abc");
+        assert_eq!(written["meta"]["owner"]["team"], "garden");
+        assert_eq!(written["meta"]["statuses"]["stories"][0]["colour"], "green");
+        assert_eq!(written["meta"]["statuses"]["sprints"][0]["id"], "s1");
+        assert_eq!(written["data"]["people"][1], "b");
+        let release = &written["data"]["releases"][0];
+        assert_eq!(release["due"], "soon");
+        assert_eq!(release["stories"][0]["points"], 3);
+        assert_eq!(release["stories"][0]["slices"][0]["estimate"]["hours"], 2);
+
+        // The same holds through the store, and for a board v1 file.
+        let (boards, _) = scratch();
+        boards.pull(board.clone()).unwrap();
+        let kept = boards.load("ahead").unwrap().board;
+        assert_eq!(kept.extra, board.extra);
+        assert_eq!(kept.meta, board.meta);
+        assert_eq!(kept.data, board.data);
+        assert_eq!(kept.statuses, board.statuses);
+        assert_eq!(kept.epics, board.epics);
+
+        let old = r#"{"format":"board v1","id":"small","secret":"x","epics":[
+            {"release":"1.0","stories":[{"number":1,"title":"One","extra":true}]}]}"#;
+        let written = value(&text(&Boards::parse(old).unwrap()));
+        assert_eq!(written["secret"], "x");
+        assert_eq!(written["epics"][0]["stories"][0]["extra"], true);
+    }
+
+    #[test]
+    fn a_retired_status_stays_on_the_list_and_is_written_back() {
+        // A backend may retire a status. Rows that hold it keep it, so the
+        // file still lists it, with `archived` beside it. This app offers no
+        // status to pick, so it keeps the key and writes it back.
+        let file = r#"{
+          "meta": {
+            "format": "board", "version": "2.0", "id": "retired", "name": "Retired",
+            "statuses": {
+              "stories": [
+                {"id": "in_planning", "name": "In planning", "finished": false},
+                {"id": "old_way", "name": "The old way", "finished": false, "archived": true}
+              ]
+            }
+          },
+          "data": {
+            "releases": [{
+              "release": "1.0",
+              "stories": [{"number": 1, "title": "One", "status": "The old way", "statusId": "old_way"}]
+            }]
+          }
+        }"#;
+        let board = Boards::parse(file).unwrap();
+        assert_eq!(board.check(), Ok(()));
+        let (boards, _) = scratch();
+        boards.pull(board).unwrap();
+        let kept = boards.load("retired").unwrap().board;
+        assert_eq!(kept.epics[0].stories[0].status_id, "old_way");
+        let written = value(&text(&kept.signed()));
+        let list = &written["meta"]["statuses"]["stories"];
+        assert_eq!(list[1]["id"], "old_way");
+        assert_eq!(list[1]["archived"], true);
+        // A status that is in use says nothing: the key is absent, not false.
+        assert!(list[0].get("archived").is_none());
+    }
+
+    #[test]
+    fn a_file_on_a_line_above_this_apps_is_the_one_refusal() {
+        let on = |version: &str| {
+            format!(
+                r#"{{"meta":{{"format":"board","version":"{version}","id":"x"}},"data":{{"releases":[]}}}}"#
+            )
+        };
+        assert!(Boards::parse(&on("2.0")).is_ok());
+        assert!(Boards::parse(&on("2.99")).is_ok());
+        assert_eq!(
+            Boards::parse(&on("3.0")).err().unwrap(),
+            "This board file is on line 3 of the format, and this app reads lines 1 and 2. Nothing was changed."
+        );
+        // A version that is not "line.step", or a line below the meta block's
+        // own, is not a board file.
+        for version in [
+            "",
+            "2",
+            "two.0",
+            "1.0",
+            "0.4",
+            "2.0.1",
+            "-2.0",
+            "2.00000000000000000",
+        ] {
+            assert_eq!(
+                Boards::parse(&on(version)).err().unwrap(),
+                "This is not a board file.",
+                "{version}"
+            );
+        }
+        for text in [
+            r#"{"meta":{"format":"board v1","version":"2.0","id":"x"},"data":{"releases":[]}}"#,
+            r#"{"format":"board","version":"2.0","id":"x","epics":[]}"#,
+            r#"{"format":2,"id":"x"}"#,
+            r#"{"id":"x","epics":[]}"#,
+            "[]",
+            "7",
+        ] {
+            assert_eq!(
+                Boards::parse(text).err().unwrap(),
+                "This is not a board file.",
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn statuses_are_data_and_are_checked() {
+        let (boards, _) = scratch();
+        let status = |id: &str, name: &str| Status {
+            id: id.to_string(),
+            name: name.to_string(),
+            ..Status::default()
+        };
+
+        // Any list of names is a board's own. None is built into the app.
+        let mut board = sample();
+        board.statuses.stories = [
+            "Planned",
+            "Looking into it",
+            "Sketching",
+            "Trying it out",
+            "Looking it over",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(at, name)| status(&format!("s{at}"), name))
+        .collect();
+        assert_eq!(board.check(), Ok(()));
+
+        // A row whose status id is not on the list is shown as its text. It
+        // is never an error.
+        first_story(&mut board).status_id = "gone".to_string();
+        assert_eq!(board.check(), Ok(()));
+
+        let mut board = sample();
+        board.statuses.stories.push(status("ready", "Again"));
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "Two story statuses have the id ready."
+        );
+
+        let mut board = sample();
+        board.statuses.releases[0].id = "not an id".to_string();
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "The id of a release status is up to 64 letters, digits, hyphens, and underscores."
+        );
+
+        let mut board = sample();
+        board.statuses.releases[0].name = "n".repeat(NAME_LIMIT + 1);
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "The name of the release status scheduled is longer than 120 characters."
+        );
+
+        let mut board = sample();
+        board.statuses.stories[0].moves = Some(vec!["a b".to_string()]);
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "A move of the story status scheduled is a status's id: up to 64 letters, digits, hyphens, and underscores."
+        );
+        // A move to an id the list does not have is kept as it is.
+        let mut board = sample();
+        board.statuses.stories[0].moves = Some(vec!["later".to_string()]);
+        assert_eq!(board.check(), Ok(()));
+
+        let mut board = sample();
+        board.statuses.stories = (0..=STATUS_LIMIT)
+            .map(|at| status(&format!("s{at}"), "S"))
+            .collect();
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "The board has story statuses, more than 100."
+        );
+
+        let mut board = sample();
+        first_story(&mut board).status_id = "../x".to_string();
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "Story #409: the status id is up to 64 letters, digits, hyphens, and underscores."
+        );
+
+        // A status's id may hold an underscore: in its list, in a move, and
+        // on a row. A backend's ids are its own, and it should not have to
+        // rename one to write a file.
+        let mut board = sample();
+        board.statuses.stories.push(Status {
+            moves: Some(vec!["on_hold".to_string()]),
+            ..status("in_planning", "In planning")
+        });
+        first_story(&mut board).status_id = "in_planning".to_string();
+        assert_eq!(board.check(), Ok(()));
+        // The ids that name a file, or stand in a path, stay as they were.
+        let mut board = sample();
+        board.id = "my_road".to_string();
+        assert_eq!(boards.pull(board).err().unwrap(), "That is not a board.");
+        let mut board = sample();
+        board.rev = "r_2".to_string();
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "The board's rev is up to 64 letters, digits, and hyphens."
+        );
+        let mut board = sample();
+        first_story(&mut board).slices[0].id = "a_b".to_string();
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "Story #409: a slice's id is up to 16 letters, digits, and hyphens."
+        );
+
+        let mut board = sample();
+        first_story(&mut board).slices[0].number = NUMBER_LIMIT + 1;
+        assert_eq!(
+            boards.pull(board).err().unwrap(),
+            "Slice a of story #409: its number is between 1 and 999,999,999."
+        );
+
+        assert!(boards.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_board_this_app_writes_says_so() {
+        let signed = sample().signed();
+        assert_eq!(
+            signed.written_by,
+            format!("rusty-business {}", env!("CARGO_PKG_VERSION"))
+        );
+        let stamp = signed.written_at.as_bytes();
+        assert_eq!(stamp.len(), 20);
+        assert_eq!((stamp[4], stamp[10], stamp[19]), (b'-', b'T', b'Z'));
+        let written = value(&text(&signed));
+        assert_eq!(written["meta"]["writtenBy"], signed.written_by);
+        assert_eq!(written["meta"]["writtenAt"], signed.written_at);
+
+        assert_eq!(utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc(951_868_799), "2000-02-29T23:59:59Z");
+        assert_eq!(utc(1_795_273_445), "2026-11-21T15:04:05Z");
+        assert_eq!(utc(4_107_542_400), "2100-03-01T00:00:00Z");
+
+        let mut board = sample();
+        board.written_at = "x".repeat(STAMP_LIMIT + 1);
+        assert_eq!(
+            board.check().err().unwrap(),
+            "The time the board was written is longer than 40 characters."
+        );
     }
 
     #[test]
@@ -1241,11 +2102,12 @@ mod tests {
         board.history = vec!["r-2".to_string(), "r-1".to_string()];
         assert_eq!(board.check(), Ok(()));
         // Both travel in the file, and neither is there when it is empty.
-        let text = serde_json::to_string(&board).unwrap();
-        assert!(text.contains(r#""rev":"2f6c1e0a9b7d4c53","history":["r-2","r-1"]"#));
-        assert_eq!(Boards::parse(&text).unwrap(), board);
-        let text = serde_json::to_string(&sample()).unwrap();
-        assert!(!text.contains("\"rev\"") && !text.contains("\"history\""));
+        let written = text(&board);
+        assert_eq!(value(&written)["meta"]["rev"], "2f6c1e0a9b7d4c53");
+        assert_eq!(value(&written)["meta"]["history"][1], "r-1");
+        assert_eq!(Boards::parse(&written).unwrap(), board);
+        let written = text(&sample());
+        assert!(!written.contains("\"rev\"") && !written.contains("\"history\""));
 
         board.rev = "../r3".to_string();
         assert_eq!(
@@ -1376,11 +2238,11 @@ mod tests {
 
         let mut board = sample();
         board.rev = "r1".to_string();
-        fs::write(at("road.json"), serde_json::to_string(&board).unwrap()).unwrap();
+        fs::write(at("road.json"), text(&board)).unwrap();
         assert_eq!(Boards::outside(&at("road.json")), Ok(Some(board)));
 
         // The file says which board it is. Its name does not.
-        fs::write(at("road.txt"), serde_json::to_string(&sample()).unwrap()).unwrap();
+        fs::write(at("road.txt"), text(&sample())).unwrap();
         for name in ["road.txt", "road", "road.json.txt"] {
             assert_eq!(
                 Boards::outside(&at(name)).err().unwrap(),
@@ -1391,7 +2253,7 @@ mod tests {
         for id in ["", "../sample", "a b"] {
             let mut board = sample();
             board.id = id.to_string();
-            fs::write(at("nameless.json"), serde_json::to_string(&board).unwrap()).unwrap();
+            fs::write(at("nameless.json"), text(&board)).unwrap();
             assert_eq!(
                 Boards::outside(&at("nameless.json")).err().unwrap(),
                 "That file does not say which board it is. Its id is up to 64 letters, digits, and hyphens.",
@@ -1401,7 +2263,7 @@ mod tests {
 
         let mut board = sample();
         board.name = "  ".to_string();
-        fs::write(at("unnamed.json"), serde_json::to_string(&board).unwrap()).unwrap();
+        fs::write(at("unnamed.json"), text(&board)).unwrap();
         assert_eq!(
             Boards::outside(&at("unnamed.json")).unwrap().unwrap().name,
             "sample"
@@ -1417,10 +2279,10 @@ mod tests {
         fs::write(at("other.json"), "{\"format\": \"board v2\"}").unwrap();
         assert_eq!(
             Boards::outside(&at("other.json")).err().unwrap(),
-            "This is not a \"board v1\" file."
+            "This is not a board file."
         );
 
-        let mut text = serde_json::to_string(&sample()).unwrap();
+        let mut text = text(&sample());
         text.push_str(&" ".repeat(SIZE_LIMIT as usize));
         fs::write(at("big.json"), text).unwrap();
         assert_eq!(
@@ -1441,7 +2303,7 @@ mod tests {
         let (boards, dir) = scratch();
         fs::create_dir_all(&dir).unwrap();
         let real = dir.join("real.json");
-        let text = serde_json::to_string(&sample()).unwrap();
+        let text = text(&sample());
         fs::write(&real, &text).unwrap();
         let link = dir.join("link.json");
         std::os::unix::fs::symlink(&real, &link).unwrap();
@@ -1493,7 +2355,7 @@ mod tests {
         // Another board's file.
         let mut other = sample();
         other.id = "another".to_string();
-        let text = serde_json::to_string(&other).unwrap();
+        let text = text(&other);
         fs::write(at("another.json"), &text).unwrap();
         assert_eq!(
             boards.send(&at("another.json"), &board).err().unwrap(),

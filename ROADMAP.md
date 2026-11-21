@@ -22,9 +22,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   computer or a repository to fetch. The app reads a kit and says what is
   missing.
 - **A source for boards.** The `board` command keeps a board in step with
-  a file on this computer. This adds a source a kit names: an address
-  reached through the gates, pulled from the Workflow view. A pull leaves
-  your notes.
+  a file on this computer. This adds a source a kit names: a file or a
+  folder on this computer, which can be one that something else shares or
+  syncs, pulled from the Workflow view. A pull leaves your notes. A source
+  that is an address on a network is refused for now: `BOARD.md` has the
+  rule.
 - **Slices you can write.** Add and edit a story's slices in the Workflow
   view, each with a brief small enough for a local model, a meter that
   says whether the brief fits the model's window, and a way to copy your
@@ -193,8 +195,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   file kept somewhere else: `pull`, `push`, or `sync` for both ways.
   Changes to different things are both kept. The same thing changed two
   ways is a conflict: it is listed, and nothing is written until you pick
-  a side. The file is board v1, an open format, so any program that reads
-  and writes one can be the other side.
+  a side. The file is an open format with a version and a ruleset,
+  `BOARD.md`, so any program that reads and writes one can be the other
+  side. A board's statuses are the board's own, kept in the file. There is
+  no direct API connection to a board's backend, for now: a board moves as
+  a file.
 - **A model the engine leaves out.** An engine that was already running
   can list fewer models than this computer holds. The app names each
   model that is on the disk and not on the engine's list, says whether

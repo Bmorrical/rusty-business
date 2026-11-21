@@ -21,7 +21,9 @@ One release for everything merged since 0.8.1.
 **New**
 
 - **The Workflow view.** Opened from the side, it shows a board kept on this computer: its releases, the stories and bugs under each, the slices each story is cut into, and whose move each one is. A slice goes through five lanes: Sliced, Written, Checked, Reviewed, and Main. A made-up sample board comes inside the app. Notes of your own on a story are kept apart from the board. It reads only this computer, so it works with both gates off.
-- **The `board` command.** `rusty-business board list | import | export | pull | push | sync` keeps a board in step with one file kept somewhere else, both ways. When the same thing changed on both sides, it lists the conflict and writes nothing until you pick a side with `--mine` or `--theirs`. The file is board v1, an open format, so any program that reads and writes one can be the other side. "A backend of your own" in the desktop README has the contract.
+- **The `board` command.** `rusty-business board list | import | export | pull | push | sync` keeps a board in step with one file kept somewhere else, both ways. When the same thing changed on both sides, it lists the conflict and writes nothing until you pick a side with `--mine` or `--theirs`.
+- **A ruleset for the board file.** `BOARD.md`, at the root of the repository, says what the file holds, each rule, and why, so any program that reads and writes one can be the other side. The file has a `meta` block and a `data` block, and a version: within a line a file only gains, and the app keeps a key it does not know and writes it back. A board's statuses are its own, listed in the file, each with an id that never changes.
+- **No direct API connection to a board's backend, for now.** The app holds no address, no token, and no key for one, and a change that adds one is refused. A board moves as a file: exported on one side, and imported on the other. That keeps the app offline first, and at most LAN.
 - **Web search.** In Settings, Web lets a model search the web while it answers. It is off to start, and it works with one model asked at a time, while the WAN gate is on. Only the model's search words go out: to DuckDuckGo, or to Brave Search with your own key.
 - **Linux carries its engine.** The `.deb`, the `.rpm`, and the `.tar.gz` now have llama.cpp's `llama-server` inside, the Vulkan build, pinned by checksum.
 - **A model the engine leaves out is named.** When an engine that was already running lists fewer models than this computer holds, the app names the missing ones, says whether this window started that engine, and says what to do. It still never stops an engine it did not start.
@@ -37,6 +39,7 @@ One release for everything merged since 0.8.1.
 **Good to know**
 
 - The Workflow view only reads for now. A board changes when a file is pulled.
+- A board v1 file, the format before this one, is still read, and a copy that came from one is written back as one.
 - Windows still carries no engine: the app starts `llama-server` when it finds it on the computer.
 - A copy of 0.8.0 or later offers Install and restart.
 

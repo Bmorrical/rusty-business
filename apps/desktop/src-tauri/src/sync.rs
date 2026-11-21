@@ -9,10 +9,17 @@
 //! A board's `rev` names one state of the copy that is shared. Its `history`
 //! lists the revs that state came from, the newest first. That is all a
 //! program needs to tell whether one copy came from another.
+//!
+//! A key this version of the format does not know is merged as any other
+//! value is, so a newer file loses nothing by passing through here. The two
+//! copies may be on different lines of the format: the merged board is on
+//! the higher one, and the copy from the lower line takes nothing away that
+//! only the higher line holds.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::board::{Board, Epic, FORMAT, HISTORY_LIMIT, Slice, Story};
+use crate::board::{Board, Epic, Extra, HISTORY_LIMIT, Slice, Status, Story};
 
 /// One of the two copies: the one on this computer, or the one in the file.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,10 +47,16 @@ pub struct Merged {
     pub conflicts: Vec<Conflict>,
 }
 
-/// Whether two copies hold the same board. When a copy was taken, and the
-/// revs it carries, are bookkeeping and do not count.
+/// Whether two copies hold the same board. When a copy was taken, the revs
+/// it carries, who wrote it, and the version of the format it is on are
+/// bookkeeping and do not count.
 pub fn same(a: &Board, b: &Board) -> bool {
-    a.name == b.name && a.epics == b.epics
+    a.name == b.name
+        && a.epics == b.epics
+        && a.statuses == b.statuses
+        && a.extra == b.extra
+        && a.meta == b.meta
+        && a.data == b.data
 }
 
 /// Whether `theirs` came from `base`: it is the same state, or `base` is in
@@ -82,6 +95,66 @@ fn quoted(text: &str) -> String {
     } else {
         format!("\"{short}\"")
     }
+}
+
+/// A list of statuses, short enough for one line of a terminal.
+fn named(list: &[Status]) -> String {
+    let names: Vec<&str> = list.iter().map(|status| status.name.as_str()).collect();
+    quoted(&names.join(", "))
+}
+
+/// The line of the format a board is on.
+fn line(board: &Board) -> u32 {
+    board.level().map_or(0, |(line, _)| line)
+}
+
+/// A copy from a lower line of the format, raised to the line `high` is on.
+/// What only the higher line holds comes from `high`: the statuses, what its
+/// two blocks hold beside their own keys, and each key the lower copy does
+/// not have. A row's status id comes too, while the row's status reads the
+/// same on both. So a file on a lower line changes what it names, and takes
+/// away nothing it has no place for.
+fn lifted(low: &Board, high: &Board) -> Board {
+    fn fill(extra: &mut Extra, from: &Extra) {
+        for (key, value) in from {
+            extra.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
+    let mut board = low.clone();
+    board.format = high.format.clone();
+    board.version = high.version.clone();
+    board.statuses = high.statuses.clone();
+    board.meta = high.meta.clone();
+    board.data = high.data.clone();
+    fill(&mut board.extra, &high.extra);
+    let stories = placed(high);
+    for epic in &mut board.epics {
+        if let Some(above) = high
+            .epics
+            .iter()
+            .find(|above| above.release == epic.release)
+        {
+            if epic.status_id.is_empty() && epic.status == above.status {
+                epic.status_id = above.status_id.clone();
+            }
+            fill(&mut epic.extra, &above.extra);
+        }
+        for story in &mut epic.stories {
+            let Some((_, above)) = stories.get(&story.number) else {
+                continue;
+            };
+            if story.status_id.is_empty() && story.status == above.status {
+                story.status_id = above.status_id.clone();
+            }
+            fill(&mut story.extra, &above.extra);
+            for slice in &mut story.slices {
+                if let Some(above) = above.slices.iter().find(|above| above.id == slice.id) {
+                    fill(&mut slice.extra, &above.extra);
+                }
+            }
+        }
+    }
+    board
 }
 
 /// A list of notes that both sides may have added to or taken from. Notes
@@ -171,6 +244,32 @@ struct Merge {
 
 impl Merge {
     /// One value, three ways. A side that left it alone takes the other's.
+    fn choose<T: Clone + PartialEq>(
+        &mut self,
+        what: impl FnOnce() -> String,
+        base: Option<&T>,
+        mine: &T,
+        theirs: &T,
+        show: impl Fn(&T) -> String,
+    ) -> T {
+        if mine == theirs || base == Some(theirs) {
+            return mine.clone();
+        }
+        if base == Some(mine) {
+            return theirs.clone();
+        }
+        self.conflicts.push(Conflict {
+            what: what(),
+            mine: show(mine),
+            theirs: show(theirs),
+        });
+        match self.keep {
+            Side::Mine => mine.clone(),
+            Side::Theirs => theirs.clone(),
+        }
+    }
+
+    /// One run of words, three ways.
     fn pick(
         &mut self,
         at: &str,
@@ -179,21 +278,84 @@ impl Merge {
         mine: &str,
         theirs: &str,
     ) -> String {
-        if mine == theirs || base == Some(theirs) {
-            return mine.to_string();
+        self.choose(
+            || format!("{at}, {field}"),
+            base.as_ref(),
+            &mine,
+            &theirs,
+            |text| quoted(text),
+        )
+        .to_string()
+    }
+
+    /// A slice's number, which one side may not have. The side that has one
+    /// gives it, since a backend that keeps no number takes none away.
+    fn number(&mut self, at: &str, base: Option<u64>, mine: u64, theirs: u64) -> u64 {
+        if mine == 0 || theirs == 0 {
+            return mine.max(theirs);
         }
-        if base == Some(mine) {
-            return theirs.to_string();
+        self.choose(
+            || format!("{at}, number"),
+            base.as_ref(),
+            &mine,
+            &theirs,
+            |number| number.to_string(),
+        )
+    }
+
+    /// The keys this version of the format does not know, each one three
+    /// ways. With no copy to compare against, a key only one side has stays.
+    fn extras(&mut self, at: &str, base: Option<&Extra>, mine: &Extra, theirs: &Extra) -> Extra {
+        if mine == theirs {
+            return mine.clone();
         }
-        self.conflicts.push(Conflict {
-            what: format!("{at}, {field}"),
-            mine: quoted(mine),
-            theirs: quoted(theirs),
-        });
-        match self.keep {
-            Side::Mine => mine.to_string(),
-            Side::Theirs => theirs.to_string(),
+        let keys: BTreeSet<&String> = mine.keys().chain(theirs.keys()).collect();
+        let mut kept = Extra::new();
+        for key in keys {
+            let (here, there) = (mine.get(key).cloned(), theirs.get(key).cloned());
+            let value = match (base, &here, &there) {
+                (None, None, _) => there,
+                (None, _, None) => here,
+                _ => {
+                    let was = base.map(|base| base.get(key).cloned());
+                    self.choose(
+                        || format!("{at}, key \"{key}\""),
+                        was.as_ref(),
+                        &here,
+                        &there,
+                        |value| match value {
+                            Some(value) => quoted(&value.to_string()),
+                            None => "(none)".to_string(),
+                        },
+                    )
+                }
+            };
+            if let Some(value) = value {
+                kept.insert(key.clone(), value);
+            }
         }
+        kept
+    }
+
+    /// One of a board's lists of statuses, three ways, as one whole list.
+    /// With no copy to compare against, a side with no list takes the other's.
+    fn statuses(
+        &mut self,
+        what: &str,
+        base: Option<&Vec<Status>>,
+        mine: &Vec<Status>,
+        theirs: &Vec<Status>,
+    ) -> Vec<Status> {
+        if base.is_none() && (mine.is_empty() || theirs.is_empty()) {
+            return if mine.is_empty() { theirs } else { mine }.clone();
+        }
+        self.choose(
+            || format!("The board, {what} statuses"),
+            base,
+            mine,
+            theirs,
+            |list| named(list),
+        )
     }
 
     /// Whether something only one side has stays. `unchanged` is `None` when
@@ -225,6 +387,7 @@ impl Merge {
         }
         Slice {
             id: mine.id.clone(),
+            number: self.number(at, base.map(|was| was.number), mine.number, theirs.number),
             title: self.pick(
                 at,
                 "title",
@@ -258,6 +421,7 @@ impl Merge {
                 &mine.notes,
                 &theirs.notes,
             ),
+            extra: self.extras(at, base.map(|was| &was.extra), &mine.extra, &theirs.extra),
         }
     }
 
@@ -332,6 +496,13 @@ impl Merge {
                 &mine.status,
                 &theirs.status,
             ),
+            status_id: self.pick(
+                at,
+                "status id",
+                base.map(|was| was.status_id.as_str()),
+                &mine.status_id,
+                &theirs.status_id,
+            ),
             turn: self.pick(
                 at,
                 "move",
@@ -350,6 +521,7 @@ impl Merge {
                 &mine.slices,
                 &theirs.slices,
             ),
+            extra: self.extras(at, base.map(|was| &was.extra), &mine.extra, &theirs.extra),
         }
     }
 
@@ -378,7 +550,15 @@ impl Merge {
                 &mine.status,
                 &theirs.status,
             ),
+            status_id: self.pick(
+                at,
+                "status id",
+                base.map(|was| was.status_id.as_str()),
+                &mine.status_id,
+                &theirs.status_id,
+            ),
             stories: Vec::new(),
+            extra: self.extras(at, base.map(|was| &was.extra), &mine.extra, &theirs.extra),
         }
     }
 }
@@ -429,16 +609,41 @@ fn bare(epic: &Epic) -> Epic {
 /// A release is known by its name, a story by its number, and a slice by its
 /// id within its story. `keep` settles every conflict for one side. The
 /// merged board carries the file's rev, since that is the shared state it
-/// now holds.
+/// now holds, and says who wrote the file. It is on the newer of the two
+/// versions of the format, so it is never written back as an older one.
 pub fn merge(base: Option<&Board>, mine: &Board, theirs: &Board, keep: Option<Side>) -> Merged {
+    // A copy on a lower line of the format is raised first, so that what the
+    // lower line has no place for is not read as taken away.
+    let top = if line(theirs) >= line(mine) {
+        theirs
+    } else {
+        mine
+    };
+    let raised = |board| -> Cow<Board> {
+        if line(board) < line(top) {
+            Cow::Owned(lifted(board, top))
+        } else {
+            Cow::Borrowed(board)
+        }
+    };
+    let (mine, theirs, base) = (raised(mine), raised(theirs), base.map(raised));
+    let (mine, theirs, base) = (mine.as_ref(), theirs.as_ref(), base.as_deref());
+    let newest = if theirs.level() >= mine.level() {
+        theirs
+    } else {
+        mine
+    };
     let mut board = Board {
-        format: FORMAT.to_string(),
+        format: newest.format.clone(),
+        version: newest.version.clone(),
         id: mine.id.clone(),
         name: mine.name.clone(),
+        written_by: theirs.written_by.clone(),
+        written_at: theirs.written_at.clone(),
         rev: theirs.rev.clone(),
         history: theirs.history.clone(),
         pulled_at: mine.pulled_at,
-        epics: Vec::new(),
+        ..Board::default()
     };
     // A side that changed nothing takes the other whole, in the other's order.
     let whole = if same(mine, theirs) || base.is_some_and(|base| same(base, mine)) {
@@ -451,6 +656,10 @@ pub fn merge(base: Option<&Board>, mine: &Board, theirs: &Board, keep: Option<Si
     if let Some(whole) = whole {
         board.name = whole.name.clone();
         board.epics = whole.epics.clone();
+        board.statuses = whole.statuses.clone();
+        board.extra = whole.extra.clone();
+        board.meta = whole.meta.clone();
+        board.data = whole.data.clone();
         return Merged {
             board,
             conflicts: Vec::new(),
@@ -467,6 +676,42 @@ pub fn merge(base: Option<&Board>, mine: &Board, theirs: &Board, keep: Option<Si
         base.map(|was| was.name.as_str()),
         &mine.name,
         &theirs.name,
+    );
+    board.statuses.stories = merge.statuses(
+        "story",
+        base.map(|was| &was.statuses.stories),
+        &mine.statuses.stories,
+        &theirs.statuses.stories,
+    );
+    board.statuses.releases = merge.statuses(
+        "release",
+        base.map(|was| &was.statuses.releases),
+        &mine.statuses.releases,
+        &theirs.statuses.releases,
+    );
+    board.statuses.extra = merge.extras(
+        "The board's statuses",
+        base.map(|was| &was.statuses.extra),
+        &mine.statuses.extra,
+        &theirs.statuses.extra,
+    );
+    board.extra = merge.extras(
+        "The board",
+        base.map(|was| &was.extra),
+        &mine.extra,
+        &theirs.extra,
+    );
+    board.meta = merge.extras(
+        "The board's meta block",
+        base.map(|was| &was.meta),
+        &mine.meta,
+        &theirs.meta,
+    );
+    board.data = merge.extras(
+        "The board's data block",
+        base.map(|was| &was.data),
+        &mine.data,
+        &theirs.data,
     );
 
     // The stories first: which stay, what each holds, and where each sits.
@@ -567,6 +812,10 @@ pub fn merge(base: Option<&Board>, mine: &Board, theirs: &Board, keep: Option<Si
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::{FORMAT, FORMAT_V1};
+
+    /// Line 2, step 0.
+    const VERSION: &str = "2.0";
 
     fn slice(id: &str, lane: &str) -> Slice {
         Slice {
@@ -600,10 +849,10 @@ mod tests {
     fn road() -> Board {
         Board {
             format: FORMAT.to_string(),
+            version: VERSION.to_string(),
             id: "road".to_string(),
             name: "A road".to_string(),
             rev: "r1".to_string(),
-            history: Vec::new(),
             pulled_at: 7,
             epics: vec![
                 epic(
@@ -624,6 +873,7 @@ mod tests {
                     ],
                 ),
             ],
+            ..Board::default()
         }
     }
 
@@ -1017,5 +1267,372 @@ mod tests {
         assert_eq!(sent.history[0], "newest");
         assert_eq!(sent.history[1], "r0");
         assert_eq!(sent.check(), Ok(()));
+    }
+
+    fn status(id: &str, name: &str) -> Status {
+        Status {
+            id: id.to_string(),
+            name: name.to_string(),
+            ..Status::default()
+        }
+    }
+
+    fn key(extra: &mut Extra, name: &str, value: serde_json::Value) {
+        extra.insert(name.to_string(), value);
+    }
+
+    /// The made-up road on this app's line, with what only that line holds:
+    /// statuses, a status id on a row, a slice's number, and keys this app
+    /// does not know.
+    fn full() -> Board {
+        let mut board = road();
+        board.statuses.stories = vec![status("ready", "Ready"), status("building", "Building")];
+        board.statuses.releases = vec![status("open", "Open"), status("out", "Out")];
+        board.epics[0].status = "Open".to_string();
+        board.epics[0].status_id = "open".to_string();
+        key(&mut board.extra, "colour", serde_json::json!("green"));
+        key(&mut board.meta, "owner", serde_json::json!("a team"));
+        key(&mut board.data, "sprints", serde_json::json!([1, 2]));
+        key(&mut board.epics[0].extra, "due", serde_json::json!("soon"));
+        let story = at(&mut board, 409);
+        story.status = "Ready".to_string();
+        story.status_id = "ready".to_string();
+        key(&mut story.extra, "points", serde_json::json!(3));
+        story.slices[0].number = 7001;
+        key(
+            &mut story.slices[0].extra,
+            "files",
+            serde_json::json!(["a.rs"]),
+        );
+        board
+    }
+
+    /// The same board as a file on line 1 holds it: no statuses, no status
+    /// ids, and none of the keys line 1 has no place for.
+    fn lower(board: &Board) -> Board {
+        let mut low = board.clone();
+        low.format = FORMAT_V1.to_string();
+        low.version.clear();
+        low.statuses = Default::default();
+        low.extra.clear();
+        low.meta.clear();
+        low.data.clear();
+        for epic in &mut low.epics {
+            epic.status_id.clear();
+            epic.extra.clear();
+            for story in &mut epic.stories {
+                story.status_id.clear();
+                story.extra.clear();
+                for slice in &mut story.slices {
+                    slice.extra.clear();
+                }
+            }
+        }
+        low
+    }
+
+    #[test]
+    fn a_key_this_app_does_not_know_is_merged_like_any_other() {
+        // "so someone doesn't have to remap when the next party wants to
+        // iterate it's logic ahead."
+        let base = full();
+        let mut mine = full();
+        at(&mut mine, 412).title = "Sortable headers".to_string();
+        let mut theirs = full();
+        key(&mut theirs.extra, "colour", serde_json::json!("blue"));
+        key(&mut theirs.meta, "team", serde_json::json!(4));
+        theirs.data.remove("sprints");
+        key(
+            &mut theirs.epics[0].extra,
+            "due",
+            serde_json::json!("later"),
+        );
+        key(
+            &mut at(&mut theirs, 409).extra,
+            "points",
+            serde_json::json!(5),
+        );
+        key(
+            &mut at(&mut theirs, 409).slices[0].extra,
+            "owner",
+            serde_json::json!({"name": "pat"}),
+        );
+        key(
+            &mut theirs.statuses.extra,
+            "note",
+            serde_json::json!("as agreed"),
+        );
+
+        let mut board = clean(Some(&base), &mine, &theirs);
+        assert_eq!(board.extra["colour"], "blue");
+        assert_eq!(board.meta["owner"], "a team");
+        assert_eq!(board.meta["team"], 4);
+        assert!(board.data.is_empty());
+        assert_eq!(board.epics[0].extra["due"], "later");
+        assert_eq!(board.statuses.extra["note"], "as agreed");
+        let story = at(&mut board, 409);
+        assert_eq!(story.extra["points"], 5);
+        assert_eq!(story.slices[0].extra["files"][0], "a.rs");
+        assert_eq!(story.slices[0].extra["owner"]["name"], "pat");
+        assert_eq!(at(&mut board, 412).title, "Sortable headers");
+
+        // The same key changed two ways is a conflict, named by its key.
+        key(
+            &mut at(&mut mine, 409).extra,
+            "points",
+            serde_json::json!(8),
+        );
+        mine.epics[0].extra.remove("due");
+        let merged = merge(Some(&base), &mine, &theirs, None);
+        assert_eq!(
+            merged.conflicts,
+            [
+                conflict("Story #409, key \"points\"", "\"8\"", "\"5\""),
+                conflict("Release \"1.2.0\", key \"due\"", "(none)", "\"\"later\"\""),
+            ]
+        );
+        let mut kept = merge(Some(&base), &mine, &theirs, Some(Side::Theirs)).board;
+        assert_eq!(at(&mut kept, 409).extra["points"], 5);
+        assert_eq!(kept.epics[0].extra["due"], "later");
+        let mut kept = merge(Some(&base), &mine, &theirs, Some(Side::Mine)).board;
+        assert_eq!(at(&mut kept, 409).extra["points"], 8);
+        assert!(!kept.epics[0].extra.contains_key("due"));
+
+        // With no copy to compare against, a key only one side has stays.
+        let mut mine = full();
+        key(&mut mine.extra, "mine", serde_json::json!(true));
+        let mut theirs = full();
+        key(&mut theirs.extra, "theirs", serde_json::json!(true));
+        let board = clean(None, &mine, &theirs);
+        assert!(board.extra.contains_key("mine") && board.extra.contains_key("theirs"));
+    }
+
+    #[test]
+    fn a_slices_number_is_never_taken_away_by_a_side_that_has_none() {
+        let base = full();
+        let mut mine = full();
+        at(&mut mine, 409).slices[0].lane = "written".to_string();
+        let mut theirs = full();
+        at(&mut theirs, 409).slices[0].number = 0;
+        at(&mut theirs, 409).slices[1].number = 7002;
+
+        let mut board = clean(Some(&base), &mine, &theirs);
+        let slices = &at(&mut board, 409).slices;
+        assert_eq!((slices[0].number, slices[1].number), (7001, 7002));
+        assert_eq!(slices[0].lane, "written");
+        let mut board = clean(Some(&base), &theirs, &mine);
+        assert_eq!(at(&mut board, 409).slices[0].number, 7001);
+
+        // Two numbers for one slice is a conflict.
+        at(&mut mine, 409).slices[0].number = 7005;
+        at(&mut theirs, 409).slices[0].number = 7009;
+        let merged = merge(Some(&base), &mine, &theirs, None);
+        assert_eq!(
+            merged.conflicts,
+            [conflict("Story #409, slice a, number", "7005", "7009")]
+        );
+    }
+
+    #[test]
+    fn a_status_id_and_the_lists_of_statuses_are_merged_three_ways() {
+        let base = full();
+        let mut mine = full();
+        at(&mut mine, 412).title = "Sortable headers".to_string();
+        let mut theirs = full();
+        at(&mut theirs, 409).status = "Building".to_string();
+        at(&mut theirs, 409).status_id = "building".to_string();
+        theirs.epics[0].status_id = "out".to_string();
+        theirs.statuses.stories[0].name = "Ready to slice".to_string();
+        theirs.statuses.releases.push(status("parked", "Parked"));
+
+        let mut board = clean(Some(&base), &mine, &theirs);
+        assert_eq!(at(&mut board, 409).status_id, "building");
+        assert_eq!(board.epics[0].status_id, "out");
+        assert_eq!(board.statuses, theirs.statuses);
+
+        // Each list is one whole thing. Changed two ways, it is a conflict.
+        at(&mut mine, 409).status_id = "done".to_string();
+        mine.epics[0].status_id = "open-again".to_string();
+        mine.statuses.stories.swap(0, 1);
+        mine.statuses.releases.clear();
+        let merged = merge(Some(&base), &mine, &theirs, None);
+        assert_eq!(
+            merged.conflicts,
+            [
+                conflict(
+                    "The board, story statuses",
+                    "\"Building, Ready\"",
+                    "\"Ready to slice, Building\""
+                ),
+                conflict(
+                    "The board, release statuses",
+                    "(empty)",
+                    "\"Open, Out, Parked\""
+                ),
+                conflict("Story #409, status id", "\"done\"", "\"building\""),
+                conflict("Release \"1.2.0\", status id", "\"open-again\"", "\"out\""),
+            ]
+        );
+        let kept = merge(Some(&base), &mine, &theirs, Some(Side::Theirs)).board;
+        assert_eq!(kept.statuses, theirs.statuses);
+
+        // With no copy to compare against, a side with no list takes the
+        // other's, and that is no conflict.
+        let mut mine = full();
+        mine.statuses.stories.clear();
+        let mut theirs = full();
+        theirs.statuses.releases.clear();
+        let board = clean(None, &mine, &theirs);
+        assert_eq!(board.statuses, full().statuses);
+    }
+
+    #[test]
+    fn a_file_on_a_lower_line_takes_away_nothing_it_has_no_place_for() {
+        // This copy is on line 2, and the file is a board v1 file of the same
+        // board with one title changed, as a backend still on line 1 writes.
+        let base = full();
+        let mut theirs = lower(&full());
+        theirs.rev = "r2".to_string();
+        at(&mut theirs, 412).title = "Sortable headers".to_string();
+        assert_eq!((line(&base), line(&theirs)), (2, 1));
+
+        let mut board = clean(Some(&base), &base, &theirs);
+        assert_eq!(
+            (board.format.as_str(), board.version.as_str()),
+            (FORMAT, VERSION)
+        );
+        assert_eq!(board.rev, "r2");
+        assert_eq!(at(&mut board, 412).title, "Sortable headers");
+        let mut expected = full();
+        at(&mut expected, 412).title = "Sortable headers".to_string();
+        assert!(same(&board, &expected));
+
+        // Both sides changed, so the merge goes field by field, and still
+        // nothing of line 2 is lost.
+        let mut mine = full();
+        at(&mut mine, 413).title = "An empty list".to_string();
+        let mut board = clean(Some(&base), &mine, &theirs);
+        at(&mut expected, 413).title = "An empty list".to_string();
+        assert!(same(&board, &expected));
+        assert_eq!(at(&mut board, 409).slices[0].number, 7001);
+
+        // The file names a new status for a story, in words alone. The id
+        // that went with the old words does not stay beside the new ones.
+        at(&mut theirs, 409).status = "Building".to_string();
+        let mut board = clean(Some(&base), &mine, &theirs);
+        let story = at(&mut board, 409);
+        assert_eq!(
+            (story.status.as_str(), story.status_id.as_str()),
+            ("Building", "")
+        );
+        assert_eq!(board.epics[0].status_id, "open");
+
+        // The other way: this copy came from a board v1 file, and the file
+        // is now on line 2. The copy moves up, and takes what line 2 holds.
+        let (base, mine) = (lower(&full()), lower(&full()));
+        let theirs = full();
+        let board = clean(Some(&base), &mine, &theirs);
+        assert_eq!(
+            (board.format.as_str(), board.version.as_str()),
+            (FORMAT, VERSION)
+        );
+        assert!(same(&board, &full()));
+
+        // Two copies on line 1 stay on line 1.
+        let board = clean(Some(&base), &mine, &base);
+        assert_eq!(
+            (board.format.as_str(), board.version.as_str()),
+            (FORMAT_V1, "")
+        );
+        assert_eq!(line(&board), 1);
+    }
+
+    #[test]
+    fn a_backend_that_moves_up_a_line_and_names_its_statuses_is_no_conflict() {
+        // On line 1 the backend wrote the value it stores as each row's
+        // status. Its first line 2 file writes the name people read, with
+        // the stored value beside it as the id. So every row's `status`
+        // reads differently from the last copy, on rows nobody touched here.
+        let mut base = lower(&full());
+        for epic in &mut base.epics {
+            epic.status = "in_progress".to_string();
+            for story in &mut epic.stories {
+                story.status = "in_progress".to_string();
+            }
+        }
+        let mut theirs = full();
+        theirs.rev = "r2".to_string();
+        theirs.statuses.stories = vec![status("in_progress", "In Progress")];
+        theirs.statuses.releases = vec![status("in_progress", "In Progress")];
+        for epic in &mut theirs.epics {
+            epic.status = "In Progress".to_string();
+            epic.status_id = "in_progress".to_string();
+            for story in &mut epic.stories {
+                story.status = "In Progress".to_string();
+                story.status_id = "in_progress".to_string();
+            }
+        }
+        assert_eq!((line(&base), line(&theirs)), (1, 2));
+
+        // This copy is as the last one was, so the file is taken whole.
+        let board = clean(Some(&base), &base, &theirs);
+        assert!(same(&board, &theirs));
+        assert_eq!(board.rev, "r2");
+
+        // A title changed here stays, and is still no conflict: the status
+        // on that row is the backend's change alone.
+        let mut mine = base.clone();
+        at(&mut mine, 413).title = "An empty list".to_string();
+        let mut board = clean(Some(&base), &mine, &theirs);
+        let story = at(&mut board, 413);
+        assert_eq!(
+            (
+                story.title.as_str(),
+                story.status.as_str(),
+                story.status_id.as_str()
+            ),
+            ("An empty list", "In Progress", "in_progress")
+        );
+        let rows: Vec<&Story> = board.epics.iter().flat_map(|epic| &epic.stories).collect();
+        assert!(
+            rows.iter()
+                .all(|story| story.status == "In Progress" && story.status_id == "in_progress")
+        );
+        assert!(
+            board
+                .epics
+                .iter()
+                .all(|epic| epic.status == "In Progress" && epic.status_id == "in_progress")
+        );
+
+        // Only a row whose status was changed here too is a conflict, and
+        // it is the one row.
+        at(&mut mine, 412).status = "blocked".to_string();
+        let merged = merge(Some(&base), &mine, &theirs, None);
+        assert_eq!(
+            merged.conflicts,
+            [conflict(
+                "Story #412, status",
+                "\"blocked\"",
+                "\"In Progress\""
+            )]
+        );
+    }
+
+    #[test]
+    fn the_merged_board_is_on_the_newer_of_the_two_versions() {
+        let base = road();
+        let mut newer = road();
+        newer.version = "2.7".to_string();
+        assert_eq!(clean(Some(&base), &base, &newer).version, "2.7");
+        assert_eq!(clean(Some(&base), &newer, &base).version, "2.7");
+
+        // Field by field too, whichever side holds it.
+        let mut mine = road();
+        at(&mut mine, 412).title = "Sortable headers".to_string();
+        at(&mut newer, 413).title = "An empty list".to_string();
+        assert_eq!(clean(Some(&base), &mine, &newer).version, "2.7");
+        mine.version = "2.10".to_string();
+        assert_eq!(clean(Some(&base), &mine, &newer).version, "2.10");
     }
 }
