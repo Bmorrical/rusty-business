@@ -47,6 +47,16 @@ pub fn run() {
             // The app's own models folder, which `llama-server` reads on
             // Windows and Linux. A Mac's engine reads the Hugging Face cache.
             models::use_own_folder(data.join("models"));
+            // The app's resource folder, which holds the engine on Windows
+            // and Linux. Tauri's own resource_dir reads the name we mark with
+            // ™ below, so the folder is worked out from the un-marked name
+            // and the place the binary is installed.
+            let resource = app.config().product_name.as_deref().and_then(|name| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| starter::resource_folder(&exe, name))
+            });
+            starter::use_resource_folder(resource);
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(projects::Projects::new(
                 data.join("projects"),

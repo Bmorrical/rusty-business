@@ -29,12 +29,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   view, each with a brief small enough for a local model, a meter that
   says whether the brief fits the model's window, and a way to copy your
   slices out as text.
-- **An engine for Windows and Linux.** The Windows installer and the Linux
-  packages carry llama.cpp's `llama-server` inside the download, so nothing
-  else has to be installed first: the Vulkan build from llama.cpp's own
-  releases, pinned to one release and checked by its SHA-256. The Linux
-  packages ask for the Vulkan loader. Until then, the app starts
-  `llama-server` when it is installed on the computer.
+- **An engine for Windows.** The Windows installer carries llama.cpp's
+  `llama-server` inside the download, so nothing else has to be installed
+  first: the Vulkan build from llama.cpp's own releases, pinned to one
+  release and checked by its SHA-256, which uses the Vulkan loader. Until
+  then, the app starts `llama-server` when it is installed on the computer.
 - **Reading images.** Images dropped on a message, and scanned PDFs, are
   read by a model that can see. That means mlx-vlm in the engine and a
   vision model on the Models list, such as Qwen2.5-VL 7B at about 5 GB.
@@ -149,6 +148,10 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   starts: on 127.0.0.1, offline, one model at a time. The five models come
   as GGUF files, from the maker's own copy first, then ggml-org's, each file
   checked against its pinned size and checksum.
+- **An engine for Linux.** The `.deb`, the `.rpm`, and the `.tar.gz` carry
+  llama.cpp's `llama-server` inside them, the Vulkan build from llama.cpp's
+  own releases, pinned to one release and checked by its SHA-256. The
+  packages ask for the Vulkan loader, so there is nothing to install first.
 - **Projects, memory, and search.** Chats group into projects, each with
   its own instructions and memory; a global memory goes with every chat and
   grows as you talk. Chats can be pinned and searched.
