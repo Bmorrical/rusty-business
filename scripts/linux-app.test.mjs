@@ -221,7 +221,9 @@ test('it fetches the pinned llama-server and packs it with the app', () => {
     'the package is not checked for the engine',
   );
   const bundle = JSON.parse(read('apps/desktop/src-tauri/tauri.conf.json')).bundle;
-  assert.deepEqual(bundle.resources, ['engine/**/*'], 'the bundle does not pack the engine folder');
+  assert.ok(!bundle.resources, 'tauri.conf.json packs the engine folder for every system');
+  const linuxBundle = JSON.parse(read('apps/desktop/src-tauri/linux-bundle.json'));
+  assert.deepEqual(linuxBundle.bundle.resources, ['engine/**/*'], 'the Linux override does not pack the engine folder');
 });
 
 test('every tool and cache it makes stays inside target/linux, which git ignores', () => {
@@ -281,7 +283,7 @@ test('it builds the two packages, packs the same files as a .tar.gz, and keeps e
   assert.equal(valueOf('DEB'), 'Rusty-Business-linux-x64.deb');
   assert.equal(valueOf('RPM'), 'Rusty-Business-linux-x64.rpm');
   assert.equal(valueOf('TGZ'), 'Rusty-Business-linux-x64.tar.gz');
-  assert.ok(COMMANDS.includes('(cd "$DESKTOP" && { [ -d node_modules ] || npm ci; } && npm run tauri -- build --bundles deb,rpm)'), 'the build is not the .deb and the .rpm alone, from the lockfile');
+  assert.ok(COMMANDS.includes('(cd "$DESKTOP" && { [ -d node_modules ] || npm ci; } && npm run tauri -- build --bundles deb,rpm --config src-tauri/linux-bundle.json)'), 'the build is not the .deb and the .rpm alone, from the lockfile');
   assert.equal(valueOf('APP'), `$(node -p "require('./$TAURI/tauri.conf.json').productName")`);
   assert.equal(valueOf('VERSION'), `$(node -p "require('./$TAURI/tauri.conf.json').version")`);
   assert.equal(valueOf('deb'), '"$TAURI/target/release/bundle/deb/${APP}_${VERSION}_amd64.deb"');
@@ -312,22 +314,22 @@ test('it builds the two packages, packs the same files as a .tar.gz, and keeps e
   for (const icon of ['icons/32x32.png', 'icons/128x128.png', 'icons/128x128@2x.png']) assert.ok(conf.bundle.icon.includes(icon), `the packages have no ${icon}`);
 });
 
-test('the .deb and the .rpm bring in OpenSSL 3 and the Vulkan loader', () => {
-  // The program links OpenSSL through its web client and will not start
-  // without it, and the bundled llama-server's Vulkan backend needs the
-  // Vulkan loader. Tauri names WebKitGTK and GTK on its own and adds these. A .deb's libssl3 is OpenSSL 3 on Ubuntu 22.04 and
-  // later and on Debian 12 and later, and libvulkan1 is the Vulkan loader; an
-  // .rpm names the two OpenSSL libraries and the loader, as Fedora's own
-  // packages do.
+test('the .deb and the .rpm bring in what the program and the engine link, and the tarball says the rest', () => {
+  // The program links OpenSSL through its web client, and the bundled
+  // llama-server links GCC's OpenMP runtime and the Vulkan loader. Tauri
+  // names WebKitGTK and GTK on its own. libssl3 is OpenSSL 3 on Ubuntu 22.04
+  // and later and Debian 12 and later; libvulkan1 is the Vulkan loader and
+  // libgomp1 the OpenMP runtime; the .rpm names the same libraries, as
+  // Fedora's own packages do.
   assert.match(read('apps/desktop/src-tauri/Cargo.lock'), /^name = "openssl-sys"$/m, 'the program no longer links OpenSSL, so these may go');
   const { linux } = JSON.parse(read('apps/desktop/src-tauri/tauri.conf.json')).bundle;
-  assert.deepEqual(linux?.deb?.depends, ['libssl3', 'libvulkan1'], 'the .deb does not bring in OpenSSL 3 and the Vulkan loader');
-  assert.deepEqual(linux?.rpm?.depends, ['libssl.so.3()(64bit)', 'libcrypto.so.3()(64bit)', 'libvulkan.so.1()(64bit)'], 'the .rpm does not bring in OpenSSL 3 and the Vulkan loader');
+  assert.deepEqual(linux?.deb?.depends, ['libssl3', 'libvulkan1', 'libgomp1'], 'the .deb does not bring in OpenSSL 3, the Vulkan loader, and the OpenMP runtime');
+  assert.deepEqual(linux?.rpm?.depends, ['libssl.so.3()(64bit)', 'libcrypto.so.3()(64bit)', 'libvulkan.so.1()(64bit)', 'libgomp.so.1()(64bit)'], 'the .rpm does not bring in OpenSSL 3, the Vulkan loader, and the OpenMP runtime');
   assert.ok(NEEDS.includes(' libssl-dev'), 'the build no longer installs what it links against');
 
   // The .tar.gz brings in nothing, so the README and the release notes say
-  // what it needs from the system, the Vulkan loader now included.
-  const needs = 'It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.';
+  // what it needs from the system, the Vulkan loader and OpenMP now included.
+  const needs = 'It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.';
   for (const file of ['README.md', 'scripts/release.sh']) {
     assert.ok(read(file).replace(/\s+/g, ' ').includes(needs), `${file} does not say what the .tar.gz needs`);
   }

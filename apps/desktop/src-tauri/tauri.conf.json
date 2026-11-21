@@ -27,16 +27,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["engine/**/*"],
     "macOS": {
       "minimumSystemVersion": "14.0"
     },
     "linux": {
       "deb": {
-        "depends": ["libssl3", "libvulkan1"]
+        "depends": ["libssl3", "libvulkan1", "libgomp1"]
       },
       "rpm": {
-        "depends": ["libssl.so.3()(64bit)", "libcrypto.so.3()(64bit)", "libvulkan.so.1()(64bit)"]
+        "depends": ["libssl.so.3()(64bit)", "libcrypto.so.3()(64bit)", "libvulkan.so.1()(64bit)", "libgomp.so.1()(64bit)"]
       }
     },
     "icon": [

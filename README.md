@@ -327,7 +327,7 @@ On 64-bit Linux, on an Intel or AMD processor:
 - Anywhere else, download
   [Rusty-Business-linux-x64.tar.gz](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz),
   unpack it, and run `Rusty-Business-linux-x64/bin/rusty-business`. It needs
-  WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.
+  WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.
 
 The window draws with WebKitGTK, the program uses OpenSSL, and the engine,
 llama.cpp's `llama-server`, uses the Vulkan loader. The `.deb` and the `.rpm`
