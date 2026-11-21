@@ -50,6 +50,7 @@ import {
   keptPicks,
   latestAnswers,
   listedLine,
+  markUnseen,
   looksLikePath,
   meterLine,
   moreLine,
@@ -72,6 +73,7 @@ import {
   UPDATE_EVERY,
   updateDetail,
   updateLine,
+  startedElsewhere,
   startLine,
   titleFrom,
   tokensPerSecond,
@@ -87,6 +89,9 @@ import {
   switchedOn,
   uninstallAsk,
   uninstalledLine,
+  unseenLine,
+  unseenModels,
+  unseenShort,
   withPick,
 } from "./chat.js";
 
@@ -1066,4 +1071,100 @@ test("Uninstall asks first, names where the model goes, and warns of the shared 
   assert.equal(uninstallAsk("Phi-4", null), "Move Phi-4 to the Trash?", "before Rust answers, it says the Trash");
   assert.equal(uninstalledLine("gpt-oss 20B", { trash: "the Recycle Bin" }), "gpt-oss 20B is in the Recycle Bin.");
   assert.equal(uninstalledLine("gpt-oss 20B", undefined), "gpt-oss 20B is in the Trash.");
+});
+
+// Brad, 2026-11-20: "why can't I pick the 2 missing but installed models?  I
+// only have 3/5 when I ask questions". An engine left running from before
+// listed three of the five models on his disk, and the app said nothing.
+
+const HELD = {
+  gptOss: { id: "a/gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI" },
+  phi: { id: "a/phi-4", name: "Phi-4", maker: "Microsoft" },
+  nemotron: { id: "a/nemotron", name: "Nemotron 3.5 Lightning", maker: "NVIDIA" },
+  gemma: { id: "a/gemma-4-26b", name: "Gemma 4 26B", maker: "Google" },
+  llama: { id: "a/llama-3.1-8b", name: "Llama 3.1 8B", maker: "Meta" },
+};
+
+const threeOfFive = {
+  name: "MLX",
+  url: "http://127.0.0.1:8080/v1",
+  reachable: true,
+  remote: false,
+  ours: false,
+  models: [HELD.gptOss, HELD.phi, HELD.nemotron],
+  onDisk: Object.values(HELD),
+  unseen: [HELD.gemma, HELD.llama],
+};
+
+test("the two models on the disk that the engine leaves out are named, with what to do", () => {
+  assert.deepEqual(
+    unseenModels(threeOfFive, []).map((entry) => entry.name),
+    ["Gemma 4 26B", "Llama 3.1 8B"],
+  );
+  assert.equal(unseenShort(threeOfFive, []), "2 more are not listed by the engine");
+  assert.equal(
+    unseenLine(threeOfFive, [], "127.0.0.1:8080"),
+    "Gemma 4 26B and Llama 3.1 8B are on this computer, but the engine at 127.0.0.1:8080 does not list them. " +
+      "This window did not start that engine. Quit any other copy of the app, stop any engine you started yourself, " +
+      "then press Check again, and this window starts its own.",
+  );
+});
+
+test("an engine this window started that leaves a model out gets the shorter advice", () => {
+  const ours = { ...threeOfFive, ours: true, unseen: [HELD.llama] };
+  assert.equal(unseenShort(ours, []), "1 more is not listed by the engine");
+  assert.equal(
+    unseenLine(ours, [], "127.0.0.1:8080"),
+    "Llama 3.1 8B is on this computer, but the engine at 127.0.0.1:8080 does not list it. Quit the app and open it again.",
+  );
+});
+
+test("nothing is said when the engine lists every model, when none answers, or for a LAN server", () => {
+  for (const engine of [
+    { ...threeOfFive, unseen: [] },
+    { ...threeOfFive, unseen: undefined },
+    { ...threeOfFive, reachable: false },
+    { ...threeOfFive, remote: true },
+    null,
+    undefined,
+  ]) {
+    assert.deepEqual(unseenModels(engine, []), []);
+    assert.equal(unseenShort(engine, []), "");
+    assert.equal(unseenLine(engine, [], "127.0.0.1:8080"), "");
+  }
+});
+
+test("a model switched off is left out of the notice", () => {
+  assert.equal(unseenShort(threeOfFive, ["a/gemma-4-26b"]), "1 more is not listed by the engine");
+  assert.match(unseenLine(threeOfFive, ["a/gemma-4-26b"], "127.0.0.1:8080"), /^Llama 3\.1 8B is on this computer/);
+  assert.equal(unseenLine(threeOfFive, ["a/gemma-4-26b", "a/llama-3.1-8b"], "127.0.0.1:8080"), "");
+});
+
+test("the footer says when this window did not start the engine on this computer", () => {
+  assert.equal(startedElsewhere(threeOfFive), true);
+  assert.equal(startedElsewhere({ ...threeOfFive, ours: true }), false);
+  assert.equal(startedElsewhere({ ...threeOfFive, remote: true }), false, "a LAN server is never this window's to start");
+  assert.equal(startedElsewhere({ ...threeOfFive, reachable: false }), false);
+  // An older answer with no `ours` claims nothing.
+  assert.equal(startedElsewhere({ reachable: true, remote: false }), false);
+  assert.equal(startedElsewhere(null), false);
+});
+
+test("a model the engine leaves out says so on its row in Settings and on the Installers page", () => {
+  const makers = [
+    { name: "Google", picked: true, models: [{ name: "Gemma 4 26B", license: "Apache 2.0", onDisk: true, ids: ["a/gemma-4-26b"] }] },
+    { name: "Microsoft", picked: true, models: [{ name: "Phi-4", license: "MIT", onDisk: true, ids: ["a/phi-4"] }] },
+  ];
+  const marked = markUnseen(makers, threeOfFive);
+  assert.equal(listedLine(marked[0].models[0]), "Apache 2.0 · on this computer, not listed by the engine");
+  assert.equal(installLine(marked[0], marked[0].models[0]), "Apache 2.0 · on this computer, not listed by the engine");
+  assert.equal(listedLine(marked[1].models[0]), "MIT · on this computer");
+  assert.equal(
+    modelLine(marked[0].models[0], ["a/gemma-4-26b"]),
+    "Apache 2.0 · on this computer, not listed by the engine, switched off",
+    "the row still says so for a model switched off, where the notice does not",
+  );
+  assert.equal(makers[0].models[0].unseen, undefined, "the makers Rust sent are not changed");
+  assert.equal(markUnseen(makers, { ...threeOfFive, unseen: [] }), makers);
+  assert.deepEqual(markUnseen(undefined, threeOfFive), []);
 });

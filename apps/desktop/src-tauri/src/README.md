@@ -7,7 +7,7 @@ The desktop app's Rust code.
 | `main.rs`     | The program's entry. `rusty-business board` does its work in the terminal and leaves, and anything else calls `run` |
 | `lib.rs`      | Builds the Tauri app and lists every command the page may call       |
 | `gate.rs`     | The outbound gate: the switch, off until the person turns it on, and every client that reaches past this computer |
-| `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, streams a chat, and separates thinking from the answer |
+| `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, names the models on the disk that the engine does not list, says whether this window started the engine that answers, streams a chat, and separates thinking from the answer |
 | `models.rs`   | The models already on this computer: reads the folder the engine reads, the Hugging Face cache on a Mac or the app's own models folder on Windows and Linux, and reports the app's models that are whole there |
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it, `mlx_lm.server` on a Mac and llama.cpp's `llama-server` on Windows and Linux |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
@@ -39,6 +39,10 @@ Three more live in `engine.rs`, each with tests:
   with no proxy and no redirects.
 - Only models on the list in that file are offered or accepted.
 - A model's thinking never reaches the window as raw markers.
+
+It also reports, and only reports: the models on the disk that the engine
+answering does not list, and whether this window started that engine. It
+stops and restarts nothing.
 
 Three more live in `models.rs`, each with tests:
 

@@ -190,3 +190,8 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   ways is a conflict: it is listed, and nothing is written until you pick
   a side. The file is board v1, an open format, so any program that reads
   and writes one can be the other side.
+- **A model the engine leaves out.** An engine that was already running
+  can list fewer models than this computer holds. The app names each
+  model that is on the disk and not on the engine's list, says whether
+  this window started that engine, and says what to do. It still never
+  stops an engine it did not start.

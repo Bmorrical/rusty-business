@@ -46,6 +46,8 @@
         "context": 262144
       }
     ],
+    "unseen": [],
+    "ours": true,
     "offers": [
       {
         "id": "mlx-community/phi-4-4bit",
