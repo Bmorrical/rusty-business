@@ -779,6 +779,7 @@ export function canRemove(makers, name) {
 
 /** "MIT · on this computer", "Apache 2.0 · 15.4 GB", or why it cannot download. */
 export function listedLine(model) {
+  if (model.onDisk && model.unseen) return `${model.license} · on this computer, not listed by the engine`;
   if (model.onDisk) return `${model.license} · ${model.remote ? "on the LAN server" : "on this computer"}`;
   if (model.offer) return `${model.license} · ${model.remote ? "about " : ""}${formatSize(model.offer.bytes)}`;
   return `${model.license} · no download for this computer`;
@@ -803,6 +804,64 @@ export function installLine(maker, model) {
 export function switchedOn(models, off) {
   const away = new Set(off ?? []);
   return (models ?? []).filter((entry) => !away.has(entry.id));
+}
+
+// "why can't I pick the 2 missing but installed models?" A question goes
+// only to a model the engine lists. The app uses an engine that is already
+// answering as it is, so one started earlier, by another copy of the app or
+// by hand, can list fewer models than this computer holds. The app says so,
+// and never stops an engine it did not start.
+
+/**
+ * The models on this computer, switched on, that the engine answering does
+ * not list. None for a LAN server, whose models are not on this computer,
+ * and none while no engine answers.
+ */
+export function unseenModels(engine, off) {
+  if (!engine?.reachable || engine.remote) return [];
+  return switchedOn(engine.unseen, off);
+}
+
+/** Beside the models that can be asked: how many more the engine leaves out. */
+export function unseenShort(engine, off) {
+  const count = unseenModels(engine, off).length;
+  if (!count) return "";
+  return count === 1 ? "1 more is not listed by the engine" : `${count} more are not listed by the engine`;
+}
+
+/**
+ * Under the engine's line: which models it leaves out, and what to do. An
+ * engine this window did not start is left running, so the way to a fresh
+ * one is to stop that one first.
+ */
+export function unseenLine(engine, off, address) {
+  const names = unseenModels(engine, off).map((entry) => entry.name);
+  if (!names.length) return "";
+  const one = new Set(names).size === 1;
+  const held = `${namesLine(names)} ${one ? "is" : "are"} on this computer, but the engine at ${address} does not list ${one ? "it" : "them"}.`;
+  if (engine.ours) return `${held} Quit the app and open it again.`;
+  return `${held} This window did not start that engine. Quit any other copy of the app, stop any engine you started yourself, then press Check again, and this window starts its own.`;
+}
+
+/**
+ * True when an engine on this computer answers and this window did not start
+ * it. The footer says so in a quiet line.
+ */
+export function startedElsewhere(engine) {
+  return Boolean(engine?.reachable) && !engine.remote && engine.ours === false;
+}
+
+/**
+ * The makers, with each model the engine leaves out marked `unseen`, so its
+ * row in Settings and on the Installers page says so.
+ */
+export function markUnseen(makers, engine) {
+  const names = new Set(unseenModels(engine, []).map((entry) => entry.name));
+  if (!names.size) return makers ?? [];
+  return (makers ?? []).map((maker) => ({
+    ...maker,
+    models: maker.models.map((entry) => (names.has(entry.name) ? { ...entry, unseen: true } : entry)),
+  }));
 }
 
 /** True when none of a model's ids is switched off. */

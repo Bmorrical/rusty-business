@@ -728,6 +728,8 @@ mod tests {
             set_aside: Vec::new(),
             hidden: 0,
             on_disk: models_in(&hub),
+            unseen: Vec::new(),
+            ours: false,
             offers: Vec::new(),
             error: Some("The engine is not answering.".to_string()),
             start_hint: "mlx_lm.server --port 8080".to_string(),

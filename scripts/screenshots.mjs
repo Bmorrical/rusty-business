@@ -123,7 +123,7 @@ export function pickedAtFirst(report) {
 export function forMakers(report, picked) {
   const mine = (list) => list.filter((model) => picked.includes(model.maker));
   const setAside = report.models.filter((model) => !picked.includes(model.maker));
-  return { ...report, models: mine(report.models), setAside, onDisk: mine(report.onDisk), offers: mine(report.offers) };
+  return { ...report, models: mine(report.models), setAside, onDisk: mine(report.onDisk), unseen: mine(report.unseen), offers: mine(report.offers) };
 }
 
 /**
@@ -150,7 +150,7 @@ export function makersStatus(report, picked) {
 
 /** What the app reports when nothing answers at the engine's address. */
 export function engineOff(engine) {
-  return { ...engine, reachable: false, models: [], setAside: [], hidden: 0, error: 'The engine is not answering.' };
+  return { ...engine, reachable: false, models: [], setAside: [], hidden: 0, unseen: [], ours: false, error: 'The engine is not answering.' };
 }
 
 /**

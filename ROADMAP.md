@@ -17,6 +17,20 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
+- **Kits.** A kit is a small file, kept outside the app, that names what a
+  board needs before work on it can start, such as a folder on this
+  computer or a repository to fetch. The app reads a kit and says what is
+  missing.
+- **A source for boards.** The `board` command keeps a board in step with
+  a file on this computer. This adds a source a kit names: a file or a
+  folder on this computer, which can be one that something else shares or
+  syncs, pulled from the Workflow view. A pull leaves your notes. A source
+  that is an address on a network is refused for now: `BOARD.md` has the
+  rule.
+- **Slices you can write.** Add and edit a story's slices in the Workflow
+  view, each with a brief small enough for a local model, a meter that
+  says whether the brief fits the model's window, and a way to copy your
+  slices out as text.
 - **An engine for Windows.** The Windows installer carries llama.cpp's
   `llama-server` inside the download, so nothing else has to be installed
   first: the Vulkan build from llama.cpp's own releases, pinned to one
@@ -80,8 +94,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 - **Downloads for Linux.** A `.deb`, an `.rpm`, and a `.tar.gz`, linked
   from the README beside the Mac's `.dmg` and the Windows `.exe`: download,
   install, and go. The Release workflow builds them on Ubuntu with
-  `scripts/linux-app.sh`, after a green gate. Until Linux has an engine, the
-  window opens and says so.
+  `scripts/linux-app.sh`, after a green gate.
 - **A notice of each new version.** When a new version is released, the
   window says so, and Download opens this system's file in the browser: the
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
@@ -164,3 +177,35 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   signature matches the key built into the app, and opens the new version.
   The Release workflow signs each of those files and writes `latest.json`.
   A copy unpacked from the `.tar.gz` updates by download.
+- **Web search.** A model asked alone can look something up on the web
+  while it answers, once you switch it on in Settings, where it starts
+  off. The model writes the search, and its words go out through the
+  outbound gate, over https, to DuckDuckGo, or to Brave Search when you
+  give the path to a file that holds your own key. The model reads at most
+  8 results, as plain text.
+- **The Workflow view.** A board is a road of releases, the stories and
+  bugs under each, and the slices each story is cut into. The view shows
+  one, with the five lanes a slice goes through, Sliced, Written, Checked,
+  Reviewed, and Main, and whose move each slice and each story is. It
+  reads only a copy kept on this computer, so it works with both gates
+  off, and it keeps a note of your own on any story. A made-up sample
+  board shows how one reads.
+- **A board in step with a file.** One command in a terminal,
+  `rusty-business board`, keeps a board on this computer in step with one
+  file kept somewhere else: `pull`, `push`, or `sync` for both ways.
+  Changes to different things are both kept. The same thing changed two
+  ways is a conflict: it is listed, and nothing is written until you pick
+  a side. The file is an open format with a version and a ruleset,
+  `BOARD.md`, so any program that reads and writes one can be the other
+  side. A board's statuses are the board's own, kept in the file. There is
+  no direct API connection to a board's backend, for now: a board moves as
+  a file.
+- **A model the engine leaves out.** An engine that was already running
+  can list fewer models than this computer holds. The app names each
+  model that is on the disk and not on the engine's list, says whether
+  this window started that engine, and says what to do. It still never
+  stops an engine it did not start.
+- **Release notes.** Every version has one note in
+  [RELEASES.md](RELEASES.md), back to the first release, written before the
+  version is built: the gate fails without it, and the release run puts it
+  at the top of the version's page, above the steps to install.
