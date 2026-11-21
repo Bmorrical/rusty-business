@@ -19,7 +19,7 @@
 [Run it from localhost](#run-it-from-localhost) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
 [Release notes](#release-notes) · [Roadmap](#roadmap) ·
-[Security](#security) · [License](#license)
+[Contributing](#contributing) · [Security](#security) · [License](#license)
 
 **Three ways to install it:**
 
@@ -572,6 +572,25 @@ opens that page.
 
 What is planned, and in what order, is in [ROADMAP.md](ROADMAP.md). It
 promises no dates: a thing ships when its tests are green.
+
+## Contributing
+
+Anyone can send a change, and so can an AI model that works for them. Read
+[AGENTS.md](AGENTS.md) first. It sets every rule of the project in one
+place, for people and for models alike: how to behave here, how to send a
+change, what a good slice of work looks like, and what is refused. The
+rules a change meets first:
+
+- **Offline first.** A change never turns a gate on, and never reaches the
+  network around one.
+- **A board moves as a file.** No direct API connection to a board's
+  backend, for now. [BOARD.md](BOARD.md) has the rule and its why.
+- **Nothing private in this repository.** No key, no person's data, and
+  nothing from a private repository. Every sample is made up.
+- **One change per pull request**, with its tests.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the agreement every change follows
+before it merges.
 
 ## Security
 

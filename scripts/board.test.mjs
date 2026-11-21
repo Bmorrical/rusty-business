@@ -789,6 +789,7 @@ test('no direct API connection to a backend, for now, in one wording wherever it
   const places = {
     [RULESET]: read(RULESET),
     'SECURITY.md': read('SECURITY.md'),
+    'AGENTS.md': read('AGENTS.md'),
     'README.md': read('README.md'),
     'apps/desktop/README.md': read('apps/desktop/README.md'),
     "RELEASES.md's 0.8.3 note": note('0.8.3'),
@@ -800,14 +801,14 @@ test('no direct API connection to a backend, for now, in one wording wherever it
   assert.ok(NO_API.includes(', for now.'), 'the rule lost "for now"');
 
   // Why the rule is there, wherever there is room to say it.
-  for (const place of [RULESET, 'SECURITY.md', 'README.md', "RELEASES.md's 0.8.3 note"]) {
+  for (const place of [RULESET, 'SECURITY.md', 'AGENTS.md', 'README.md', "RELEASES.md's 0.8.3 note"]) {
     assert.match(flat(places[place]), /offline first, and at most LAN/, `${place} does not say why a board moves as a file`);
   }
   assert.match(flat(places[RULESET]), /A file crosses only when a person moves it/, 'BOARD.md does not say a file crosses only when a person moves it');
   assert.match(flat(places[RULESET]), /loosely coupled/, 'BOARD.md does not say the two sides stay loosely coupled');
 
   // Every other place points at the ruleset, which has the rule in full.
-  for (const place of ['SECURITY.md', 'README.md', 'apps/desktop/README.md']) {
+  for (const place of ['SECURITY.md', 'AGENTS.md', 'README.md', 'apps/desktop/README.md']) {
     assert.match(places[place], /\]\((\.\.\/\.\.\/)?BOARD\.md\)/, `${place} does not link BOARD.md`);
   }
   assert.ok(places[`${COMMAND}'s help`].includes('BOARD.md, at the root of the repository, is the file\'s ruleset.'), 'the help does not say where the ruleset is');
