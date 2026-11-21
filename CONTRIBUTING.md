@@ -50,6 +50,10 @@ Maintainers may also review and merge.
 - Never force-push to `main`, and never change a release once it is
   published.
 - A release runs from `main`, and only after the gate there is green.
+- Every version gets one release note, written in [RELEASES.md](RELEASES.md)
+  before the version is built. The gate fails without it, and the release
+  run stops. A merge into `main` gets no note of its own: what it changed
+  goes in the note of the version it goes out in.
 
 ## Who decides
 

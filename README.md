@@ -18,7 +18,8 @@
 [Build it from source](#build-it-from-source) ·
 [Run it from localhost](#run-it-from-localhost) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
-[Roadmap](#roadmap) · [Security](#security) · [License](#license)
+[Release notes](#release-notes) · [Roadmap](#roadmap) ·
+[Security](#security) · [License](#license)
 
 **Three ways to install it:**
 
@@ -46,6 +47,8 @@ with one command. Windows has [an installer](#run-the-chat-window-windows), and 
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux). The Mac and
 Linux apps carry their model engine; the Windows installer starts llama.cpp's
 `llama-server` once it is installed. What it cannot do yet is under [Limits](#limits).
+
+**What changed in each version** is under [Release notes](#release-notes).
 
 ## Screenshots
 
@@ -208,7 +211,8 @@ own section: [Mac](#run-the-chat-window-macos),
 [Linux](#run-the-chat-window-linux). None is signed yet, so a Mac or a
 Windows computer warns once before it opens one. Each file's checksum is
 beside it on the
-[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest),
+and what changed in it is under [Release notes](#release-notes).
 
 ## Run the chat window (macOS)
 
@@ -545,6 +549,17 @@ next.
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the
   chat window starts them but does not use them.
+
+## Release notes
+
+What changed in each version is in [RELEASES.md](RELEASES.md), newest first,
+back to the first release. Every version gets its note there before it is
+built.
+
+From 0.8.3 on, the same note is at the top of the version's page under
+[Releases](https://github.com/Bmorrical/rusty-business/releases), above the
+steps to install it. In the app, What changed on the notice of a new version
+opens that page.
 
 ## Roadmap
 
