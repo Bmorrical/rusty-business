@@ -5,6 +5,12 @@
 //! off. Nothing here uses the network, takes a path from the page, or
 //! deletes a file. A pull replaces a board's snapshot. What the person wrote,
 //! their drafts, lives in a second file that a pull never touches.
+//!
+//! A board can also be kept in step with one file somewhere else, a file the
+//! person names at the command line. Beside each snapshot the store keeps
+//! the board as it was when the two last agreed, and where that file is.
+//! Reading and writing that file happens here, under the same rules as every
+//! other board file. Working out what changed happens in `sync.rs`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -19,6 +25,8 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT: &str = "board v1";
 /// The format of the file that holds the person's own drafts for a board.
 pub const DRAFTS_FORMAT: &str = "board drafts v1";
+/// The format of the file that says where a board's shared file is kept.
+pub const SOURCE_FORMAT: &str = "board source v1";
 
 /// The five lanes a slice goes through, in order. A slice's `lane` is the
 /// last one it has been through; empty means none yet.
@@ -39,6 +47,8 @@ const NAME_LIMIT: usize = 120;
 const TITLE_LIMIT: usize = 300;
 const DETAIL_LIMIT: usize = 20_000;
 const NOTE_LIMIT: usize = 4_000;
+/// The most revs a board's `history` holds. Older ones fall off the end.
+pub const HISTORY_LIMIT: usize = 50;
 
 /// The made-up board the app carries, so the view has something to show
 /// before a board of the person's own arrives.
@@ -117,11 +127,28 @@ pub struct Board {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    /// The name of this state of the board, given by whoever last wrote the
+    /// copy that is shared. A file nobody keeps in step has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rev: String,
+    /// The revs this state came from, the newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<String>,
     /// When this copy was taken, in milliseconds. The app stamps it.
     #[serde(default)]
     pub pulled_at: u64,
     #[serde(default)]
     pub epics: Vec<Epic>,
+}
+
+/// Where a board's shared file is, as the person last named it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Source {
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    file: String,
 }
 
 /// What the person wrote about one story, on this computer.
@@ -303,16 +330,38 @@ impl Story {
 
 impl Board {
     /// Why this is not a board the app can keep, in words for a person.
-    fn check(&self) -> Result<(), String> {
+    pub fn check(&self) -> Result<(), String> {
         if self.format != FORMAT {
             return Err(format!("This is not a \"{FORMAT}\" file."));
         }
         too_long("The board's name", &self.name, NAME_LIMIT)?;
+        if !self.rev.is_empty() && !valid_id(&self.rev) {
+            return Err("The board's rev is up to 64 letters, digits, and hyphens.".to_string());
+        }
+        too_many(
+            "The board's history has revs,",
+            self.history.len(),
+            HISTORY_LIMIT,
+        )?;
+        if !self.history.iter().all(|rev| valid_id(rev)) {
+            return Err(
+                "A rev in the board's history is up to 64 letters, digits, and hyphens."
+                    .to_string(),
+            );
+        }
         too_many("The board has epics,", self.epics.len(), EPIC_LIMIT)?;
         let mut numbers = BTreeSet::new();
+        let mut releases = BTreeSet::new();
         for epic in &self.epics {
             let at = format!("Release {}", shown(&epic.release));
             too_long("A release's name", &epic.release, NAME_LIMIT)?;
+            // A release is known by its name, so no two may share one.
+            if !releases.insert(epic.release.as_str()) {
+                return Err(format!(
+                    "Two releases have the name \"{}\".",
+                    shown(&epic.release)
+                ));
+            }
             too_long(&format!("{at}: the title"), &epic.title, TITLE_LIMIT)?;
             too_long(&format!("{at}: the detail"), &epic.detail, DETAIL_LIMIT)?;
             too_long(&format!("{at}: the status"), &epic.status, NAME_LIMIT)?;
@@ -333,7 +382,7 @@ impl Board {
             .any(|epic| epic.stories.iter().any(|story| story.number == number))
     }
 
-    fn stories(&self) -> usize {
+    pub fn stories(&self) -> usize {
         self.epics.iter().map(|epic| epic.stories.len()).sum()
     }
 }
@@ -366,8 +415,23 @@ impl Boards {
         self.dir.join("drafts")
     }
 
+    /// Each board as it was when this computer and its file last agreed.
+    fn synced_dir(&self) -> PathBuf {
+        self.dir.join("synced")
+    }
+
+    /// Where each board's file is.
+    fn sources_dir(&self) -> PathBuf {
+        self.dir.join("sources")
+    }
+
     fn ready(&self) -> Result<(), String> {
-        for dir in [self.dir.clone(), self.drafts_dir()] {
+        for dir in [
+            self.dir.clone(),
+            self.drafts_dir(),
+            self.synced_dir(),
+            self.sources_dir(),
+        ] {
             fs::create_dir_all(&dir).map_err(failed("Could not open the boards folder"))?;
             own(&dir, 0o700);
         }
@@ -386,6 +450,25 @@ impl Boards {
             return Err("That is not a board.".to_string());
         }
         Ok(self.drafts_dir().join(format!("{id}.json")))
+    }
+
+    fn base_file(&self, id: &str) -> Result<PathBuf, String> {
+        if !valid_id(id) {
+            return Err("That is not a board.".to_string());
+        }
+        Ok(self.synced_dir().join(format!("{id}.json")))
+    }
+
+    fn source_file(&self, id: &str) -> Result<PathBuf, String> {
+        if !valid_id(id) {
+            return Err("That is not a board.".to_string());
+        }
+        Ok(self.sources_dir().join(format!("{id}.json")))
+    }
+
+    /// Whether anything is at a path. A link counts, wherever it leads.
+    fn found(path: &Path) -> bool {
+        fs::symlink_metadata(path).is_ok()
     }
 
     /// Reads one file, and never more of it than a board may be.
@@ -408,17 +491,166 @@ impl Boards {
         Ok(text)
     }
 
-    fn read(&self, id: &str) -> Result<Board, String> {
-        let text = Self::text(&self.snapshot(id)?, "Could not read the board")?;
-        let mut board: Board = serde_json::from_str(&text)
+    /// A board from the text of a file, checked against the format.
+    fn parse(text: &str) -> Result<Board, String> {
+        let board: Board = serde_json::from_str(text)
             .map_err(|error| format!("This file is not a board: {error}."))?;
         board.check()?;
+        Ok(board)
+    }
+
+    /// A board as the text of a file. It is checked first, and is never more
+    /// than a file may be.
+    fn json(board: &Board) -> Result<String, String> {
+        board.check()?;
+        let text = serde_json::to_string_pretty(board)
+            .map_err(|_| "Could not write the board.".to_string())?;
+        if text.len() as u64 > SIZE_LIMIT {
+            return Err("That board is larger than 4 MB.".to_string());
+        }
+        Ok(text)
+    }
+
+    /// One of the app's own files for a board.
+    fn kept(path: &Path, id: &str, what: &str) -> Result<Board, String> {
+        let mut board = Self::parse(&Self::text(path, what)?)?;
         // The file's name is the board's id, whatever the file says inside.
         board.id = id.to_string();
         if board.name.trim().is_empty() {
             board.name = id.to_string();
         }
         Ok(board)
+    }
+
+    fn read(&self, id: &str) -> Result<Board, String> {
+        Self::kept(&self.snapshot(id)?, id, "Could not read the board")
+    }
+
+    /// The local copy of a board, or `None` when this computer has none.
+    pub fn local(&self, id: &str) -> Result<Option<Board>, String> {
+        if !Self::found(&self.snapshot(id)?) {
+            return Ok(None);
+        }
+        self.read(id).map(Some)
+    }
+
+    /// A board as it was when this computer and its file last agreed, or
+    /// `None` when they never have.
+    pub fn base(&self, id: &str) -> Result<Option<Board>, String> {
+        let path = self.base_file(id)?;
+        if !Self::found(&path) {
+            return Ok(None);
+        }
+        Self::kept(&path, id, "Could not read the last synced copy").map(Some)
+    }
+
+    /// Keeps a board as the state this computer and its file last agreed on.
+    /// Neither the snapshot nor the drafts are touched.
+    pub fn keep_base(&self, board: &Board) -> Result<(), String> {
+        let path = self.base_file(&board.id)?;
+        let text = Self::json(board)?;
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        write(&path, &text, "Could not save the last synced copy")
+    }
+
+    /// Where a board's file is, or `None` when the person has named none.
+    pub fn source(&self, id: &str) -> Result<Option<PathBuf>, String> {
+        let path = self.source_file(id)?;
+        if !Self::found(&path) {
+            return Ok(None);
+        }
+        let what = "Could not read where this board's file is";
+        let source: Source = serde_json::from_str(&Self::text(&path, what)?)
+            .map_err(|error| format!("{what}: {error}."))?;
+        if source.format != SOURCE_FORMAT || source.file.is_empty() {
+            return Err(format!("{what}: it is not a \"{SOURCE_FORMAT}\" file."));
+        }
+        Ok(Some(PathBuf::from(source.file)))
+    }
+
+    /// Remembers where a board's file is, so the next sync needs no path.
+    pub fn remember(&self, id: &str, file: &Path) -> Result<(), String> {
+        let path = self.source_file(id)?;
+        let Some(file) = file.to_str() else {
+            return Err("That file's path is not text.".to_string());
+        };
+        let source = Source {
+            format: SOURCE_FORMAT.to_string(),
+            file: file.to_string(),
+        };
+        let text = serde_json::to_string_pretty(&source)
+            .map_err(|_| "Could not remember the file.".to_string())?;
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        write(&path, &text, "Could not remember the file")
+    }
+
+    /// The id of every board that has a file, in order.
+    pub fn sources(&self) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(self.sources_dir()) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|end| end.to_str()) == Some("json"))
+            .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
+            .filter(|id| valid_id(id))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// A board file kept somewhere else, at a path the person typed, or
+    /// `None` when nothing is there. It is read as any board file is: a plain
+    /// file, never a link, of at most 4 MB, checked against the format. The
+    /// file says which board it is.
+    pub fn outside(path: &Path) -> Result<Option<Board>, String> {
+        if path.extension().and_then(|end| end.to_str()) != Some("json") {
+            return Err("A board file's name ends in .json.".to_string());
+        }
+        if !Self::found(path) {
+            return Ok(None);
+        }
+        let mut board = Self::parse(&Self::text(path, "Could not read the file")?)?;
+        if !valid_id(&board.id) {
+            return Err(
+                "That file does not say which board it is. Its id is up to 64 letters, digits, and hyphens."
+                    .to_string(),
+            );
+        }
+        if board.name.trim().is_empty() {
+            board.name = board.id.clone();
+        }
+        Ok(Some(board))
+    }
+
+    /// Writes a board to a file kept somewhere else. It makes a new file, or
+    /// replaces a board file of the same board, and nothing else: a file that
+    /// holds anything other than this board is left as it is.
+    pub fn send(&self, path: &Path, board: &Board) -> Result<(), String> {
+        let text = Self::json(board)?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        match Self::outside(path)? {
+            Some(there) if there.id != board.id => {
+                return Err(format!(
+                    "That file holds another board, {}. It was left as it is.",
+                    there.id
+                ));
+            }
+            _ => {}
+        }
+        // The half-written file goes beside it. Whatever already has that
+        // name must be a plain file, so the write cannot land somewhere else.
+        let partial = path.with_extension("json.partial");
+        if Self::found(&partial) && !fs::symlink_metadata(&partial).is_ok_and(|at| at.is_file()) {
+            return Err(format!(
+                "{} is in the way, and is not a plain file.",
+                partial.display()
+            ));
+        }
+        write(path, &text, "Could not write the file")
     }
 
     /// The person's drafts for a board. No file yet means none yet. A file
@@ -878,12 +1110,328 @@ mod tests {
         let (boards, dir) = scratch();
         boards.pull(sample()).unwrap();
         boards.note("sample", 412, "Mine.").unwrap();
+        boards.keep_base(&sample()).unwrap();
+        let file = dir.join("elsewhere.json");
+        boards.remember("sample", &file).unwrap();
+        boards.send(&file, &sample()).unwrap();
         let mode = |path: PathBuf| fs::metadata(path).unwrap().permissions().mode() & 0o777;
         let folder = dir.join("boards");
         assert_eq!(mode(folder.clone()), 0o700);
-        assert_eq!(mode(folder.join("drafts")), 0o700);
         assert_eq!(mode(folder.join("sample.json")), 0o600);
-        assert_eq!(mode(folder.join("drafts").join("sample.json")), 0o600);
+        for kept in ["drafts", "synced", "sources"] {
+            assert_eq!(mode(folder.join(kept)), 0o700, "{kept}");
+            assert_eq!(mode(folder.join(kept).join("sample.json")), 0o600, "{kept}");
+        }
+        // A file written somewhere else is the owner's alone too.
+        assert_eq!(mode(file), 0o600);
+    }
+
+    #[test]
+    fn a_rev_and_a_history_are_checked() {
+        let mut board = sample();
+        board.rev = "2f6c1e0a9b7d4c53".to_string();
+        board.history = vec!["r-2".to_string(), "r-1".to_string()];
+        assert_eq!(board.check(), Ok(()));
+        // Both travel in the file, and neither is there when it is empty.
+        let text = serde_json::to_string(&board).unwrap();
+        assert!(text.contains(r#""rev":"2f6c1e0a9b7d4c53","history":["r-2","r-1"]"#));
+        assert_eq!(Boards::parse(&text).unwrap(), board);
+        let text = serde_json::to_string(&sample()).unwrap();
+        assert!(!text.contains("\"rev\"") && !text.contains("\"history\""));
+
+        board.rev = "../r3".to_string();
+        assert_eq!(
+            board.check().err().unwrap(),
+            "The board's rev is up to 64 letters, digits, and hyphens."
+        );
+        board.rev = "r".repeat(65);
+        assert!(board.check().is_err());
+
+        let mut board = sample();
+        board.history = vec!["r 1".to_string()];
+        assert_eq!(
+            board.check().err().unwrap(),
+            "A rev in the board's history is up to 64 letters, digits, and hyphens."
+        );
+        board.history = vec![String::new()];
+        assert!(board.check().is_err());
+        board.history = (0..=HISTORY_LIMIT).map(|n| format!("r{n}")).collect();
+        assert_eq!(
+            board.check().err().unwrap(),
+            "The board's history has revs, more than 50."
+        );
+        board.history.pop();
+        assert_eq!(board.check(), Ok(()));
+    }
+
+    #[test]
+    fn two_releases_cannot_share_a_name() {
+        let mut board = sample();
+        board.epics[1].release = board.epics[0].release.clone();
+        assert_eq!(
+            board.check().err().unwrap(),
+            "Two releases have the name \"1.2.0\"."
+        );
+    }
+
+    #[test]
+    fn the_last_synced_copy_is_kept_apart_from_the_snapshot() {
+        let (boards, dir) = scratch();
+        assert_eq!(boards.local("sample").unwrap(), None);
+        assert_eq!(boards.base("sample").unwrap(), None);
+
+        let pulled = boards.pull(sample()).unwrap();
+        assert_eq!(boards.local("sample").unwrap(), Some(pulled));
+        assert_eq!(boards.base("sample").unwrap(), None);
+        let snapshot = dir.join("boards").join("sample.json");
+        let before = fs::read_to_string(&snapshot).unwrap();
+
+        let mut agreed = sample();
+        agreed.rev = "r1".to_string();
+        first_story(&mut agreed).title = "As both sides last had it".to_string();
+        boards.keep_base(&agreed).unwrap();
+        assert_eq!(boards.base("sample").unwrap(), Some(agreed));
+        assert_eq!(fs::read_to_string(&snapshot).unwrap(), before);
+        assert!(
+            dir.join("boards")
+                .join("synced")
+                .join("sample.json")
+                .is_file()
+        );
+
+        // Neither is listed as a board of its own.
+        assert_eq!(boards.list().unwrap().len(), 1);
+
+        // A copy that breaks the format is never kept.
+        let mut broken = sample();
+        broken.rev = "not a rev".to_string();
+        assert!(boards.keep_base(&broken).is_err());
+        assert_eq!(boards.base("sample").unwrap().unwrap().rev, "r1");
+    }
+
+    #[test]
+    fn a_boards_file_is_remembered() {
+        let (boards, dir) = scratch();
+        assert_eq!(boards.source("sample").unwrap(), None);
+        assert!(boards.sources().is_empty());
+
+        let file = dir.join("shared").join("sample.json");
+        boards.remember("sample", &file).unwrap();
+        boards.remember("a-road", &dir.join("a-road.json")).unwrap();
+        assert_eq!(boards.source("sample").unwrap(), Some(file));
+        assert_eq!(boards.sources(), ["a-road", "sample"]);
+        let kept = dir.join("boards").join("sources").join("sample.json");
+        let text = fs::read_to_string(&kept).unwrap();
+        assert!(text.contains("\"format\": \"board source v1\""));
+
+        // Remembering a file reads nothing and writes nothing there.
+        assert!(!dir.join("shared").exists());
+        // It is not a board, and is not listed as one.
+        assert!(boards.list().unwrap().is_empty());
+
+        fs::write(
+            &kept,
+            "{\"format\": \"something else\", \"file\": \"/x.json\"}",
+        )
+        .unwrap();
+        assert_eq!(
+            boards.source("sample").err().unwrap(),
+            "Could not read where this board's file is: it is not a \"board source v1\" file."
+        );
+    }
+
+    #[test]
+    fn the_sync_files_cannot_reach_outside_the_folder() {
+        let (boards, dir) = scratch();
+        let refused = "That is not a board.";
+        for id in ["../x", "a/b", "", "a.b", "..", &"x".repeat(65)] {
+            assert_eq!(boards.local(id).err().unwrap(), refused, "{id}");
+            assert_eq!(boards.base(id).err().unwrap(), refused, "{id}");
+            assert_eq!(boards.source(id).err().unwrap(), refused, "{id}");
+            let file = dir.join("x.json");
+            assert_eq!(boards.remember(id, &file).err().unwrap(), refused, "{id}");
+            let mut board = sample();
+            board.id = id.to_string();
+            assert_eq!(boards.keep_base(&board).err().unwrap(), refused, "{id}");
+        }
+        // Nothing was made, not even the folder.
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_file_somewhere_else_is_read_as_any_board_file_is() {
+        let (_, dir) = scratch();
+        fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name);
+
+        assert_eq!(Boards::outside(&at("none.json")), Ok(None));
+
+        let mut board = sample();
+        board.rev = "r1".to_string();
+        fs::write(at("road.json"), serde_json::to_string(&board).unwrap()).unwrap();
+        assert_eq!(Boards::outside(&at("road.json")), Ok(Some(board)));
+
+        // The file says which board it is. Its name does not.
+        fs::write(at("road.txt"), serde_json::to_string(&sample()).unwrap()).unwrap();
+        for name in ["road.txt", "road", "road.json.txt"] {
+            assert_eq!(
+                Boards::outside(&at(name)).err().unwrap(),
+                "A board file's name ends in .json.",
+                "{name}"
+            );
+        }
+        for id in ["", "../sample", "a b"] {
+            let mut board = sample();
+            board.id = id.to_string();
+            fs::write(at("nameless.json"), serde_json::to_string(&board).unwrap()).unwrap();
+            assert_eq!(
+                Boards::outside(&at("nameless.json")).err().unwrap(),
+                "That file does not say which board it is. Its id is up to 64 letters, digits, and hyphens.",
+                "{id}"
+            );
+        }
+
+        let mut board = sample();
+        board.name = "  ".to_string();
+        fs::write(at("unnamed.json"), serde_json::to_string(&board).unwrap()).unwrap();
+        assert_eq!(
+            Boards::outside(&at("unnamed.json")).unwrap().unwrap().name,
+            "sample"
+        );
+
+        fs::write(at("words.json"), "not a board").unwrap();
+        assert!(
+            Boards::outside(&at("words.json"))
+                .err()
+                .unwrap()
+                .starts_with("This file is not a board: ")
+        );
+        fs::write(at("other.json"), "{\"format\": \"board v2\"}").unwrap();
+        assert_eq!(
+            Boards::outside(&at("other.json")).err().unwrap(),
+            "This is not a \"board v1\" file."
+        );
+
+        let mut text = serde_json::to_string(&sample()).unwrap();
+        text.push_str(&" ".repeat(SIZE_LIMIT as usize));
+        fs::write(at("big.json"), text).unwrap();
+        assert_eq!(
+            Boards::outside(&at("big.json")).err().unwrap(),
+            "Could not read the file: it is larger than 4 MB."
+        );
+
+        fs::create_dir_all(at("folder.json")).unwrap();
+        assert_eq!(
+            Boards::outside(&at("folder.json")).err().unwrap(),
+            "Could not read the file: it is not a plain file."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_somewhere_else_is_neither_read_nor_written_through() {
+        let (boards, dir) = scratch();
+        fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("real.json");
+        let text = serde_json::to_string(&sample()).unwrap();
+        fs::write(&real, &text).unwrap();
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let refused = "Could not read the file: it is not a plain file.";
+        assert_eq!(Boards::outside(&link).err().unwrap(), refused);
+        assert_eq!(boards.send(&link, &sample()).err().unwrap(), refused);
+
+        // A link where the half-written file would go is refused as well.
+        let file = dir.join("road.json");
+        let target = dir.join("target.txt");
+        fs::write(&target, "Left alone.").unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("road.json.partial")).unwrap();
+        assert_eq!(
+            boards.send(&file, &sample()).err().unwrap(),
+            format!(
+                "{} is in the way, and is not a plain file.",
+                dir.join("road.json.partial").display()
+            )
+        );
+        assert!(!file.exists());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "Left alone.");
+        assert_eq!(fs::read_to_string(&real).unwrap(), text);
+    }
+
+    // "we can start with a flat file"
+    #[test]
+    fn a_send_makes_a_new_file_or_replaces_its_own_board_and_nothing_else() {
+        let (boards, dir) = scratch();
+        fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name);
+
+        // A new file.
+        let mut board = sample();
+        board.rev = "r1".to_string();
+        boards.send(&at("road.json"), &board).unwrap();
+        assert_eq!(Boards::outside(&at("road.json")), Ok(Some(board.clone())));
+        assert!(!at("road.json.partial").exists());
+        // The local copy is not what a send writes.
+        assert_eq!(boards.local("sample").unwrap(), None);
+
+        // The same board, again.
+        board.rev = "r2".to_string();
+        board.history = vec!["r1".to_string()];
+        first_story(&mut board).title = "A newer title".to_string();
+        boards.send(&at("road.json"), &board).unwrap();
+        assert_eq!(Boards::outside(&at("road.json")), Ok(Some(board.clone())));
+
+        // Another board's file.
+        let mut other = sample();
+        other.id = "another".to_string();
+        let text = serde_json::to_string(&other).unwrap();
+        fs::write(at("another.json"), &text).unwrap();
+        assert_eq!(
+            boards.send(&at("another.json"), &board).err().unwrap(),
+            "That file holds another board, another. It was left as it is."
+        );
+        assert_eq!(fs::read_to_string(at("another.json")).unwrap(), text);
+
+        // A file that is not a board at all.
+        fs::write(at("package.json"), "{\"name\": \"something\"}").unwrap();
+        assert!(boards.send(&at("package.json"), &board).is_err());
+        assert_eq!(
+            fs::read_to_string(at("package.json")).unwrap(),
+            "{\"name\": \"something\"}"
+        );
+        fs::write(at("words.json"), "Keep me.").unwrap();
+        assert!(boards.send(&at("words.json"), &board).is_err());
+        assert_eq!(fs::read_to_string(at("words.json")).unwrap(), "Keep me.");
+
+        // A name that does not end in .json, there or not.
+        fs::write(at("notes.txt"), "Keep me.").unwrap();
+        for name in ["notes.txt", "new.txt", "new"] {
+            assert_eq!(
+                boards.send(&at(name), &board).err().unwrap(),
+                "A board file's name ends in .json.",
+                "{name}"
+            );
+        }
+        assert_eq!(fs::read_to_string(at("notes.txt")).unwrap(), "Keep me.");
+        assert!(!at("new.txt").exists() && !at("new").exists());
+
+        // A board that breaks the format is never written.
+        let mut broken = sample();
+        broken.epics[0].stories[0].slices[0].lane = "shipped".to_string();
+        assert!(boards.send(&at("broken.json"), &broken).is_err());
+        assert!(!at("broken.json").exists());
+
+        // A folder where the half-written file would go.
+        fs::create_dir_all(at("blocked.json.partial")).unwrap();
+        assert_eq!(
+            boards.send(&at("blocked.json"), &board).err().unwrap(),
+            format!(
+                "{} is in the way, and is not a plain file.",
+                at("blocked.json.partial").display()
+            )
+        );
+        assert!(!at("blocked.json").exists());
     }
 
     #[test]

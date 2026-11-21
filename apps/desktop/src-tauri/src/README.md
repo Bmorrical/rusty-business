@@ -4,7 +4,7 @@ The desktop app's Rust code.
 
 | File          | What it is                                                           |
 | ------------- | -------------------------------------------------------------------- |
-| `main.rs`     | The program's entry. It only calls `run`                             |
+| `main.rs`     | The program's entry. `rusty-business board` does its work in the terminal and leaves, and anything else calls `run` |
 | `lib.rs`      | Builds the Tauri app and lists every command the page may call       |
 | `gate.rs`     | The outbound gate: the switch, off until the person turns it on, and every client that reaches past this computer |
 | `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, streams a chat, and separates thinking from the answer |
@@ -18,7 +18,9 @@ The desktop app's Rust code.
 | `web.rs`      | Web search: while Settings allows it and the gate is on, a model's search goes to Brave Search's API with the person's key, kept as a path, or to DuckDuckGo's plain results page without one |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
-| `board.rs`    | Boards for the Workflow view: a copy of each board as one JSON file, your notes in a second file, and the made-up sample board. It asks nothing of the network, and nothing deletes |
+| `board.rs`    | Boards for the Workflow view: a copy of each board as one JSON file, your notes in a second file, and the made-up sample board. It also does every read and write for a board in step with a file. It asks nothing of the network, and nothing deletes |
+| `sync.rs`     | What two copies of a board come to: what each side changed since the last sync, and the conflicts. It only compares, and touches no file |
+| `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -157,9 +159,9 @@ Six more live in `board.rs`, each with tests:
 
 - It asks nothing of the network, so it needs no gate: the Workflow view
   reads a board with both gates off.
-- No command takes a path. A board is asked for by its id, which is
-  letters, digits, and hyphens, and a file's name gives its board's id,
-  whatever the file says inside.
+- No command the page can call takes a path. A board is asked for by its
+  id, which is letters, digits, and hyphens, and a file's name gives its
+  board's id, whatever the file says inside.
 - A new copy of a board replaces the copy alone. Your notes live in a
   second file that a new copy never touches, and a note on a story that
   has left the board is kept.
@@ -169,6 +171,21 @@ Six more live in `board.rs`, each with tests:
   is: one that breaks the format, is larger than 4 MB, or is a link.
 - On a Mac and on Linux, the boards folder and its files are readable by
   this computer's user only.
+
+Five more keep a board in step with a file, across `board.rs`, `sync.rs`,
+and `cli.rs`, each with tests:
+
+- The file's path comes from the person at the terminal, never from the
+  page. `cli.rs` and `sync.rs` hold no Tauri command, and neither touches a
+  file: every read and write is the store's, in `board.rs`.
+- The file is read as any board file is: a plain file of at most 4 MB,
+  never a link, checked against board v1.
+- A pull never writes the file, and a push never writes the copy here. A
+  push makes a new file or replaces a file of the same board, and leaves
+  any other file as it is.
+- With conflicts and no side picked, nothing is written. With nothing to
+  compare against, nothing is taken away.
+- The program leaves from `main.rs` alone, with what the command came to.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts

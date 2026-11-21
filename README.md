@@ -526,9 +526,10 @@ next.
   answers, not the chat before them.
 - **No pictures yet.** It reads attached PDF, Word, PowerPoint, spreadsheet,
   and text files, but not images. (On the roadmap: Reading images.)
-- **The Workflow view only reads.** A board gets there as a file you put in
-  the boards folder. The app cannot pull one yet, and cannot change a story
-  or a slice. (On the roadmap: A source for boards.)
+- **The Workflow view only reads.** A board gets there as a file: imported
+  with the `board` command in a terminal, which also keeps the two in step,
+  or put in the boards folder. The view cannot change a story or a slice
+  yet. (On the roadmap: Slices you can write.)
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the

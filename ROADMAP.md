@@ -21,9 +21,10 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   board needs before work on it can start, such as a folder on this
   computer or a repository to fetch. The app reads a kit and says what is
   missing.
-- **A source for boards.** The app pulls a fresh copy of a board from a
-  source a kit names: a file on this computer, or an address reached
-  through the gates. A pull replaces the copy and leaves your notes.
+- **A source for boards.** The `board` command keeps a board in step with
+  a file on this computer. This adds a source a kit names: an address
+  reached through the gates, pulled from the Workflow view. A pull leaves
+  your notes.
 - **Slices you can write.** Add and edit a story's slices in the Workflow
   view, each with a brief small enough for a local model, a meter that
   says whether the brief fits the model's window, and a way to copy your
@@ -179,3 +180,10 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   reads only a copy kept on this computer, so it works with both gates
   off, and it keeps a note of your own on any story. A made-up sample
   board shows how one reads.
+- **A board in step with a file.** One command in a terminal,
+  `rusty-business board`, keeps a board on this computer in step with one
+  file kept somewhere else: `pull`, `push`, or `sync` for both ways.
+  Changes to different things are both kept. The same thing changed two
+  ways is a conflict: it is listed, and nothing is written until you pick
+  a side. The file is board v1, an open format, so any program that reads
+  and writes one can be the other side.

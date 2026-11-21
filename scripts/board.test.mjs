@@ -15,6 +15,18 @@
 // board stops being made up, when a rule loses its Rust test, or when the
 // READMEs, the roadmap, and SECURITY.md stop saying what the view does.
 //
+// A second ask, the same day: "we can start with a flat file", then "i also
+// like a one command option at the cli to push pull either way", "probably
+// bi-directional sync with conflict resolution", "any user can use the import
+// export and build their own backend", and "this keeps it loosely coupled".
+// So these also fail when the `board` command stops being one command the
+// program's entry runs, when the command or the merge behind it gains a way
+// past this computer, a way to delete, a way to start a program, or a file it
+// reads or writes without the store, when a path could come from the page,
+// when a pull could write the file or a push the copy here, when a conflict
+// could write anything, or when the docs stop saying how to keep a board in
+// step and how to build the other side.
+//
 // The checks read the files as text, so nothing has to be installed to run
 // them.
 
@@ -31,6 +43,13 @@ const HELPERS = 'apps/desktop/src/board.js';
 const STORE = 'apps/desktop/src-tauri/src/board.rs';
 const LIB = 'apps/desktop/src-tauri/src/lib.rs';
 const SAMPLE = 'apps/desktop/src-tauri/sample-board.json';
+const MERGE = 'apps/desktop/src-tauri/src/sync.rs';
+const COMMAND = 'apps/desktop/src-tauri/src/cli.rs';
+const ENTRY = 'apps/desktop/src-tauri/src/main.rs';
+const CONF = 'apps/desktop/src-tauri/tauri.conf.json';
+
+/** Everything the `board` command does. */
+const WORDS = ['list', 'import', 'export', 'pull', 'push', 'sync'];
 
 /** Everything the view asks of Rust. */
 const COMMANDS = ['list_boards', 'load_board', 'open_sample_board', 'save_board_note'];
@@ -74,17 +93,58 @@ const KEPT_BY = [
   'a_board_that_breaks_the_format_is_refused_with_the_reason',
   'notes_that_cannot_be_read_are_never_written_over',
   'the_folder_and_its_files_are_the_owners_alone',
+  'a_rev_and_a_history_are_checked',
+  'two_releases_cannot_share_a_name',
+  'the_last_synced_copy_is_kept_apart_from_the_snapshot',
+  'a_boards_file_is_remembered',
+  'the_sync_files_cannot_reach_outside_the_folder',
+  'a_file_somewhere_else_is_read_as_any_board_file_is',
+  'a_link_somewhere_else_is_neither_read_nor_written_through',
+  'a_send_makes_a_new_file_or_replaces_its_own_board_and_nothing_else',
+];
+
+/** The Rust tests that keep what two copies of a board come to. */
+const MERGE_KEPT_BY = [
+  'a_side_that_changed_nothing_takes_the_other_whole',
+  'changes_to_different_things_are_both_kept',
+  'the_same_thing_changed_two_ways_is_a_conflict_settled_for_one_side',
+  'what_each_side_added_is_kept',
+  'what_one_side_removed_is_removed_unless_the_other_changed_it',
+  'a_story_moved_to_another_release_moves',
+  'notes_on_the_board_are_added_to_and_taken_from_by_both_sides',
+  'the_side_that_moved_things_sets_the_order',
+  'with_nothing_to_compare_against_nothing_is_taken_away',
+  'a_release_goes_with_its_stories_and_stays_while_one_remains',
+  'a_file_comes_from_a_copy_when_the_copy_is_in_its_history',
+  'a_stamped_board_names_its_state_and_lists_where_it_came_from',
+];
+
+/** The Rust tests that keep what the `board` command does. */
+const COMMAND_KEPT_BY = [
+  'only_the_board_command_is_taken',
+  'help_is_shown_and_a_command_that_cannot_be_read_is_refused',
+  'a_first_import_makes_this_computers_copy_and_leaves_the_file_as_it_is',
+  'one_command_pushes_and_one_pulls_and_neither_writes_the_other_side',
+  'sync_brings_together_what_each_side_changed',
+  'a_conflict_writes_nothing_until_a_side_is_picked',
+  'a_push_is_refused_while_the_file_has_changes_that_are_not_here',
+  'an_export_makes_a_new_file_and_writes_over_nothing_but_its_own_board',
+  'with_no_id_every_board_with_a_file_is_done_and_the_worst_is_left_with',
+  'list_names_each_board_and_the_file_it_has',
+  'what_the_file_took_away_is_taken_away_here_only_when_it_came_from_this_copy',
+  'a_backend_written_by_hand_stays_in_step_through_one_file',
+  'a_backend_that_changed_before_it_imported_loses_nothing',
 ];
 
 function read(file) {
   return readFileSync(path.join(REPO, file), 'utf8');
 }
 
-/** The store without its tests. */
-function code(store) {
-  const tests = store.indexOf('#[cfg(test)]');
-  assert.ok(tests >= 0, `${STORE} has no tests`);
-  return store.slice(0, tests);
+/** A Rust file without its tests. */
+function code(text, file = STORE) {
+  const tests = text.indexOf('#[cfg(test)]');
+  assert.ok(tests >= 0, `${file} has no tests`);
+  return text.slice(0, tests);
 }
 
 /** One function's text in the view. */
@@ -159,15 +219,15 @@ test('no command takes a path from the page, and an id cannot name one', () => {
     /fn valid_id\(id: &str\) -> bool \{\s+!id\.is_empty\(\) && id\.len\(\) <= 64 && id\.chars\(\)\.all\(\|c\| c\.is_ascii_alphanumeric\(\) \|\| c == '-'\)\s+\}/,
     'an id may hold more than letters, digits, and hyphens',
   );
-  // Both files of a board are found through the id check, and nowhere else.
-  for (const name of ['snapshot', 'drafts_file']) {
+  // All four files of a board are found through the id check, and nowhere else.
+  for (const name of ['snapshot', 'drafts_file', 'base_file', 'source_file']) {
     const start = store.indexOf(`fn ${name}(&self, id: &str)`);
     assert.ok(start >= 0, `${STORE} has no ${name}`);
     const body = store.slice(start, store.indexOf('\n    }', start));
     assert.ok(body.indexOf('if !valid_id(id)') >= 0, `${name} skips the id check`);
     assert.ok(body.indexOf('if !valid_id(id)') < body.indexOf('.join('), `${name} builds the path before it checks the id`);
   }
-  assert.equal(count(store, 'format!("{id}.json")'), 2, 'a board file is named somewhere the id check does not cover');
+  assert.equal(count(store, 'format!("{id}.json")'), 4, 'a board file is named somewhere the id check does not cover');
 });
 
 test('the view and the store have no way past this computer, delete nothing, and start nothing', () => {
@@ -198,7 +258,7 @@ test('a file is written beside itself, then moved into place', () => {
 
   // The folders are the person's alone, and one write runs at a time.
   assert.match(store, /fs::create_dir_all\(&dir\)[^;]+;\s+own\(&dir, 0o700\);/, 'the boards folder is open to others');
-  for (const name of ['pull', 'note']) {
+  for (const name of ['pull', 'note', 'keep_base', 'remember']) {
     const from = store.indexOf(`pub fn ${name}(&self`);
     const body = store.slice(from, store.indexOf('\n    }', from));
     assert.ok(body.includes('self.writing.lock()'), `${name} does not wait its turn to write`);
@@ -227,6 +287,12 @@ test('every rule has its Rust test', () => {
   const store = read(STORE);
   for (const name of KEPT_BY) {
     assert.match(store, new RegExp(`#\\[test\\]\\s+fn ${name}\\(`), `${STORE} lost its test ${name}`);
+  }
+  for (const [file, names] of [[MERGE, MERGE_KEPT_BY], [COMMAND, COMMAND_KEPT_BY]]) {
+    const text = read(file);
+    for (const name of names) {
+      assert.match(text, new RegExp(`#\\[test\\]\\s+fn ${name}\\(`), `${file} lost its test ${name}`);
+    }
   }
 });
 
@@ -348,4 +414,164 @@ test('the READMEs, the roadmap, and SECURITY.md say what the view does', () => {
   assert.match(promises, /The Workflow view reads only the boards kept on this computer/, 'SECURITY.md does not promise the view reads the local copy alone');
   assert.match(promises, /with both\s+gates\s+off/, 'SECURITY.md does not say the view works with both gates off');
   assert.match(promises, /never\s+changes\s+(?:or\s+removes\s+)?your\s+notes/, 'SECURITY.md does not promise a new copy leaves the notes');
+});
+
+// Brad, 2026-11-20: "i also like a one command option at the cli to push pull either way".
+test('one command in a terminal does it, and the program leaves from its entry alone', () => {
+  const entry = read(ENTRY);
+  const asked = entry.indexOf('rusty_business_lib::command(std::env::args().skip(1).collect())');
+  assert.ok(asked >= 0, `${ENTRY} does not look for the board command`);
+  assert.ok(asked < entry.indexOf('rusty_business_lib::run()'), 'the app opens before the board command is looked for');
+  assert.equal(count(entry, 'std::process::exit('), 1, `${ENTRY} leaves in more than one place`);
+
+  const lib = read(LIB);
+  assert.ok(lib.includes('\nmod cli;\n') && lib.includes('\nmod sync;\n'), `${LIB} does not hold the command and the merge`);
+  assert.match(lib, /pub fn command\(args: Vec<String>\) -> Option<i32> \{\s+cli::run\(&args\)\s+\}/, `${LIB} does not hand the command its words`);
+
+  const command = code(read(COMMAND), COMMAND);
+  assert.ok(
+    command.includes('if args.first().map(String::as_str) != Some("board") {\n        return None;'),
+    'the app does not open when something other than board is asked for',
+  );
+  // It runs without the app, so it finds the app's data folder by the app's own name.
+  const identifier = JSON.parse(read(CONF)).identifier;
+  assert.ok(command.includes(`pub const IDENTIFIER: &str = "${identifier}";`), `${COMMAND} and ${CONF} name two data folders`);
+  assert.ok(command.includes('Boards::new(data.join(IDENTIFIER).join("boards"))'), 'the command reads another boards folder than the app');
+
+  for (const word of WORDS) {
+    assert.ok(command.includes(`["${word}"`), `the command does not take ${word}`);
+    assert.ok(command.includes(`\n  rusty-business board ${word}`), `the command's help does not show ${word}`);
+  }
+  assert.match(
+    command,
+    /const DONE: i32 = 0;\s+const REFUSED: i32 = 1;\s+const CONFLICTS: i32 = 2;/,
+    'the command leaves with something other than 0, 1, and 2',
+  );
+});
+
+// Brad, 2026-11-20: "this keeps it loosely coupled".
+test('the command and the merge have no way past this computer, and touch no file themselves', () => {
+  for (const file of [MERGE, COMMAND]) {
+    // The tests too: not one of them deletes, or reaches out.
+    const text = read(file);
+    for (const never of NEVER) assert.ok(!text.includes(never), `${file} holds ${never}`);
+
+    const own = code(text, file);
+    // The page cannot call either, so a path can only come from the person at the terminal.
+    assert.ok(!own.includes('tauri::'), `${file} offers the page a command`);
+    // Every read and write is the store's.
+    for (const direct of ['fs::', 'File::', 'std::env']) assert.ok(!own.includes(direct), `${file} holds ${direct}`);
+  }
+  // The merge only compares what it is handed.
+  const merge = code(read(MERGE), MERGE);
+  for (const reach of ['std::path', 'std::io', 'Boards']) assert.ok(!merge.includes(reach), `${MERGE} holds ${reach}`);
+
+  const lib = read(LIB);
+  assert.equal(count(lib, 'cli::'), 1, `${LIB} uses the command somewhere other than the program's start`);
+  assert.equal(count(lib, 'sync::'), 0, `${LIB} offers the merge to the page`);
+});
+
+// Brad, 2026-11-20: "probably bi-directional sync with conflict resolution".
+test('a pull never writes the file, a push never writes the copy here, and a conflict writes nothing', () => {
+  const command = code(read(COMMAND), COMMAND);
+  const body = (name) => {
+    const from = command.indexOf(`\nfn ${name}(`);
+    assert.ok(from >= 0, `${COMMAND} has no ${name}`);
+    return command.slice(from, command.indexOf('\n}\n', from));
+  };
+
+  const pulled = body('pulled');
+  const pushed = body('pushed');
+  assert.ok(!pulled.includes('.send('), 'a pull writes the file');
+  assert.ok(!pushed.includes('boards.pull('), 'a push writes the copy on this computer');
+  assert.equal(count(command, '.send('), 1, 'the file is written somewhere other than a push');
+  assert.equal(count(command, 'boards.pull('), 1, 'the copy here is written somewhere other than a pull');
+
+  // With conflicts and no side picked, the pull stops before its first write.
+  const stop = pulled.indexOf('if count > 0 && keep.is_none() {');
+  assert.ok(stop >= 0, 'a pull goes on past its conflicts');
+  assert.match(pulled.slice(stop), /^if count > 0 && keep\.is_none\(\) \{\s+conflicts\([^;]+;\s+return Ok\(CONFLICTS\);/, 'conflicts do not stop a pull');
+  for (const write of ['boards.pull(', 'boards.keep_base(', 'boards.remember(']) {
+    assert.ok(pulled.indexOf(write) > stop, `a pull calls ${write} before it has looked for conflicts`);
+  }
+  // The last synced copy counts only when the file came from it.
+  assert.ok(pulled.includes('.filter(|base| sync::descends(&theirs, base))'), 'a pull compares against a copy the file did not come from');
+
+  // A file is replaced only when everything in it is already here.
+  const guard = pushed.indexOf('if !base.as_ref().is_some_and(|base| sync::same(base, theirs)) {');
+  assert.ok(guard >= 0, 'a push replaces a file whose changes are not here');
+  assert.ok(guard < pushed.indexOf('boards.send('), 'a push writes before it has looked at the file');
+  assert.ok(pushed.includes('Pull first, or run sync.'), 'a refused push does not say what to do');
+
+  // Sync pushes only when the pull is done.
+  assert.match(body('both'), /if code != DONE \{\s+return code;\s+\}\s+push\(boards, id, file, out\)/, 'sync pushes after a pull that was not done');
+});
+
+// Brad, 2026-11-20: "we can start with a flat file".
+test('the file somewhere else is read and written as any board file is', () => {
+  const store = code(read(STORE));
+  const body = (name) => {
+    const from = store.indexOf(`pub fn ${name}(`);
+    assert.ok(from >= 0, `${STORE} has no ${name}`);
+    return store.slice(from, store.indexOf('\n    }', from));
+  };
+
+  const outside = body('outside');
+  assert.ok(outside.includes('!= Some("json")'), 'a file with any name is read as a board');
+  assert.ok(outside.includes('Self::parse(&Self::text(path, "Could not read the file")?)?'), 'the file skips the checks every board file gets');
+  assert.ok(outside.includes('if !valid_id(&board.id)'), 'a file may say it is a board no id can name');
+
+  const send = body('send');
+  const turn = send.indexOf('self.writing.lock()');
+  const looked = send.indexOf('Self::outside(path)?');
+  const written = send.indexOf('write(path, &text,');
+  assert.ok(turn >= 0 && looked > turn && written > looked, 'a send does not take its turn, look at the file, then write, in that order');
+  assert.ok(send.includes('Some(there) if there.id != board.id => {'), 'a send writes over a file that holds another board');
+  assert.ok(send.includes('path.with_extension("json.partial")'), 'a send does not look at where the half-written file goes');
+  assert.equal(count(store, 'write(path, &text,'), 1, 'the store writes to a typed path somewhere other than a send');
+
+  // The last synced copy and the remembered file each have their own folder.
+  assert.ok(body('keep_base').includes('let path = self.base_file(&board.id)?;'), 'the last synced copy is written somewhere else');
+  assert.ok(body('remember').includes('let path = self.source_file(id)?;'), 'the file is remembered somewhere else');
+  assert.ok(!body('keep_base').includes('self.snapshot(') && !body('remember').includes('self.snapshot('), 'the sync files write the snapshot');
+});
+
+// Brad, 2026-11-20: "any user can use the import export and build their own backend".
+test('the docs say how to keep a board in step, and how to build the other side', () => {
+  const desktop = read('apps/desktop/README.md');
+  const boards = desktop.slice(desktop.indexOf('## Boards'));
+  assert.ok(boards.includes('### A board in step with a file'), 'apps/desktop/README.md does not say how to keep a board in step');
+  for (const word of WORDS) {
+    assert.ok(boards.includes(`\nrusty-business board ${word}`), `apps/desktop/README.md does not show board ${word}`);
+  }
+  for (const piece of ['`--mine`', '`--theirs`', '`synced/<id>.json`', '`sources/<id>.json`', '"rev": ', '"history": ', '**`rev`**', '**`history`**']) {
+    assert.ok(boards.includes(piece), `apps/desktop/README.md does not name ${piece}`);
+  }
+  assert.match(boards, /leaves with 0 when it is done, 1 when it refused or failed, and 2 when\s+there are conflicts to settle/, 'apps/desktop/README.md does not say what the command leaves with');
+  assert.match(boards, /lists each conflict,[^.]+,\s+and\s+writes\s+nothing/, 'apps/desktop/README.md does not say a conflict writes nothing');
+  assert.match(boards, /Your notes stay on this computer/, 'apps/desktop/README.md does not say the notes stay');
+
+  const own = boards.slice(boards.indexOf('### A backend of your own'));
+  assert.ok(boards.includes('### A backend of your own'), 'apps/desktop/README.md does not say how to build the other side');
+  assert.match(own, /Board v1 is an open format, and the file is the whole of the join/, 'the docs do not say the file is all two sides share');
+  assert.match(own, /It needs none of this\s+app's code/, 'the docs do not say a backend needs none of this app');
+  assert.ok(own.includes('- **To export**') && own.includes('- **To import**'), 'the docs do not say what a backend does to export and to import');
+  assert.match(own, /A test in `cli\.rs` runs a backend written by hand/, 'the docs do not point at the test that runs a backend');
+
+  const rust = read('apps/desktop/src-tauri/src/README.md');
+  for (const file of ['sync.rs', 'cli.rs', 'main.rs']) {
+    assert.ok(rust.includes(`\n| \`${file}\``), `apps/desktop/src-tauri/src/README.md has no row for ${file}`);
+  }
+  assert.match(rust, /No command the page can call takes a path/, 'apps/desktop/src-tauri/src/README.md does not say where a path can come from');
+
+  const roadmap = read('ROADMAP.md');
+  const done = roadmap.slice(roadmap.indexOf('\n## Done'));
+  assert.ok(done.includes('- **A board in step with a file.**'), 'the roadmap does not list a board in step with a file as done');
+
+  const security = read('SECURITY.md');
+  const promises = security.slice(security.indexOf('These are the promises that matter most.'));
+  assert.match(promises, /The `board` command, run in a terminal, reads and writes one board file\s+at a path you type/, 'SECURITY.md does not say what the command reads and writes');
+  assert.match(promises, /The path never comes from the page/, 'SECURITY.md does not say where the path comes from');
+  assert.match(promises, /leaves any other file as it is/, 'SECURITY.md does not promise a push leaves other files');
+  assert.match(promises, /asks nothing of the network, starts no program, deletes nothing/, 'SECURITY.md does not say what the command never does');
 });
