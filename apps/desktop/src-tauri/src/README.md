@@ -183,7 +183,7 @@ and `cli.rs`, each with tests:
   page. `cli.rs` and `sync.rs` hold no Tauri command, and neither touches a
   file: every read and write is the store's, in `board.rs`.
 - The file is read as any board file is: a plain file of at most 4 MB,
-  never a link, checked against board v1.
+  never a link, checked against the board file's ruleset, `BOARD.md`.
 - A pull never writes the file, and a push never writes the copy here. A
   push makes a new file or replaces a file of the same board, and leaves
   any other file as it is.

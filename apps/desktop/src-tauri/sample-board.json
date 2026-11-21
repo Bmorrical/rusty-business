@@ -1,144 +1,225 @@
 {
-  "format": "board v1",
-  "id": "sample",
-  "name": "Sample board",
-  "pulledAt": 0,
-  "epics": [
-    {
-      "release": "1.2.0",
-      "title": "Lists that sort",
-      "detail": "A made-up release of a made-up list app, here to show how a board reads.",
-      "status": "Building",
+  "meta": {
+    "format": "board",
+    "version": "2.0",
+    "id": "sample",
+    "name": "Sample board",
+    "statuses": {
       "stories": [
         {
-          "number": 409,
-          "kind": "story",
-          "title": "Wider tap targets on a phone",
-          "detail": "Every button in a row is at least 44 points tall, so a thumb lands on the right one.",
-          "status": "On main",
-          "notes": ["Measured on the smallest phone the app supports."],
-          "slices": [
-            {
-              "id": "a",
-              "title": "Raise the row height",
-              "detail": "Goal: a row is at least 44 points tall.\nFiles: src/row.css.\nDone when: the row test measures 44 points or more.",
-              "lane": "main"
-            },
-            {
-              "id": "b",
-              "title": "Space the buttons in a row",
-              "detail": "Goal: 8 points between a row's buttons.\nFiles: src/row.css.\nDone when: no two buttons in a row touch at phone width.",
-              "lane": "main"
-            }
+          "id": "scheduled",
+          "name": "Scheduled",
+          "finished": false,
+          "moves": [
+            "ready"
           ]
         },
         {
-          "number": 412,
-          "kind": "story",
-          "title": "Sortable column headers",
-          "detail": "Click a column's header to sort the list by it, and click again to turn the order around.",
-          "status": "Building",
-          "notes": ["Numbers sort as numbers, not as text."],
-          "slices": [
-            {
-              "id": "a",
-              "title": "A sort helper for text and numbers",
-              "detail": "Goal: one function that sorts rows by a column, text by the alphabet and numbers by value.\nFiles: src/sort.js, src/sort.test.js.\nDone when: the tests pass for text, numbers, and empty cells.",
-              "lane": "main"
-            },
-            {
-              "id": "b",
-              "title": "Header buttons with an arrow",
-              "detail": "Goal: each header is a button, and the sorted one shows an arrow for its order.\nFiles: src/Header.vue.\nDone when: a click sorts, a second click turns the order around, and the arrow follows.",
-              "lane": "checked"
-            },
-            {
-              "id": "c",
-              "title": "Remember the last sort",
-              "detail": "Goal: the list opens sorted the way it was left.\nFiles: src/sort.js, src/settings.js.\nDone when: the sort is still there after the app restarts.",
-              "lane": "written"
-            },
-            {
-              "id": "d",
-              "title": "Sort from the keyboard",
-              "detail": "Goal: Enter and Space on a focused header sort by it.\nFiles: src/Header.vue.\nDone when: the keyboard test sorts with both keys.",
-              "lane": "sliced"
-            }
+          "id": "ready",
+          "name": "Ready to slice",
+          "finished": false,
+          "moves": [
+            "sliced",
+            "scheduled"
           ]
         },
         {
-          "number": 413,
-          "kind": "story",
-          "title": "An empty state for the list",
-          "detail": "A list with no rows says so, and offers the button that adds the first one.",
-          "status": "Ready to slice",
-          "notes": [],
-          "slices": []
+          "id": "sliced",
+          "name": "Sliced",
+          "finished": false,
+          "moves": [
+            "building"
+          ]
         },
         {
-          "number": 415,
-          "kind": "bug",
-          "title": "The date filter skips the last day",
-          "detail": "Filtering from the 1st to the 30th leaves out rows dated the 30th.",
-          "status": "Building",
-          "notes": ["Seen with every range: the end day is always missing."],
-          "slices": [
-            {
-              "id": "a",
-              "title": "Make the end day count",
-              "detail": "Goal: the filter keeps rows dated on the end day.\nFiles: src/filter.js, src/filter.test.js.\nDone when: a test with a row on the end day passes.",
-              "lane": "reviewed"
-            },
-            {
-              "id": "b",
-              "title": "Say the range in the filter's label",
-              "detail": "Goal: the label reads \"from the 1st through the 30th\".\nFiles: src/Filter.vue.\nDone when: the label names both days.",
-              "lane": "sliced",
-              "move": "you",
-              "notes": ["The wording needs a decision first."]
-            }
+          "id": "building",
+          "name": "Building",
+          "finished": false,
+          "moves": [
+            "on-main",
+            "sliced"
           ]
+        },
+        {
+          "id": "on-main",
+          "name": "On main",
+          "finished": true,
+          "moves": []
         }
-      ]
-    },
-    {
-      "release": "1.3.0",
-      "title": "Sharing",
-      "detail": "",
-      "status": "Scheduled",
-      "stories": [
+      ],
+      "releases": [
         {
-          "number": 420,
-          "kind": "story",
-          "title": "Print a list",
-          "detail": "A list prints on one page per 40 rows, with its title at the top of each page.",
-          "status": "Sliced",
-          "notes": [],
-          "slices": [
-            {
-              "id": "a",
-              "title": "A print layout for the list",
-              "detail": "Goal: the list prints 40 rows to a page.\nFiles: src/print.css.\nDone when: a list of 41 rows prints on two pages.",
-              "lane": "sliced"
-            },
-            {
-              "id": "b",
-              "title": "The title on every page",
-              "detail": "Goal: each printed page starts with the list's title.\nFiles: src/print.css, src/List.vue.\nDone when: both pages of a two-page list show the title.",
-              "lane": "sliced"
-            }
-          ]
+          "id": "scheduled",
+          "name": "Scheduled",
+          "finished": false
         },
         {
-          "number": 421,
-          "kind": "story",
-          "title": "Save a list as a file",
-          "detail": "A list saves as a CSV file that a spreadsheet opens.",
-          "status": "Scheduled",
-          "notes": [],
-          "slices": []
+          "id": "building",
+          "name": "Building",
+          "finished": false
+        },
+        {
+          "id": "out",
+          "name": "Out",
+          "finished": true
         }
       ]
     }
-  ]
+  },
+  "data": {
+    "releases": [
+      {
+        "release": "1.2.0",
+        "title": "Lists that sort",
+        "detail": "A made-up release of a made-up list app, here to show how a board reads.",
+        "status": "Building",
+        "statusId": "building",
+        "stories": [
+          {
+            "number": 409,
+            "kind": "story",
+            "title": "Wider tap targets on a phone",
+            "detail": "Every button in a row is at least 44 points tall, so a thumb lands on the right one.",
+            "status": "On main",
+            "statusId": "on-main",
+            "notes": [
+              "Measured on the smallest phone the app supports."
+            ],
+            "slices": [
+              {
+                "id": "a",
+                "title": "Raise the row height",
+                "detail": "Goal: a row is at least 44 points tall.\nFiles: src/row.css.\nDone when: the row test measures 44 points or more.",
+                "lane": "main"
+              },
+              {
+                "id": "b",
+                "title": "Space the buttons in a row",
+                "detail": "Goal: 8 points between a row's buttons.\nFiles: src/row.css.\nDone when: no two buttons in a row touch at phone width.",
+                "lane": "main"
+              }
+            ]
+          },
+          {
+            "number": 412,
+            "kind": "story",
+            "title": "Sortable column headers",
+            "detail": "Click a column's header to sort the list by it, and click again to turn the order around.",
+            "status": "Building",
+            "statusId": "building",
+            "notes": [
+              "Numbers sort as numbers, not as text."
+            ],
+            "slices": [
+              {
+                "id": "a",
+                "title": "A sort helper for text and numbers",
+                "detail": "Goal: one function that sorts rows by a column, text by the alphabet and numbers by value.\nFiles: src/sort.js, src/sort.test.js.\nDone when: the tests pass for text, numbers, and empty cells.",
+                "lane": "main"
+              },
+              {
+                "id": "b",
+                "title": "Header buttons with an arrow",
+                "detail": "Goal: each header is a button, and the sorted one shows an arrow for its order.\nFiles: src/Header.vue.\nDone when: a click sorts, a second click turns the order around, and the arrow follows.",
+                "lane": "checked"
+              },
+              {
+                "id": "c",
+                "title": "Remember the last sort",
+                "detail": "Goal: the list opens sorted the way it was left.\nFiles: src/sort.js, src/settings.js.\nDone when: the sort is still there after the app restarts.",
+                "lane": "written"
+              },
+              {
+                "id": "d",
+                "title": "Sort from the keyboard",
+                "detail": "Goal: Enter and Space on a focused header sort by it.\nFiles: src/Header.vue.\nDone when: the keyboard test sorts with both keys.",
+                "lane": "sliced"
+              }
+            ]
+          },
+          {
+            "number": 413,
+            "kind": "story",
+            "title": "An empty state for the list",
+            "detail": "A list with no rows says so, and offers the button that adds the first one.",
+            "status": "Ready to slice",
+            "statusId": "ready",
+            "notes": [],
+            "slices": []
+          },
+          {
+            "number": 415,
+            "kind": "bug",
+            "title": "The date filter skips the last day",
+            "detail": "Filtering from the 1st to the 30th leaves out rows dated the 30th.",
+            "status": "Building",
+            "statusId": "building",
+            "notes": [
+              "Seen with every range: the end day is always missing."
+            ],
+            "slices": [
+              {
+                "id": "a",
+                "title": "Make the end day count",
+                "detail": "Goal: the filter keeps rows dated on the end day.\nFiles: src/filter.js, src/filter.test.js.\nDone when: a test with a row on the end day passes.",
+                "lane": "reviewed"
+              },
+              {
+                "id": "b",
+                "title": "Say the range in the filter's label",
+                "detail": "Goal: the label reads \"from the 1st through the 30th\".\nFiles: src/Filter.vue.\nDone when: the label names both days.",
+                "lane": "sliced",
+                "move": "you",
+                "notes": [
+                  "The wording needs a decision first."
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "release": "1.3.0",
+        "title": "Sharing",
+        "detail": "",
+        "status": "Scheduled",
+        "statusId": "scheduled",
+        "stories": [
+          {
+            "number": 420,
+            "kind": "story",
+            "title": "Print a list",
+            "detail": "A list prints on one page per 40 rows, with its title at the top of each page.",
+            "status": "Sliced",
+            "statusId": "sliced",
+            "notes": [],
+            "slices": [
+              {
+                "id": "a",
+                "title": "A print layout for the list",
+                "detail": "Goal: the list prints 40 rows to a page.\nFiles: src/print.css.\nDone when: a list of 41 rows prints on two pages.",
+                "lane": "sliced"
+              },
+              {
+                "id": "b",
+                "title": "The title on every page",
+                "detail": "Goal: each printed page starts with the list's title.\nFiles: src/print.css, src/List.vue.\nDone when: both pages of a two-page list show the title.",
+                "lane": "sliced"
+              }
+            ]
+          },
+          {
+            "number": 421,
+            "kind": "story",
+            "title": "Save a list as a file",
+            "detail": "A list saves as a CSV file that a spreadsheet opens.",
+            "status": "Scheduled",
+            "statusId": "scheduled",
+            "notes": [],
+            "slices": []
+          }
+        ]
+      }
+    ]
+  }
 }

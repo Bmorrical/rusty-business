@@ -138,6 +138,19 @@ export function handLabel(story) {
   return `${held} of ${LANES.length} lanes`;
 }
 
+/**
+ * What the status of a story, a bug, or a release reads as. A board lists its
+ * own statuses, one list for stories and bugs and one for releases. When the
+ * row's `statusId` names a status in its list, the list's name is shown, so a
+ * status that was renamed reads the new way on every row. Otherwise the row's
+ * own `status` is shown as it is written. Neither case is an error.
+ */
+export function statusName(board, entry, list = "stories") {
+  const id = entry?.statusId;
+  const known = id ? (board?.statuses?.[list] ?? []).find((status) => status?.id === id) : null;
+  return known?.name || entry?.status || "";
+}
+
 /** "Story" or "Bug". */
 export function kindLabel(story) {
   return story?.kind === "bug" ? "Bug" : "Story";

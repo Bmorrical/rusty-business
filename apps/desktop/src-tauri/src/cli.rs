@@ -49,6 +49,11 @@ Keeps a board on this computer in step with one file kept somewhere else.
 
 With no id, pull, push, and sync do every board that has a file.
 
+No direct API connection to a board's backend, for now. The app holds no
+address, no token, and no key for one, and a change that adds one is refused.
+A board moves as a file: exported on one side, and imported on the other.
+BOARD.md, at the root of the repository, is the file's ruleset.
+
 When both sides changed the same thing, nothing is written and each conflict
 is listed. Run it again with --mine to keep what is on this computer, or with
 --theirs to keep what the file has.
@@ -291,9 +296,9 @@ fn pulled(
 
     // This computer's copy first, then the state the two sides now agree on,
     // then where the file is. A copy that already holds it all is left alone.
-    let changed = mine
-        .as_ref()
-        .is_none_or(|mine| !sync::same(mine, &merged.board));
+    let changed = mine.as_ref().is_none_or(|mine| {
+        mine.level() != merged.board.level() || !sync::same(mine, &merged.board)
+    });
     if changed {
         boards.pull(merged.board)?;
     }
@@ -392,7 +397,7 @@ fn pushed(boards: &Boards, id: &str, file: &Path, out: &mut dyn Write) -> Result
         None => base.as_ref(),
     };
     let rev = uuid::Uuid::new_v4().simple().to_string();
-    let sent = sync::stamped(mine, from, rev);
+    let sent = sync::stamped(mine, from, rev).signed();
     boards.send(file, &sent)?;
     boards.keep_base(&sent)?;
     boards.remember(id, file)?;
@@ -463,7 +468,7 @@ mod tests {
     }
 
     fn road() -> Board {
-        serde_json::from_str(ROAD).unwrap()
+        Boards::parse(ROAD).unwrap()
     }
 
     fn named(id: &str, name: &str) -> Board {
@@ -483,11 +488,11 @@ mod tests {
     }
 
     fn put(file: &Path, board: &Board) {
-        fs::write(file, serde_json::to_string_pretty(board).unwrap()).unwrap();
+        fs::write(file, Boards::written(board).unwrap()).unwrap();
     }
 
     fn held(file: &Path) -> Board {
-        serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap()
+        Boards::parse(&fs::read_to_string(file).unwrap()).unwrap()
     }
 
     /// A change made in the file by whoever keeps it, with no new rev.
@@ -889,7 +894,7 @@ mod tests {
         other.epics[0].stories[0].title = "Dig a pond".to_string();
         put(&older, &other);
         for (path, why) in [
-            (&list, "garden: This is not a \"board v1\" file.\n"),
+            (&list, "garden: This is not a board file.\n"),
             (
                 &orchard,
                 "holds another board, orchard. It was left as it is.\n",
@@ -1140,7 +1145,7 @@ mod tests {
         }
 
         fn board(&self) -> Board {
-            serde_json::from_value(self.board.clone()).unwrap()
+            Boards::parse(&self.board.to_string()).unwrap()
         }
     }
 
@@ -1261,5 +1266,271 @@ mod tests {
             title(&backend.board(), 1).unwrap(),
             "Dig the first two beds"
         );
+    }
+
+    /// A made-up board on line 2 of the format, as a backend a step ahead of
+    /// this app would write it: every key this app does not know is one of
+    /// that backend's own.
+    const ORCHARD: &str = r#"{
+      "meta": {
+        "format": "board",
+        "version": "2.3",
+        "id": "orchard",
+        "name": "Orchard list",
+        "writtenBy": "a backend of your own 1.0",
+        "writtenAt": "2026-03-01T08:00:00Z",
+        "rev": "o-1",
+        "history": [],
+        "owner": "the allotment",
+        "statuses": {
+          "stories": [
+            { "id": "todo", "name": "To do", "finished": false, "moves": ["doing"], "colour": "grey" },
+            { "id": "doing", "name": "Doing", "finished": false },
+            { "id": "done", "name": "Done", "finished": true, "moves": [] }
+          ],
+          "releases": [{ "id": "open", "name": "Open", "finished": false }],
+          "since": "spring"
+        }
+      },
+      "data": {
+        "seasons": 2,
+        "releases": [
+          {
+            "release": "Autumn",
+            "title": "Apples",
+            "detail": "",
+            "status": "Open",
+            "statusId": "open",
+            "crew": 3,
+            "stories": [
+              {
+                "number": 7,
+                "kind": "story",
+                "title": "Pick the early row",
+                "detail": "",
+                "status": "To do",
+                "statusId": "todo",
+                "move": "you",
+                "notes": [],
+                "points": 5,
+                "slices": [
+                  {
+                    "id": "a",
+                    "number": 41,
+                    "title": "Set the ladders",
+                    "detail": "",
+                    "lane": "sliced",
+                    "move": "you",
+                    "notes": [],
+                    "files": ["ladders.md"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "tool": "written by hand"
+    }"#;
+
+    fn raw(file: &Path) -> Value {
+        serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap()
+    }
+
+    // "direct API connections are refused as rule for now, use the import /
+    // export to help enforce the offline / LAN model."
+    #[test]
+    fn the_help_says_a_board_moves_as_a_file_and_never_over_an_api() {
+        let said = HELP.split_whitespace().collect::<Vec<_>>().join(" ");
+        for line in [
+            "No direct API connection to a board's backend, for now.",
+            "The app holds no address, no token, and no key for one, and a change that adds one is refused.",
+            "A board moves as a file: exported on one side, and imported on the other.",
+            "BOARD.md, at the root of the repository, is the file's ruleset.",
+        ] {
+            assert!(said.contains(line), "{line}");
+        }
+        // Nothing the command takes is an address.
+        for word in ["http", "://", "--url", "--token", "--key", "--host"] {
+            assert!(!HELP.contains(word), "{word}");
+        }
+    }
+
+    // A backend still on board v1 reads back what this app writes.
+    #[test]
+    fn a_board_v1_file_goes_back_out_as_board_v1() {
+        let (boards, shared) = scratch();
+        let file = shared.join("garden.json");
+        let at = file.to_str().unwrap();
+        let mut backend = Backend::new();
+        backend.export(&file);
+        assert_eq!(raw(&file)["format"], "board v1");
+        assert_eq!(board(&boards, &["import", at]).0, DONE);
+        assert_eq!(here(&boards, "garden").level(), Some((1, 0)));
+
+        change(&boards, "garden", |board| {
+            board.epics[0].stories[0].slices[1].lane = "written".to_string();
+        });
+        assert_eq!(board(&boards, &["sync"]).0, DONE);
+        let sent = raw(&file);
+        assert_eq!(sent["format"], "board v1");
+        assert_eq!(
+            sent["epics"][0]["stories"][0]["slices"][1]["lane"],
+            "written"
+        );
+        assert_eq!(sent["history"], json!(["backend-1"]));
+        for key in [
+            "meta",
+            "data",
+            "version",
+            "writtenBy",
+            "writtenAt",
+            "statuses",
+        ] {
+            assert!(sent.get(key).is_none(), "{key}");
+        }
+        assert_eq!(backend.import(&file), "taken");
+        assert_eq!(here(&boards, "garden").level(), Some((1, 0)));
+    }
+
+    // "so someone doesn't have to remap when the next party wants to iterate
+    // it's logic ahead."
+    #[test]
+    fn a_file_a_step_ahead_comes_back_with_everything_this_app_does_not_know() {
+        let (boards, shared) = scratch();
+        let file = shared.join("orchard.json");
+        let at = file.to_str().unwrap();
+        fs::write(&file, ORCHARD).unwrap();
+        let first = raw(&file);
+        assert_eq!(board(&boards, &["import", at]).0, DONE);
+        assert_eq!(here(&boards, "orchard").level(), Some((2, 3)));
+
+        change(&boards, "orchard", |board| {
+            board.epics[0].stories[0].slices[0].lane = "written".to_string();
+        });
+        assert_eq!(board(&boards, &["sync"]).0, DONE);
+        let sent = raw(&file);
+
+        // The file says this app wrote it, and when. Nothing decides by it.
+        let meta = &sent["meta"];
+        assert_eq!(
+            meta["writtenBy"],
+            format!("rusty-business {}", env!("CARGO_PKG_VERSION"))
+        );
+        let when = meta["writtenAt"].as_str().unwrap();
+        assert!(when.len() == 20 && when.ends_with('Z'), "{when}");
+        assert_ne!(when, "2026-03-01T08:00:00Z");
+        assert_ne!(meta["rev"], "o-1");
+        assert_eq!(meta["history"], json!(["o-1"]));
+
+        // Apart from that and the one lane, it is the file that came in:
+        // its version, its statuses, and every key that is the backend's own.
+        let mut expected = first;
+        expected["data"]["releases"][0]["stories"][0]["slices"][0]["lane"] = json!("written");
+        for key in ["writtenBy", "writtenAt", "rev", "history"] {
+            expected["meta"][key] = meta[key].clone();
+        }
+        assert_eq!(sent, expected);
+        assert_eq!(meta["version"], "2.3");
+        assert_eq!(meta["statuses"]["stories"][0]["colour"], "grey");
+    }
+
+    #[test]
+    fn a_file_on_a_newer_line_moves_this_computers_copy_up_and_never_back() {
+        let (boards, file, _) = imported();
+        assert_eq!(here(&boards, "garden").level(), Some((1, 0)));
+
+        // The backend moves to line 2, and says what its statuses are.
+        let mut newer = held(&file);
+        newer.format = crate::board::FORMAT.to_string();
+        newer.version = "2.0".to_string();
+        newer.statuses.stories = vec![crate::board::Status {
+            id: "building".to_string(),
+            name: "Building".to_string(),
+            ..Default::default()
+        }];
+        newer.epics[0].stories[0].status_id = "building".to_string();
+        put(&file, &newer);
+        let (code, said) = board(&boards, &["pull"]);
+        assert_eq!(code, DONE, "{said}");
+        assert!(said.contains("now holds the changes"), "{said}");
+        let copy = here(&boards, "garden");
+        assert_eq!(copy.level(), Some((2, 0)));
+        assert_eq!(copy.statuses, newer.statuses);
+        assert_eq!(copy.epics[0].stories[0].status_id, "building");
+
+        // A step ahead on the same line is taken too, with nothing else new.
+        edit(&file, |board| board.version = "2.7".to_string());
+        let (code, said) = board(&boards, &["pull"]);
+        assert_eq!(code, DONE, "{said}");
+        assert_eq!(here(&boards, "garden").level(), Some((2, 7)));
+
+        // A file from a step behind, or from line 1, takes nothing away, and
+        // this copy stays where it is.
+        edit(&file, |board| board.version = "2.0".to_string());
+        let (code, said) = board(&boards, &["pull"]);
+        assert_eq!((code, said.contains("nothing new")), (DONE, true), "{said}");
+        assert_eq!(here(&boards, "garden").level(), Some((2, 7)));
+
+        let mut older = road();
+        older.epics[1].title = "Water and shade".to_string();
+        put(&file, &older);
+        assert_eq!(raw(&file)["format"], "board v1");
+        let (code, said) = board(&boards, &["pull"]);
+        assert_eq!(code, DONE, "{said}");
+        let copy = here(&boards, "garden");
+        assert_eq!(copy.level(), Some((2, 7)));
+        assert_eq!(copy.epics[1].title, "Water and shade");
+        assert_eq!(copy.statuses, newer.statuses);
+        assert_eq!(copy.epics[0].stories[0].status_id, "building");
+
+        // What this app then writes is on the copy's line, not the file's.
+        change(&boards, "garden", |board| {
+            board.epics[0].title = "Beds, paths, and a gate".to_string();
+        });
+        assert_eq!(board(&boards, &["push"]).0, DONE);
+        let sent = raw(&file);
+        assert_eq!(sent["meta"]["format"], "board");
+        assert_eq!(sent["meta"]["version"], "2.7");
+        assert_eq!(
+            sent["data"]["releases"][0]["title"],
+            "Beds, paths, and a gate"
+        );
+    }
+
+    #[test]
+    fn a_file_on_a_line_above_this_apps_is_refused_and_nothing_is_changed() {
+        let (boards, shared) = scratch();
+        let file = shared.join("orchard.json");
+        let at = file.to_str().unwrap();
+        fs::write(&file, ORCHARD).unwrap();
+        assert_eq!(board(&boards, &["import", at]).0, DONE);
+        let copy = copy_of(&file, "orchard");
+        let kept = fs::read(&copy).unwrap();
+        change(&boards, "orchard", |board| {
+            board.epics[0].title = "Apples and pears".to_string();
+        });
+        let mine = fs::read(&copy).unwrap();
+        assert_ne!(mine, kept);
+
+        let ahead = ORCHARD.replace("\"version\": \"2.3\"", "\"version\": \"3.0\"");
+        assert_ne!(ahead, ORCHARD);
+        fs::write(&file, &ahead).unwrap();
+        let why = "orchard: This board file is on line 3 of the format, and this app reads lines 1 and 2. Nothing was changed.\n";
+        for words in [&["pull"][..], &["push"], &["sync"], &["sync", "--mine"]] {
+            let (code, said) = board(&boards, words);
+            assert_eq!((code, said.as_str()), (REFUSED, why), "{words:?}");
+            assert_eq!(fs::read(&copy).unwrap(), mine, "{words:?}");
+            assert_eq!(fs::read_to_string(&file).unwrap(), ahead, "{words:?}");
+        }
+
+        // A first import of one is refused the same way, and makes no copy.
+        let (boards, shared) = scratch();
+        let file = shared.join("orchard.json");
+        fs::write(&file, &ahead).unwrap();
+        let (code, said) = board(&boards, &["import", file.to_str().unwrap()]);
+        assert_eq!(code, REFUSED, "{said}");
+        assert!(said.contains("is on line 3 of the format"), "{said}");
+        assert!(boards.local("orchard").unwrap().is_none());
     }
 }

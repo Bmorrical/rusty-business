@@ -545,6 +545,13 @@ next.
   with the `board` command in a terminal, which also keeps the two in step,
   or put in the boards folder. The view cannot change a story or a slice
   yet. (On the roadmap: Slices you can write.)
+- **A board moves as a file.** [BOARD.md](BOARD.md) is the file's ruleset:
+  what it holds, each rule, and why, so anyone can bring in a road of their
+  own and build the other side. No direct API connection to a board's
+  backend, for now. The app holds no address, no token, and no key for one,
+  and a change that adds one is refused. A board moves as a file: exported
+  on one side, and imported on the other. That keeps the app offline first,
+  and at most LAN.
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the

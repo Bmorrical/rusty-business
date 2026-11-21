@@ -297,43 +297,69 @@ file is named `<id>.json`, and its name is the board's id: up to 64 letters,
 digits, and hyphens. The view lists every board in the folder. A file it
 cannot read is listed with what is wrong, and left as it is.
 
+The file's ruleset is [BOARD.md](../../BOARD.md), at the root of the
+repository: what the file holds, each rule, and why the rule is there. In
+short:
+
 ```json
 {
-  "format": "board v1",
-  "id": "list-app",
-  "name": "A list app",
-  "rev": "export-12",
-  "history": ["export-11", "export-10"],
-  "epics": [
-    {
-      "release": "1.2.0",
-      "title": "Lists that sort",
-      "detail": "",
-      "status": "Building",
+  "meta": {
+    "format": "board",
+    "version": "2.0",
+    "id": "list-app",
+    "name": "A list app",
+    "rev": "export-12",
+    "history": ["export-11", "export-10"],
+    "statuses": {
       "stories": [
-        {
-          "number": 412,
-          "kind": "story",
-          "title": "Sortable column headers",
-          "detail": "Click a column's header to sort the list by it.",
-          "status": "Building",
-          "notes": ["Numbers sort as numbers, not as text."],
-          "slices": [
-            {
-              "id": "a",
-              "title": "A sort helper for text and numbers",
-              "detail": "Goal: one function that sorts rows by a column.",
-              "lane": "written"
-            }
-          ]
-        }
+        { "id": "building", "name": "Building", "finished": false },
+        { "id": "done", "name": "Done", "finished": true }
       ]
     }
-  ]
+  },
+  "data": {
+    "releases": [
+      {
+        "release": "1.2.0",
+        "title": "Lists that sort",
+        "detail": "",
+        "status": "Building",
+        "stories": [
+          {
+            "number": 412,
+            "kind": "story",
+            "title": "Sortable column headers",
+            "detail": "Click a column's header to sort the list by it.",
+            "status": "Building",
+            "statusId": "building",
+            "notes": ["Numbers sort as numbers, not as text."],
+            "slices": [
+              {
+                "id": "a",
+                "title": "A sort helper for text and numbers",
+                "detail": "Goal: one function that sorts rows by a column.",
+                "lane": "written"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
-- **`format`** is `board v1`. A file that says anything else is not read.
+- **`meta`** says what the file is, and **`data`** is the board.
+- **`format`** is `board`, and **`version`** is the ruleset's version the
+  file follows, as a line and a step: `2.0`. Within a line a file only
+  gains, so the app reads every step of lines 1 and 2, keeps a key it does
+  not know, and writes it back. A file on a line above 2 is not read. A
+  board v1 file, the format before this one, is line 1 and is still read.
+- **`statuses`** are the board's own: a list for stories and bugs, and one
+  for releases. Each status has an `id` that never changes, a `name`, and
+  whether it is `finished`. A row's **`statusId`** names one. The app shows
+  that status's name, and the row's `status` as written when the id is not
+  on the list.
 - **`id`**, on the board, says which board a file kept somewhere else is.
   In the boards folder, the file's name says it.
 - **`rev`** names the state a file holds, and **`history`** lists the
@@ -425,7 +451,8 @@ What it does not do yet:
 - Your notes stay on this computer. They are never written to the file.
 - The Workflow view cannot change a board yet, so the copy here changes
   only when a pull brings something in, or when you edit its file.
-- What board v1 does not name is left out when a board is written.
+- The view does not show a key the app does not know. The key is kept, and
+  written back.
 - When both sides moved stories or slices, the order on the side that is
   kept stands, and no conflict is listed for it.
 - The command reaches no network. The file is a path on this computer,
@@ -437,10 +464,16 @@ What it does not do yet:
 
 ### A backend of your own
 
-Board v1 is an open format, and the file is the whole of the join. Any
-program that can read and write one can be the other side: a script, an
-export from a tracker, or a server of your own. It needs none of this
+The board file is an open format, and the file is the whole of the join.
+Any program that can read and write one can be the other side: a script,
+an export from a tracker, or a server of your own. It needs none of this
 app's code, and this app does not need to know what it is.
+[BOARD.md](../../BOARD.md) is the file's ruleset.
+
+**No direct API connection to a board's backend, for now.** The app holds no
+address, no token, and no key for one, and a change that adds one is
+refused. A board moves as a file: exported on one side, and imported on the
+other. BOARD.md says why.
 
 A backend keeps the `rev` and `history` of the last file it exported or
 imported, and whether its board changed since.
@@ -465,6 +498,10 @@ it next exports, nothing here can say what each side changed, so nothing
 is taken away, and every difference is listed as a conflict to settle for
 one side. A backend that also keeps the last file's content can do its own
 merge by the rules above, and avoid that.
+
+BOARD.md has the rest of what a backend may do: apply part of a file and
+list what it did not, leave an over-long text out of an export, and keep
+rows of its own out of a file.
 
 A test in `cli.rs` runs a backend written by hand, this way, through each
 of these cases.

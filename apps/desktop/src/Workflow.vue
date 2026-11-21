@@ -29,6 +29,7 @@ import {
   sliceSteps,
   startSlice,
   startStory,
+  statusName,
   storyLine,
   storyMove,
 } from "./board.js";
@@ -329,7 +330,9 @@ onBeforeUnmount(() => {
           <h3>
             <span class="label">{{ row.epic.release }}</span>
             <span class="wf-release-title">{{ row.epic.title }}</span>
-            <span v-if="row.epic.status" class="quiet small">{{ row.epic.status }}</span>
+            <span v-if="statusName(board, row.epic, 'releases')" class="quiet small">{{
+              statusName(board, row.epic, "releases")
+            }}</span>
           </h3>
           <ul>
             <li v-for="entry in row.stories" :key="entry.story.number">
@@ -379,7 +382,8 @@ onBeforeUnmount(() => {
         <article v-if="story || orphan" ref="storyPane" class="wf-pane" aria-labelledby="wf-story-title">
           <template v-if="story">
             <p class="label">
-              {{ kindLabel(story) }} #{{ story.number }}<template v-if="story.status"> · {{ story.status }}</template>
+              {{ kindLabel(story) }} #{{ story.number
+              }}<template v-if="statusName(board, story)"> · {{ statusName(board, story) }}</template>
             </p>
             <h3 id="wf-story-title" tabindex="-1">{{ story.title }}</h3>
             <p v-if="story.detail" class="wf-detail">{{ story.detail }}</p>
@@ -467,7 +471,10 @@ onBeforeUnmount(() => {
 
         <aside v-if="story" ref="slicePane" class="wf-pane wf-open" aria-labelledby="wf-slice-title">
           <template v-if="slice">
-            <p class="label">Slice {{ slice.id }} of #{{ story.number }}</p>
+            <p class="label">
+              Slice {{ slice.id }} of #{{ story.number
+              }}<template v-if="slice.number"> · number {{ slice.number }}</template>
+            </p>
             <h3 id="wf-slice-title" tabindex="-1">{{ slice.title }}</h3>
             <p class="wf-line" :class="{ yours: sliceMove(slice) === 'you' }">
               {{ moveLabel(sliceMove(slice))
