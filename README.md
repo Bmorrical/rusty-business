@@ -18,7 +18,8 @@
 [Build it from source](#build-it-from-source) ·
 [Run it from localhost](#run-it-from-localhost) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
-[Roadmap](#roadmap) · [Security](#security) · [License](#license)
+[Release notes](#release-notes) · [Roadmap](#roadmap) ·
+[Security](#security) · [License](#license)
 
 **Three ways to install it:**
 
@@ -40,12 +41,14 @@ a private-network llama-server you configure. Turn on the LAN gate to use
 that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
 Gemini with your own keys.
 
-**Status:** version 0.8.1, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.3, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux). The Mac and
 Linux apps carry their model engine; the Windows installer starts llama.cpp's
 `llama-server` once it is installed. What it cannot do yet is under [Limits](#limits).
+
+**What changed in each version** is under [Release notes](#release-notes).
 
 ## Screenshots
 
@@ -104,7 +107,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   for Claude, and Google's for Gemini, over https and to
   nowhere else, with that key. When one grades, the question and every
   answer go too, those from this computer included. Each key stays in its
-  file and never reaches the page. There is no account and no sign-in. Ollama keeps your prompts on
+  file and never reaches the page. The fifth is web search, off until you
+  switch it on in Settings: the words a model searches for go to DuckDuckGo,
+  or to Brave Search with your own key, over https and to nowhere else.
+  There is no account and no sign-in. Ollama keeps your prompts on
   your computer too when a model runs there. It also offers models that run
   in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
@@ -205,7 +211,8 @@ own section: [Mac](#run-the-chat-window-macos),
 [Linux](#run-the-chat-window-linux). None is signed yet, so a Mac or a
 Windows computer warns once before it opens one. Each file's checksum is
 beside it on the
-[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest),
+and what changed in it is under [Release notes](#release-notes).
 
 ## Run the chat window (macOS)
 
@@ -257,6 +264,12 @@ grade, or No grading. A grade by Grok, GPT, Claude, or Gemini sends its maker th
 question and every answer, so a grade by a model on this computer keeps it all
 here.
 
+In Settings, Web lets a model search the web while it answers, such as for a
+plumber near you. It is off to start, and it works with one model asked at a
+time, while the WAN gate is on. The model writes the search, and only its
+words go: to DuckDuckGo, or to Brave Search when you give the path to a file
+that holds your own Brave key. That key goes only to Brave.
+
 The Installers page, at the foot of the window above Settings, lists every
 model on the app's list, whoever made it. With the WAN gate on, Install
 brings a model from Hugging Face onto this computer. For a configured
@@ -278,7 +291,10 @@ the model too.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
-and left running.
+and left running. The foot of the side says when the engine answering is one
+this window did not start. When that engine does not list a model that is on
+this computer, the app names the model and says what to do, beside the
+models a question goes to and on the model's row in Settings.
 
 When Docker is on the computer and the gate is on, the app also starts the
 stack, opening Docker Desktop first when it is not running. It pulls the API
@@ -525,10 +541,25 @@ next.
   answers, not the chat before them.
 - **No pictures yet.** It reads attached PDF, Word, PowerPoint, spreadsheet,
   and text files, but not images. (On the roadmap: Reading images.)
+- **The Workflow view only reads.** A board gets there as a file: imported
+  with the `board` command in a terminal, which also keeps the two in step,
+  or put in the boards folder. The view cannot change a story or a slice
+  yet. (On the roadmap: Slices you can write.)
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the
   chat window starts them but does not use them.
+
+## Release notes
+
+What changed in each version is in [RELEASES.md](RELEASES.md), newest first,
+back to the first release. Every version gets its note there before it is
+built.
+
+From 0.8.3 on, the same note is at the top of the version's page under
+[Releases](https://github.com/Bmorrical/rusty-business/releases), above the
+steps to install it. In the app, What changed on the notice of a new version
+opens that page.
 
 ## Roadmap
 

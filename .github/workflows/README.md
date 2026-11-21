@@ -75,6 +75,11 @@ copy installs over and holds its signature.
 | `updater` | Linux                    | Runs `scripts/updater.mjs`, which signs the `.app.tar.gz`, the `.exe`, the `.deb`, and the `.rpm` with the Tauri key and writes `latest.json`, naming each one with its signature. It builds nothing, and keeps only `latest.json` for the next job |
 | `publish` | Linux                    | Checks each signature in `latest.json` against the public key in `tauri.conf.json`, all six checksums, and that the app's three version numbers agree, then makes the release and its tag at this commit, with the steps to open the Mac app as it went out, signed or not |
 
+Each version's page opens with its note, from the version's section of
+[RELEASES.md](../../RELEASES.md), above the steps to install it. A version
+with no note there fails the gate, so nothing is built, and the release
+script stops again before it asks GitHub anything.
+
 A release that is out is never changed. When the version's tag is already
 on GitHub, the run stops, so publishing again means raising the version in
 `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, and

@@ -250,6 +250,12 @@ pub struct EngineStatus {
     /// Models on the list that are on this computer's disk, whether or not
     /// the engine is answering.
     pub on_disk: Vec<ModelInfo>,
+    /// Models on the list that are on this computer's disk and that the
+    /// engine answering does not list, so no question can be put to them.
+    pub unseen: Vec<ModelInfo>,
+    /// True when this window started the engine that answers. An engine
+    /// that was already running is used as it is, and never stopped.
+    pub ours: bool,
     /// Models the app can download, with their sizes. The page shows them
     /// only while none of the app's models is on the disk.
     pub offers: Vec<crate::downloads::Offer>,
@@ -340,6 +346,8 @@ fn first_status() -> EngineStatus {
         set_aside: Vec::new(),
         hidden: 0,
         on_disk: crate::models::on_disk(),
+        unseen: Vec::new(),
+        ours: false,
         offers: crate::downloads::offers(),
         error: None,
         start_hint: start_hint_on(std::env::consts::OS).to_string(),
@@ -357,16 +365,38 @@ fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
         .filter(|model| !status.models.contains(model))
         .collect();
     makers.keep_picked(&mut status.on_disk, |model| &model.maker);
+    makers.keep_picked(&mut status.unseen, |model| &model.maker);
     makers.keep_picked(&mut status.offers, |offer| &offer.maker);
     status
+}
+
+/// The models on the disk that the engine answering does not list. They are
+/// matched by the list's name, because an engine may give a model another id
+/// than its folder has.
+pub fn unseen(on_disk: &[ModelInfo], served: &[ModelInfo]) -> Vec<ModelInfo> {
+    on_disk
+        .iter()
+        .filter(|model| !served.iter().any(|other| other.name == model.name))
+        .cloned()
+        .collect()
+}
+
+/// True when the engine that answers is one this window started: it is on
+/// this computer, it answers, and the engine this window started is still
+/// running. One port has one listener, so that engine is the one answering.
+pub fn started_here(status: &EngineStatus, running: bool) -> bool {
+    status.reachable && !status.remote && running
 }
 
 #[tauri::command]
 pub async fn engine_status(
     makers: tauri::State<'_, Makers>,
     lan: tauri::State<'_, LanGate>,
+    starter: tauri::State<'_, crate::starter::Starter>,
 ) -> Result<EngineStatus, String> {
-    Ok(for_makers(status_at(base_url(), &lan).await, &makers))
+    let mut status = for_makers(status_at(base_url(), &lan).await, &makers);
+    status.ours = started_here(&status, starter.running());
+    Ok(status)
 }
 
 async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus {
@@ -397,14 +427,20 @@ async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus 
         fetch_model_ids(&base).await
     };
     match result {
-        Ok(ids) => {
-            status.reachable = true;
-            status.models = allowed_models(&ids);
-            status.hidden = ids.len().saturating_sub(status.models.len());
-        }
+        Ok(ids) => answered(&mut status, &ids),
         Err(error) => status.error = Some(error),
     }
     status
+}
+
+/// Fills in the report once the engine has given its list of ids: the
+/// models on the app's list, how many others it serves, and the models on
+/// the disk that it leaves out.
+fn answered(status: &mut EngineStatus, ids: &[String]) {
+    status.reachable = true;
+    status.models = allowed_models(ids);
+    status.hidden = ids.len().saturating_sub(status.models.len());
+    status.unseen = unseen(&status.on_disk, &status.models);
 }
 
 // ---------------------------------------------------------------------------
@@ -1267,6 +1303,122 @@ mod tests {
             "a model of a maker not picked is on the list, so it is not hidden"
         );
         std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    fn listed(name: &str, maker: &str, id: &str) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            maker: maker.to_string(),
+            context: 8,
+        }
+    }
+
+    #[test]
+    fn a_model_on_the_disk_that_the_engine_does_not_list_is_named() {
+        // Brad, 2026-11-20: "why can't I pick the 2 missing but installed
+        // models?  I only have 3/5 when I ask questions". An engine left
+        // running from before listed three of the five on his disk.
+        let on_disk = [
+            listed("gpt-oss 20B", "OpenAI", "a/gpt-oss-20b"),
+            listed("Phi-4", "Microsoft", "a/phi-4"),
+            listed("Nemotron 3.5 Lightning", "NVIDIA", "a/nemotron"),
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b"),
+            listed("Llama 3.1 8B", "Meta", "a/llama-3.1-8b"),
+        ];
+        let served = &on_disk[..3];
+        let names: Vec<String> = unseen(&on_disk, served)
+            .into_iter()
+            .map(|model| model.name)
+            .collect();
+        assert_eq!(names, ["Gemma 4 26B", "Llama 3.1 8B"]);
+        assert!(unseen(&on_disk, &on_disk).is_empty());
+        assert!(unseen(&[], served).is_empty());
+        assert_eq!(unseen(&on_disk, &[]).len(), 5);
+    }
+
+    #[test]
+    fn a_model_the_engine_lists_under_another_id_is_not_left_out() {
+        // The engine may give a model the path of its folder, so the match
+        // is the list's name, never the id.
+        let on_disk = [listed("Phi-4", "Microsoft", "mlx-community/phi-4-4bit")];
+        let served = [listed("Phi-4", "Microsoft", "/models/phi-4-4bit")];
+        assert!(unseen(&on_disk, &served).is_empty());
+    }
+
+    #[test]
+    fn only_a_picked_makers_model_is_reported_as_left_out() {
+        let folder =
+            std::env::temp_dir().join(format!("rusty-engine-unseen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let makers = Makers::new(folder.join("makers"), &[]);
+        makers.set(&["Google".to_string()]).unwrap();
+        let mut status = first_status();
+        status.models = Vec::new();
+        status.on_disk = Vec::new();
+        status.unseen = vec![
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b"),
+            listed("Llama 3.1 8B", "Meta", "a/llama-3.1-8b"),
+        ];
+        let shown = for_makers(status, &makers);
+        let names: Vec<&str> = shown
+            .unseen
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect();
+        assert_eq!(names, ["Gemma 4 26B"]);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn an_engine_is_this_windows_only_when_this_window_started_the_one_answering() {
+        let mut status = first_status();
+        status.reachable = true;
+        status.remote = false;
+        assert!(started_here(&status, true));
+        assert!(
+            !started_here(&status, false),
+            "an engine that was already answering is not this window's"
+        );
+        status.remote = true;
+        assert!(
+            !started_here(&status, true),
+            "a LAN server is never this window's"
+        );
+        status.remote = false;
+        status.reachable = false;
+        assert!(
+            !started_here(&status, true),
+            "nothing answers yet, so nothing is claimed"
+        );
+    }
+
+    #[test]
+    fn the_engines_answer_is_set_against_the_disk() {
+        // The engine's list is read first, then the disk's models it does
+        // not hold are worked out from it, in the one report the page gets.
+        let mut status = first_status();
+        status.on_disk = vec![
+            listed("Phi-4", "Microsoft", "a/phi-4"),
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b-a4b"),
+        ];
+        let ids = ["b/phi-4-4bit".to_string(), "b/another-model".to_string()];
+        answered(&mut status, &ids);
+        assert!(status.reachable);
+        assert_eq!(status.models.len(), 1);
+        assert_eq!(status.hidden, 1);
+        let names: Vec<&str> = status.unseen.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Gemma 4 26B"]);
+    }
+
+    #[test]
+    fn the_page_is_told_which_models_are_left_out_and_whose_engine_it_is() {
+        let mut status = first_status();
+        status.unseen = vec![listed("Phi-4", "Microsoft", "a/phi-4")];
+        status.ours = true;
+        let told = serde_json::to_value(&status).unwrap();
+        assert_eq!(told["unseen"][0]["name"], "Phi-4");
+        assert_eq!(told["ours"], true);
     }
 
     #[test]

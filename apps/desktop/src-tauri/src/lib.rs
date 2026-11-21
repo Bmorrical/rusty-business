@@ -1,4 +1,6 @@
 mod attachments;
+mod board;
+mod cli;
 mod deactivated;
 mod downloads;
 mod engine;
@@ -11,12 +13,19 @@ mod remote;
 mod sessions;
 mod stack;
 mod starter;
+mod sync;
 mod uninstall;
 mod update;
 mod web;
 mod workspace;
 
 use tauri::Manager;
+
+/// The `board` command, for a terminal. It gives back what to leave with, or
+/// `None` when the app was started the usual way and its window should open.
+pub fn command(args: Vec<String>) -> Option<i32> {
+    cli::run(&args)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -76,6 +85,8 @@ pub fn run() {
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             // Web search: the path to a Brave key, never the key.
             app.manage(web::Web::new(data.join("web.json")));
+            // Boards: the local copies the Workflow view reads, and the notes on them.
+            app.manage(board::Boards::new(data.join("boards")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -91,6 +102,10 @@ pub fn run() {
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,
+            board::list_boards,
+            board::load_board,
+            board::open_sample_board,
+            board::save_board_note,
             sessions::list_sessions,
             sessions::load_session,
             sessions::save_session,
