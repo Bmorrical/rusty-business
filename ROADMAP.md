@@ -92,8 +92,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 - **Downloads for Linux.** A `.deb`, an `.rpm`, and a `.tar.gz`, linked
   from the README beside the Mac's `.dmg` and the Windows `.exe`: download,
   install, and go. The Release workflow builds them on Ubuntu with
-  `scripts/linux-app.sh`, after a green gate. Until Linux has an engine, the
-  window opens and says so.
+  `scripts/linux-app.sh`, after a green gate.
 - **A notice of each new version.** When a new version is released, the
   window says so, and Download opens this system's file in the browser: the
   `.dmg`, the `.exe`, or the Linux file this copy came from. The app asks
@@ -176,6 +175,12 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   signature matches the key built into the app, and opens the new version.
   The Release workflow signs each of those files and writes `latest.json`.
   A copy unpacked from the `.tar.gz` updates by download.
+- **Web search.** A model asked alone can look something up on the web
+  while it answers, once you switch it on in Settings, where it starts
+  off. The model writes the search, and its words go out through the
+  outbound gate, over https, to DuckDuckGo, or to Brave Search when you
+  give the path to a file that holds your own key. The model reads at most
+  8 results, as plain text.
 - **The Workflow view.** A board is a road of releases, the stories and
   bugs under each, and the slices each story is cut into. The view shows
   one, with the five lanes a slice goes through, Sliced, Written, Checked,

@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -53,6 +53,10 @@ pub const HISTORY_LIMIT: usize = 50;
 /// The made-up board the app carries, so the view has something to show
 /// before a board of the person's own arrives.
 const SAMPLE: &str = include_str!("../sample-board.json");
+
+/// What a note says when one more would take the notes past the size cap.
+const NOTES_FULL: &str =
+    "Your notes for this board would be larger than 4 MB. Shorten or clear one, then save again.";
 
 fn story() -> String {
     "story".to_string()
@@ -274,11 +278,16 @@ fn own(path: &Path, mode: u32) {
 }
 
 /// Writes beside the file, then moves it into place, so a write that stops
-/// halfway leaves the old file whole.
+/// halfway leaves the old file whole. The new file is the owner's alone
+/// before a word goes into it, and it is on the disk before the move, so a
+/// power cut cannot leave an empty file under the board's name.
 fn write(path: &Path, text: &str, what: &str) -> Result<(), String> {
     let partial = path.with_extension("json.partial");
-    fs::write(&partial, text).map_err(failed(what))?;
+    let mut file = fs::File::create(&partial).map_err(failed(what))?;
     own(&partial, 0o600);
+    file.write_all(text.as_bytes()).map_err(failed(what))?;
+    file.sync_all().map_err(failed(what))?;
+    drop(file);
     fs::rename(&partial, path).map_err(failed(what))
 }
 
@@ -759,15 +768,24 @@ impl Boards {
         }
         let json = serde_json::to_string_pretty(&drafts)
             .map_err(|_| "Could not write the note.".to_string())?;
+        // The notes are read back under the same cap, so a file past it
+        // would lock every note on the board.
+        if json.len() as u64 > SIZE_LIMIT {
+            return Err(NOTES_FULL.to_string());
+        }
         write(&path, &json, "Could not save the note")?;
         Ok(drafts)
     }
 
-    /// Puts the made-up sample board in the folder, as a pull would, and
-    /// opens it.
+    /// Opens the made-up sample board. The first time, it is put in the
+    /// folder as a pull would. A file already under the sample's name is
+    /// opened as it is, or its problem is said: it is never written over.
     pub fn sample(&self) -> Result<Local, String> {
         let board: Board = serde_json::from_str(SAMPLE)
             .map_err(|_| "Could not read the sample board.".to_string())?;
+        if Self::found(&self.snapshot(&board.id)?) {
+            return self.load(&board.id);
+        }
         let board = self.pull(board)?;
         let drafts = self.read_drafts(&board.id)?;
         Ok(Local { board, drafts })
@@ -852,6 +870,48 @@ mod tests {
     }
 
     #[test]
+    fn the_sample_never_writes_over_a_board_already_there() {
+        let (boards, dir) = scratch();
+        // The first time, the sample is put in the folder.
+        let first = boards.sample().unwrap();
+        assert_eq!(first.board.name, "Sample board");
+        assert!(first.board.pulled_at > 0);
+
+        // A board of the person's own under the sample's name, with a note.
+        let mut mine = sample();
+        mine.name = "My own board".to_string();
+        first_story(&mut mine).title = "Mine, not the sample's".to_string();
+        boards.pull(mine).unwrap();
+        boards.note("sample", 412, "Keep this.").unwrap();
+        let file = dir.join("boards").join("sample.json");
+        let before = fs::read(&file).unwrap();
+
+        let opened = boards.sample().unwrap();
+        assert_eq!(opened.board.name, "My own board");
+        assert_eq!(
+            opened.board.epics[0].stories[0].title,
+            "Mine, not the sample's"
+        );
+        assert_eq!(opened.drafts.stories[&412].note, "Keep this.");
+        assert_eq!(fs::read(&file).unwrap(), before);
+    }
+
+    #[test]
+    fn a_broken_file_under_the_samples_name_is_said_and_left_as_it_is() {
+        let (boards, dir) = scratch();
+        boards.ready().unwrap();
+        let file = dir.join("boards").join("sample.json");
+        fs::write(&file, "{ half a board").unwrap();
+
+        let problem = boards.sample().map(|_| ()).unwrap_err();
+        assert!(
+            problem.starts_with("This file is not a board:"),
+            "{problem}"
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), "{ half a board");
+    }
+
+    #[test]
     fn a_pull_replaces_the_snapshot_and_keeps_the_note() {
         let (boards, _) = scratch();
         boards.pull(sample()).unwrap();
@@ -902,6 +962,54 @@ mod tests {
 
         let drafts = boards.note("sample", 412, "  \n").unwrap();
         assert!(drafts.stories.is_empty());
+    }
+
+    /// Notes, each as long as a note may be, with less room left under the
+    /// size cap than one more of them needs.
+    fn nearly_full() -> Drafts {
+        let note = || StoryDraft {
+            note: "x".repeat(NOTE_LIMIT),
+            noted_at: 1_795_000_000_000,
+        };
+        let size = |drafts: &Drafts| serde_json::to_string_pretty(drafts).unwrap().len() as u64;
+        let mut drafts = Drafts::new();
+        drafts.stories.insert(900_000_000, note());
+        let one = size(&drafts);
+        drafts.stories.insert(900_000_001, note());
+        let each = size(&drafts) - one;
+        for more in 0..(SIZE_LIMIT - size(&drafts)) / each {
+            drafts.stories.insert(900_000_002 + more, note());
+        }
+        assert!(size(&drafts) <= SIZE_LIMIT && size(&drafts) + each > SIZE_LIMIT);
+        drafts
+    }
+
+    #[test]
+    fn a_note_that_would_take_the_notes_past_the_size_cap_is_refused() {
+        let (boards, dir) = scratch();
+        boards.pull(sample()).unwrap();
+        let kept = dir.join("boards").join("drafts").join("sample.json");
+        let full = serde_json::to_string_pretty(&nearly_full()).unwrap();
+        write(&kept, &full, "Could not write the notes").unwrap();
+
+        // One more would make a file the app could not read back.
+        let long = "x".repeat(NOTE_LIMIT);
+        assert_eq!(
+            boards.note("sample", 412, &long),
+            Err(
+                "Your notes for this board would be larger than 4 MB. Shorten or clear one, then save again."
+                    .to_string()
+            )
+        );
+        assert_eq!(fs::read_to_string(&kept).unwrap(), full);
+        let local = boards.load("sample").unwrap();
+        assert!(!local.drafts.stories.contains_key(&412));
+
+        // Clearing one makes the room the message asks for.
+        boards.note("sample", 900_000_000, "").unwrap();
+        let drafts = boards.note("sample", 412, &long).unwrap();
+        assert_eq!(drafts.stories[&412].note, long);
+        assert_eq!(boards.load("sample").unwrap().drafts, drafts);
     }
 
     #[test]

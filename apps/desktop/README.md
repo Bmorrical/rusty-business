@@ -85,6 +85,13 @@ Select the picture to open it full size. The rest of the set is in
   below them, and a round not graded yet has a button to grade it. Where the
   grader wrote "Answer 2", the page adds the name of the model that wrote it.
   No grading turns it off.
+- **Web search**, off until you switch it on in Settings under Web. A model
+  asked alone can then look something up while it answers: it writes the
+  search, the app runs it, and the model reads at most 8 results as plain
+  text, with every tag taken out. A search goes out only while the gate is
+  on, over https, to DuckDuckGo's results page, or to Brave Search's API
+  when you give the path to a file that holds your own Brave key. That key
+  goes only to Brave and never reaches the page.
 - **The models on this computer**, named when the engine is not answering.
   On a Mac, the app looks in the Hugging Face cache folder, where the engine
   keeps the models it has downloaded. On Windows and Linux, it looks in the

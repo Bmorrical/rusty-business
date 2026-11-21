@@ -103,9 +103,30 @@ export function storyMove(story) {
 export function storyLine(story) {
   const slices = story?.slices ?? [];
   if (royalFlush(story)) return "A royal flush: every slice is on main.";
-  if (!slices.length) return "Your move: cut this into slices.";
+  if (!slices.length) {
+    // Slicing is yours, unless the board gives the story to someone else.
+    const move = storyMove(story);
+    return move === "you" ? "Your move: cut this into slices." : `${moveLabel(move)}. No slices yet.`;
+  }
   const onMain = slices.filter((slice) => !nextLane(slice)).length;
   return `${moveLabel(storyMove(story))}. ${onMain} of ${slices.length} ${slices.length === 1 ? "slice is" : "slices are"} on main.`;
+}
+
+/**
+ * Opens the first board on the list that opens. `load` is asked for each in
+ * turn. One that cannot be opened is passed over and named in `problem`, so
+ * one file that cannot be read never hides the boards that can.
+ */
+export async function openFirstOf(entries, load) {
+  const problems = [];
+  for (const entry of entries ?? []) {
+    try {
+      return { local: await load(entry), problem: problems.join(" ") };
+    } catch (error) {
+      problems.push(`${entry?.name || entry?.id}: ${String(error)}`);
+    }
+  }
+  return { local: null, problem: problems.join(" ") };
 }
 
 /** A story's hand in words, for someone who cannot see its five marks. */
