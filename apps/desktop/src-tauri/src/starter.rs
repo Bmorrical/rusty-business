@@ -2181,7 +2181,12 @@ mod tests {
                     .iter()
                     .map(|(name, value)| (name.to_string(), value.clone()))
                     .collect();
-                find_program("llama-server", |name| set.get(name).cloned(), Some(&home), folder)
+                find_program(
+                    "llama-server",
+                    |name| set.get(name).cloned(),
+                    Some(&home),
+                    folder,
+                )
             };
             let path = ("PATH", text(on_path.parent().unwrap()));
 
@@ -2191,12 +2196,12 @@ mod tests {
                 Some(resource.join("engine"))
             );
             assert_eq!(
-                find(&[path.clone()], Some(&resource.join("engine"))),
+                find(std::slice::from_ref(&path), Some(&resource.join("engine"))),
                 Some(bundled)
             );
             // Without it, PATH is tried next.
             assert_eq!(
-                find(&[path.clone()], Some(&root.join("empty"))),
+                find(std::slice::from_ref(&path), Some(&root.join("empty"))),
                 Some(on_path)
             );
             // A program named outright is still the only one tried.
@@ -2210,12 +2215,23 @@ mod tests {
             );
 
             // The app keeps the resource folder, and reads it when it looks.
-            assert!(code().contains("static RESOURCE: OnceLock<Option<PathBuf>> = OnceLock::new();"));
+            assert!(
+                code().contains("static RESOURCE: OnceLock<Option<PathBuf>> = OnceLock::new();")
+            );
             assert!(code().contains("pub fn use_resource_folder(folder: Option<PathBuf>)"));
-            assert!(code().contains("pub fn resource_folder(exe: &Path, name: &str) -> Option<PathBuf>"));
+            assert!(
+                code()
+                    .contains("pub fn resource_folder(exe: &Path, name: &str) -> Option<PathBuf>")
+            );
             assert!(PUT_TOGETHER.contains("starter::use_resource_folder("));
-            assert!(PUT_TOGETHER.contains("starter::resource_folder("), "lib.rs does not work the folder out from the binary's place");
-            assert!(PUT_TOGETHER.contains("product_name"), "lib.rs does not use the un-marked name");
+            assert!(
+                PUT_TOGETHER.contains("starter::resource_folder("),
+                "lib.rs does not work the folder out from the binary's place"
+            );
+            assert!(
+                PUT_TOGETHER.contains("product_name"),
+                "lib.rs does not use the un-marked name"
+            );
         }
 
         #[test]
