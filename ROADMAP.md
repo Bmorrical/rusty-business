@@ -200,3 +200,7 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   model that is on the disk and not on the engine's list, says whether
   this window started that engine, and says what to do. It still never
   stops an engine it did not start.
+- **Release notes.** Every version has one note in
+  [RELEASES.md](RELEASES.md), back to the first release, written before the
+  version is built: the gate fails without it, and the release run puts it
+  at the top of the version's page, above the steps to install.
