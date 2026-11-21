@@ -96,6 +96,15 @@ Select the picture to open it full size. The rest of the set is in
   engine that is already running is used as it is, and asking twice changes
   nothing. When the app quits, it stops the engine it started and no other.
   When it cannot start one, it says why in one sentence.
+- **A model the engine leaves out.** A question goes only to a model the
+  engine lists. An engine started earlier, by another copy of the app or by
+  hand, can list fewer models than this computer holds. The app then names
+  each model that is on this computer and not on the engine's list, beside
+  the models a question goes to, at the foot of the side, and on the
+  model's row in Settings and on the Installers page. It also says whether
+  this window started the engine that answers. It does not stop or restart
+  an engine it did not start: it says how to, and Check again looks once
+  more.
 - **The stack, started by the app.** When the stack's front door is not
   answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a

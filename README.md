@@ -278,7 +278,10 @@ the model too.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
-and left running.
+and left running. The foot of the side says when the engine answering is one
+this window did not start. When that engine does not list a model that is on
+this computer, the app names the model and says what to do, beside the
+models a question goes to and on the model's row in Settings.
 
 When Docker is on the computer and the gate is on, the app also starts the
 stack, opening Docker Desktop first when it is not running. It pulls the API

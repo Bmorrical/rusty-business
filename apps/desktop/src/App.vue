@@ -49,6 +49,7 @@ import {
   keptPicks,
   listedLine,
   looksLikePath,
+  markUnseen,
   memoryRequest,
   meterLine,
   modelLine,
@@ -66,6 +67,7 @@ import {
   showsStartHint,
   showsUpdate,
   stackLine,
+  startedElsewhere,
   startLine,
   switchedOn,
   systemPrompt,
@@ -73,6 +75,8 @@ import {
   tokensPerSecond,
   uninstallAsk,
   uninstalledLine,
+  unseenLine,
+  unseenShort,
   UPDATE_EVERY,
   updateDetail,
   updateLine,
@@ -288,8 +292,10 @@ const installGateOpen = computed(() => (lanEngine.value ? lanGate.value : gate.v
 const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : gateBusy.value));
 const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
 const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
+const unseenNote = computed(() => unseenLine(engine.value, off.value, engineAddress.value));
+const unseenChip = computed(() => unseenShort(engine.value, off.value));
 const displayMakers = computed(() => {
-  if (!lanEngine.value) return makers.value;
+  if (!lanEngine.value) return markUnseen(makers.value, engine.value);
   const installed = lanGate.value ? [...engine.value.models, ...(engine.value.setAside ?? [])] : [];
   return makers.value.map((maker) => ({
     ...maker,
@@ -1814,6 +1820,13 @@ onBeforeUnmount(() => {
         <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
           <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
+          <template v-if="unseenNote">
+            <p id="engine-unseen" class="small">{{ unseenNote }}</p>
+            <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
+              {{ checking ? "Checking..." : "Check again" }}
+            </button>
+          </template>
+          <p v-else-if="startedElsewhere(engine)" class="quiet small">This window did not start this engine.</p>
           <p v-if="engine.hidden" class="quiet small">
             {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
             {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
@@ -2388,6 +2401,9 @@ onBeforeUnmount(() => {
             <span class="chip-mark" aria-hidden="true">{{ picked.includes(entry.id) ? "✓" : "+" }}</span>
             {{ entry.name }}
             <span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>
+          </button>
+          <button v-if="unseenChip" class="link small" type="button" :title="unseenNote" @click="sideOpen = true">
+            {{ unseenChip }}
           </button>
         </div>
         <h2 class="bar-title">
