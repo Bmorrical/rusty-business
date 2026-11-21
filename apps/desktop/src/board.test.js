@@ -15,6 +15,7 @@ import {
   nextLane,
   noteOf,
   notesOf,
+  openFirstOf,
   orphanNotes,
   pulledLine,
   road,
@@ -117,6 +118,50 @@ test("a story with no slices holds nothing, and slicing it is your move", () => 
   assert.equal(storyLine(story(413)), "Your move: cut this into slices.");
   assert.equal(royalFlush({}), false);
   assert.equal(storyMove(undefined), "you");
+});
+
+test("a story with no slices that the board gives to someone else is not called yours", () => {
+  const given = { ...story(413), move: "model" };
+  assert.equal(storyMove(given), "model");
+  assert.equal(storyLine(given), "A local model's move. No slices yet.");
+  assert.equal(storyLine({ move: "review", slices: [] }), "A reviewer's move. No slices yet.");
+  // Given to you by the board, it reads as it does when nobody is named.
+  assert.equal(storyLine({ ...story(413), move: "you" }), "Your move: cut this into slices.");
+});
+
+test("the first board that opens is shown, and one that cannot be opened is named and passed over", async () => {
+  const entries = [
+    { id: "torn", name: "Torn" },
+    { id: "road", name: "Road" },
+    { id: "later", name: "Later" },
+  ];
+  const asked = [];
+  const load = async (entry) => {
+    asked.push(entry.id);
+    if (entry.id === "torn") throw "Could not read your notes for this board: no such luck.";
+    return { board: { id: entry.id }, drafts: {} };
+  };
+
+  const opened = await openFirstOf(entries, load);
+  assert.equal(opened.local.board.id, "road");
+  assert.equal(opened.problem, "Torn: Could not read your notes for this board: no such luck.");
+  // It stops at the first that opens.
+  assert.deepEqual(asked, ["torn", "road"]);
+
+  // The first on the list opens: nothing to say.
+  assert.deepEqual(await openFirstOf(entries.slice(1), load), { local: { board: { id: "road" }, drafts: {} }, problem: "" });
+
+  // None opens: every one is named, by its id when it has no name.
+  const none = await openFirstOf([{ id: "torn", name: "Torn" }, { id: "torn" }], load);
+  assert.equal(none.local, null);
+  assert.equal(
+    none.problem,
+    "Torn: Could not read your notes for this board: no such luck. torn: Could not read your notes for this board: no such luck.",
+  );
+
+  // No boards at all, or no list.
+  assert.deepEqual(await openFirstOf([], load), { local: null, problem: "" });
+  assert.deepEqual(await openFirstOf(undefined, load), { local: null, problem: "" });
 });
 
 test("a story is your move when any slice is, and otherwise follows the slice furthest behind", () => {

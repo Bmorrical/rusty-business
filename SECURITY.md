@@ -79,6 +79,17 @@ I want to hear about:
   up to a size. It installs that file only when its signature matches the
   public key built into the app, and `latest.json` names that version and
   that file. Otherwise it installs nothing and says why.
+- A web search goes out only once you switch it on in Settings, where it
+  starts off, and only while the outbound gate is on. It goes over https to
+  one of two fixed addresses: Brave Search's API, `api.search.brave.com`,
+  when you gave a key file, and DuckDuckGo's results page,
+  `html.duckduckgo.com`, when you did not. No setting changes either
+  address, no redirect is followed, and turning the gate off stops a search
+  under way. A search carries the words the model wrote, which can come
+  from your question, the app's name and version, and, to Brave only, your
+  key. The app keeps the path to your key file, never the key, and the key
+  never reaches the page. What comes back is cut to at most 8 results of
+  plain text, with every tag taken out, before the model reads it.
 - The Workflow view reads only the boards kept on this computer, in the
   app's own data folder. It asks nothing of the network and works with both
   gates off. No command it uses takes a path, a new copy of a board never
@@ -88,9 +99,12 @@ I want to hear about:
   at a path you type. The path never comes from the page. The file is read
   as a plain file of at most 4 MB, never through a link, and checked
   against board v1 before it is used. A push makes a new file, or replaces
-  a file of the same board, and leaves any other file as it is. The command
-  asks nothing of the network, starts no program, deletes nothing, and
-  leaves your notes as they are.
+  a file of the same board, and leaves any other file as it is. It writes
+  first to a plain file beside that one, named for it and ending
+  `.json.partial`, then moves it into place: a plain file already under
+  that name is written over, and anything else there stops the push. The
+  command asks nothing of the network, starts no program, deletes nothing,
+  and leaves your notes as they are.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.
@@ -99,8 +113,10 @@ I want to hear about:
 
 Please report these to their makers:
 
-- The model engine, `mlx_lm.server`, and the models themselves, including
-  what a model says.
+- The model engines, `mlx_lm.server` and llama.cpp's `llama-server`, and
+  the models themselves, including what a model says.
+- Brave Search and DuckDuckGo. How the app reads what they send back is
+  covered.
 - The images the stack uses as they come: Postgres, Redis, MinIO, Mailpit,
   and Caddy.
 - Docker, macOS, Windows, and Linux, with the WebKitGTK it draws with there.

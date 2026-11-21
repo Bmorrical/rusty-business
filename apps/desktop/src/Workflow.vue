@@ -19,6 +19,7 @@ import {
   nextLane,
   noteOf,
   notesOf,
+  openFirstOf,
   orphanNotes,
   pulledLine,
   road,
@@ -139,8 +140,11 @@ async function run(task) {
 function openFirst() {
   return run(async () => {
     boards.value = await invoke("list_boards");
-    const first = good.value[0];
-    if (first) show(await invoke("load_board", { id: first.id }));
+    // A board that cannot be opened is passed over and named, so one file
+    // that cannot be read never hides the boards that can.
+    const opened = await openFirstOf(good.value, (entry) => invoke("load_board", { id: entry.id }));
+    if (opened.local) show(opened.local);
+    problem.value = opened.problem;
   });
 }
 
@@ -321,7 +325,7 @@ onBeforeUnmount(() => {
         <p v-if="!rows.length" class="quiet small wf-none">
           {{ onlyYours ? "Nothing is waiting on you." : "This board has no stories." }}
         </p>
-        <section v-for="row in rows" :key="row.epic.release + row.epic.title" class="wf-release">
+        <section v-for="row in rows" :key="row.epic.release" class="wf-release">
           <h3>
             <span class="label">{{ row.epic.release }}</span>
             <span class="wf-release-title">{{ row.epic.title }}</span>
@@ -510,7 +514,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="ready" class="wf-empty">
-      <p class="display">No board on this computer yet.</p>
+      <p class="display">{{ good.length ? "No board could be opened." : "No board on this computer yet." }}</p>
       <p class="quiet">
         A board is a road: releases, the stories and bugs under them, and the slices each story is cut into. The sample
         board is made up, and shows how one reads.

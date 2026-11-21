@@ -104,7 +104,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   for Claude, and Google's for Gemini, over https and to
   nowhere else, with that key. When one grades, the question and every
   answer go too, those from this computer included. Each key stays in its
-  file and never reaches the page. There is no account and no sign-in. Ollama keeps your prompts on
+  file and never reaches the page. The fifth is web search, off until you
+  switch it on in Settings: the words a model searches for go to DuckDuckGo,
+  or to Brave Search with your own key, over https and to nowhere else.
+  There is no account and no sign-in. Ollama keeps your prompts on
   your computer too when a model runs there. It also offers models that run
   in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
@@ -256,6 +259,12 @@ model's name after its number. In Settings, Grading picks another model to
 grade, or No grading. A grade by Grok, GPT, Claude, or Gemini sends its maker the
 question and every answer, so a grade by a model on this computer keeps it all
 here.
+
+In Settings, Web lets a model search the web while it answers, such as for a
+plumber near you. It is off to start, and it works with one model asked at a
+time, while the WAN gate is on. The model writes the search, and only its
+words go: to DuckDuckGo, or to Brave Search when you give the path to a file
+that holds your own Brave key. That key goes only to Brave.
 
 The Installers page, at the foot of the window above Settings, lists every
 model on the app's list, whoever made it. With the WAN gate on, Install

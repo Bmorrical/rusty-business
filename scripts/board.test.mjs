@@ -10,7 +10,8 @@
 // but its four commands or a command takes a path, when the view or the store
 // gains a way to reach past this computer, to delete a file, or to start a
 // program, when a file could be written in one step, when a note could be
-// left behind, when a pick could land out of view, when the view shows a
+// left behind, when one board that cannot be opened could hide the rest,
+// when a pick could land out of view, when the view shows a
 // board's words as markup or gains a way to change a gate, when the sample
 // board stops being made up, when a rule loses its Rust test, or when the
 // READMEs, the roadmap, and SECURITY.md stop saying what the view does.
@@ -86,6 +87,9 @@ const KEPT_BY = [
   'a_note_is_kept_apart_from_the_snapshot',
   'an_empty_note_clears_it_and_a_long_one_is_refused',
   'a_note_needs_a_story_on_the_board_unless_it_already_has_one',
+  'a_note_that_would_take_the_notes_past_the_size_cap_is_refused',
+  'the_sample_never_writes_over_a_board_already_there',
+  'a_broken_file_under_the_samples_name_is_said_and_left_as_it_is',
   'an_id_cannot_reach_outside_the_folder',
   'a_file_that_is_not_a_board_is_named_and_left_alone',
   'a_board_too_large_is_not_read',
@@ -246,15 +250,28 @@ test('the view and the store have no way past this computer, delete nothing, and
 
 test('a file is written beside itself, then moved into place', () => {
   const store = code(read(STORE));
-  assert.equal(count(store, 'fs::write('), 1, 'the store writes a file somewhere other than its one helper');
+  assert.equal(count(store, 'fs::write('), 0, 'the store writes a file in one step');
+  assert.equal(count(store, 'fs::File::create('), 1, 'the store makes a file somewhere other than its one helper');
+  assert.equal(count(store, 'fs::rename('), 1, 'the store moves a file somewhere other than its one helper');
   const start = store.indexOf('\nfn write(path: &Path, text: &str, what: &str)');
   assert.ok(start >= 0, `${STORE} has no write helper`);
   const write = store.slice(start, store.indexOf('\n}', start));
-  const partial = write.indexOf('fs::write(&partial, text)');
-  const owned = write.indexOf('own(&partial, 0o600);');
-  const moved = write.indexOf('fs::rename(&partial, path)');
   assert.ok(write.includes('path.with_extension("json.partial")'), 'the half-written file has another name');
-  assert.ok(partial >= 0 && owned > partial && moved > owned, 'a file is not written, made private, then moved, in that order');
+  // Made, made private, filled, put on the disk, then moved: in that order.
+  // A file moved before it is on the disk can be empty after a power cut.
+  const steps = [
+    'fs::File::create(&partial)',
+    'own(&partial, 0o600);',
+    'file.write_all(text.as_bytes())',
+    'file.sync_all()',
+    'fs::rename(&partial, path)',
+  ];
+  let last = -1;
+  for (const step of steps) {
+    const at = write.indexOf(step);
+    assert.ok(at > last, `the write helper has no "${step}", or has it out of order`);
+    last = at;
+  }
 
   // The folders are the person's alone, and one write runs at a time.
   assert.match(store, /fs::create_dir_all\(&dir\)[^;]+;\s+own\(&dir, 0o700\);/, 'the boards folder is open to others');
@@ -264,6 +281,27 @@ test('a file is written beside itself, then moved into place', () => {
     assert.ok(body.includes('self.writing.lock()'), `${name} does not wait its turn to write`);
     assert.ok(body.indexOf('self.writing.lock()') < body.indexOf('write(&path'), `${name} writes before it has its turn`);
   }
+});
+
+// One board that cannot be opened must not hide the boards that can.
+test('the view opens the first board that opens, and names one it passed over', () => {
+  const view = read(VIEW);
+  const open = functionOf(view, 'openFirst');
+  assert.ok(
+    open.includes('await openFirstOf(good.value, (entry) => invoke("load_board", { id: entry.id }))'),
+    'the view stops at the first board it cannot open',
+  );
+  assert.ok(open.includes('if (opened.local) show(opened.local);'), 'the board that opened is not shown');
+  assert.ok(open.includes('problem.value = opened.problem;'), 'a board that was passed over is not named');
+  assert.ok(
+    view.includes('{{ good.length ? "No board could be opened." : "No board on this computer yet." }}'),
+    'the view says there is no board when there are boards it could not open',
+  );
+  assert.match(read(HELPERS), /\nexport async function openFirstOf\(entries, load\) \{/, `${HELPERS} has no openFirstOf`);
+
+  // Rust refuses a board where two releases share a name, so the name alone
+  // tells two releases apart. A title is free text and may be left out.
+  assert.ok(view.includes('v-for="row in rows" :key="row.epic.release"'), 'a release on the road is not told apart by its name');
 });
 
 // Brad, 2026-11-20: "privately".
