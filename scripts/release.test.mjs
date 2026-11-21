@@ -222,7 +222,7 @@ test('a release asks once whether the tag is there, then makes it at this commit
     "On 64-bit Linux on an Intel or AMD processor. The three files carry the engine inside them, llama.cpp's llama-server, the Vulkan build pinned by checksum.",
     `On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}`,
     `On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}`,
-    `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.`,
+    `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.`,
     `    sha256sum -c ${DEB}.sha256`,
     // Brad, 2026-11-19, asked how Install and restart should start: "Click
     // to install". And for Linux: ".deb and .rpm".

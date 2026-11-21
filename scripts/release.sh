@@ -100,7 +100,7 @@ On 64-bit Linux on an Intel or AMD processor. The three files carry the engine i
 
 - On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}
 - On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}
-- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, and glibc 2.35 or later from the system.
+- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.
 
 To check a download first, put it and its .sha256 file in one folder. On a Mac, run:
 

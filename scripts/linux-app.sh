@@ -129,7 +129,7 @@ tar -xzf "$WORK/downloads/llama-server.tar.gz" -C "$TAURI/engine" --strip-compon
 APP=$(node -p "require('./$TAURI/tauri.conf.json').productName")
 VERSION=$(node -p "require('./$TAURI/tauri.conf.json').version")
 
-(cd "$DESKTOP" && { [ -d node_modules ] || npm ci; } && npm run tauri -- build --bundles deb,rpm)
+(cd "$DESKTOP" && { [ -d node_modules ] || npm ci; } && npm run tauri -- build --bundles deb,rpm --config src-tauri/linux-bundle.json)
 
 deb="$TAURI/target/release/bundle/deb/${APP}_${VERSION}_amd64.deb"
 rpm="$TAURI/target/release/bundle/rpm/${APP}-${VERSION}-1.x86_64.rpm"
