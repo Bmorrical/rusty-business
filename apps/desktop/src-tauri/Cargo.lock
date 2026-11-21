@@ -3182,6 +3182,7 @@ name = "rusty-business"
 version = "0.8.3"
 dependencies = [
  "calamine",
+ "dirs",
  "futures-util",
  "libc",
  "pdf-extract",

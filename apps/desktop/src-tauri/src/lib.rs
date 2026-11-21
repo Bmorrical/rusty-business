@@ -1,5 +1,6 @@
 mod attachments;
 mod board;
+mod cli;
 mod deactivated;
 mod downloads;
 mod engine;
@@ -12,12 +13,19 @@ mod remote;
 mod sessions;
 mod stack;
 mod starter;
+mod sync;
 mod uninstall;
 mod update;
 mod web;
 mod workspace;
 
 use tauri::Manager;
+
+/// The `board` command, for a terminal. It gives back what to leave with, or
+/// `None` when the app was started the usual way and its window should open.
+pub fn command(args: Vec<String>) -> Option<i32> {
+    cli::run(&args)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

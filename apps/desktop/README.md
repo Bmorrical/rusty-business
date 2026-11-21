@@ -274,16 +274,20 @@ and the slices each story is cut into. A board is one JSON file in a
 - Windows: `%APPDATA%\net.morrical.rusty-business\boards`
 - Linux: `~/.local/share/net.morrical.rusty-business/boards`
 
-The app cannot fetch a board yet. One gets there when you put its file in
-that folder, or when you open the sample board, which is made up. The file
-is named `<id>.json`, and its name is the board's id: up to 64 letters,
+A board gets there when you import its file with the `board` command
+below, when you put its file in that folder, or when you open the sample
+board, which is made up. The app does not reach the network for one. The
+file is named `<id>.json`, and its name is the board's id: up to 64 letters,
 digits, and hyphens. The view lists every board in the folder. A file it
 cannot read is listed with what is wrong, and left as it is.
 
 ```json
 {
   "format": "board v1",
+  "id": "list-app",
   "name": "A list app",
+  "rev": "export-12",
+  "history": ["export-11", "export-10"],
   "epics": [
     {
       "release": "1.2.0",
@@ -314,6 +318,12 @@ cannot read is listed with what is wrong, and left as it is.
 ```
 
 - **`format`** is `board v1`. A file that says anything else is not read.
+- **`id`**, on the board, says which board a file kept somewhere else is.
+  In the boards folder, the file's name says it.
+- **`rev`** names the state a file holds, and **`history`** lists the
+  states it came from, the newest first, up to 50. Each is up to 64
+  letters, digits, and hyphens. Both are for keeping a board in step with a
+  file, below, and a board that is only read needs neither.
 - **`number`** is a story's number, from 1 up, and no two stories on a
   board share one. **`kind`** is `story` or `bug`, and a story with no
   `kind` is a story.
@@ -342,6 +352,106 @@ Your own notes are kept apart from the board, in `drafts/<id>.json` in the
 same folder: one note a story, up to 4,000 characters. A new copy of a
 board never changes or removes your notes. A note on a story that has left
 the board stays, and the view lists it under No longer on this board.
+
+### A board in step with a file
+
+A board can have one file kept somewhere else: a folder you share, a
+checkout of a repository, or wherever another program writes its export.
+One command, run in a terminal, keeps that file and this computer's copy in
+step, either way:
+
+```sh
+rusty-business board import <file>       # a first copy here, from a file
+rusty-business board export <id> <file>  # a first file, from the copy here
+rusty-business board sync                # pull, then push
+rusty-business board pull
+rusty-business board push
+rusty-business board list
+```
+
+On a Mac the program is inside the app, at
+`/Applications/Rusty\ Business.app/Contents/MacOS/rusty-business`. From
+this repository, it is `cargo run -- board list` in `apps/desktop/src-tauri`.
+
+- **`import`** reads a board file, keeps a copy of it here, and remembers
+  where the file is. **`export`** writes a board that is here to a new
+  file, and remembers that. After either, `pull`, `push`, and `sync` need no
+  path.
+- **`pull`** brings the file's changes here, and never writes the file.
+  **`push`** writes what is here to the file, and never writes the copy
+  here. **`sync`** pulls, then pushes.
+- With no id, `pull`, `push`, and `sync` do every board that has a file.
+  With one, as in `board sync list-app`, they do that board.
+- It leaves with 0 when it is done, 1 when it refused or failed, and 2 when
+  there are conflicts to settle.
+
+The app keeps each board as it stood at the last sync, and compares both
+sides against that. Changes to different things are both kept. What one
+side added is kept. What one side took away is taken away, unless the
+other side changed it. A release is known by its name, a story by its
+number, and a slice by its id within its story.
+
+A conflict is the same thing changed two ways, such as one story's title.
+The command lists each conflict, with what is here and what the file has,
+and writes nothing. Run it again with `--mine` to keep what is here, or
+`--theirs` to keep what the file has.
+
+A push is refused while the file has changes that are not here yet: pull
+first, or run `sync`. A push makes a new file, or replaces a file of the
+same board, and leaves any other file as it is.
+
+Beside the board and your notes, the boards folder keeps two more files
+for each board in step with a file: `synced/<id>.json`, the board as it
+stood at the last sync, and `sources/<id>.json`, where its file is.
+
+What it does not do yet:
+
+- Your notes stay on this computer. They are never written to the file.
+- The Workflow view cannot change a board yet, so the copy here changes
+  only when a pull brings something in, or when you edit its file.
+- What board v1 does not name is left out when a board is written.
+- When both sides moved stories or slices, the order on the side that is
+  kept stands, and no conflict is listed for it.
+- The command reaches no network. The file is a path on this computer,
+  which can be a folder that something else shares or syncs.
+- The app shows a board the command changed the next time the view loads
+  it.
+- On Windows, the command has not been tried, and the installed app may
+  print nothing in a terminal.
+
+### A backend of your own
+
+Board v1 is an open format, and the file is the whole of the join. Any
+program that can read and write one can be the other side: a script, an
+export from a tracker, or a server of your own. It needs none of this
+app's code, and this app does not need to know what it is.
+
+A backend keeps the `rev` and `history` of the last file it exported or
+imported, and whether its board changed since.
+
+- **To export**, when its board changed since that file, or it has never
+  exported, it gives the board a new `rev`, one it has never used, and
+  writes `history` as the last `rev` followed by the last `history`, at
+  most 50. When nothing changed, it writes the same `rev` and `history`
+  again.
+- **To import**, when its own board changed since that file, it refuses:
+  export first, run `board sync` here, then import. When the file's `rev`
+  is the last one, there is nothing to do. When the last `rev` is in the
+  file's `history`, it takes the file whole, and the file's `rev` and
+  `history` become its last. Otherwise it refuses, because the file does
+  not come from what it holds.
+- A release keeps its name, a story its number, and a slice its id, so
+  each can be found again.
+
+The merging is done here, by `board sync`. A backend that changes its
+board before it imports a file pushed from here has gone its own way: when
+it next exports, nothing here can say what each side changed, so nothing
+is taken away, and every difference is listed as a conflict to settle for
+one side. A backend that also keeps the last file's content can do its own
+merge by the rules above, and avoid that.
+
+A test in `cli.rs` runs a backend written by hand, this way, through each
+of these cases.
 
 ## What is in this folder
 

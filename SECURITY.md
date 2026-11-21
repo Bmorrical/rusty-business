@@ -84,6 +84,13 @@ I want to hear about:
   gates off. No command it uses takes a path, a new copy of a board never
   changes or removes your notes, and nothing in the boards folder is
   deleted.
+- The `board` command, run in a terminal, reads and writes one board file
+  at a path you type. The path never comes from the page. The file is read
+  as a plain file of at most 4 MB, never through a link, and checked
+  against board v1 before it is used. A push makes a new file, or replaces
+  a file of the same board, and leaves any other file as it is. The command
+  asks nothing of the network, starts no program, deletes nothing, and
+  leaves your notes as they are.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.

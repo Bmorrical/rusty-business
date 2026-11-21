@@ -5,7 +5,7 @@ from [../src](../src), and runs the commands the page calls.
 
 | Path                         | What it is                                               |
 | ---------------------------- | -------------------------------------------------------- |
-| [src](src)                   | The Rust code: the engine adapter, its start, the models on the disk and their download, the stack's start, the saved chats, and the boards |
+| [src](src)                   | The Rust code: the engine adapter, its start, the models on the disk and their download, the stack's start, the saved chats, the boards, and the `board` command |
 | [capabilities](capabilities) | What the page is allowed to ask Tauri for                |
 | [icons](icons)               | The app's icon in every size the systems ask for         |
 | `tauri.conf.json`            | The window's size and title, the page's content security policy, and what gets bundled |
