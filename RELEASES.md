@@ -27,6 +27,7 @@ One release for everything merged since 0.8.1.
 - **Web search.** In Settings, Web lets a model search the web while it answers. It is off to start, and it works with one model asked at a time, while the WAN gate is on. Only the model's search words go out: to DuckDuckGo, or to Brave Search with your own key.
 - **Linux carries its engine.** The `.deb`, the `.rpm`, and the `.tar.gz` now have llama.cpp's `llama-server` inside, the Vulkan build, pinned by checksum.
 - **A model the engine leaves out is named.** When an engine that was already running lists fewer models than this computer holds, the app names the missing ones, says whether this window started that engine, and says what to do. It still never stops an engine it did not start.
+- **AGENTS.md.** One page at the root sets every rule of the project, for people and for the AI models that work for them: how to behave here, how to send a change, what a good slice of work looks like, and what is refused. The README, `CONTRIBUTING.md`, `SECURITY.md`, and `BOARD.md` point to it.
 - **Release notes.** Every version has its note in `RELEASES.md`, back to 0.2.0, and from this version on at the top of its release page, which is what the What changed button opens.
 
 **Fixed**

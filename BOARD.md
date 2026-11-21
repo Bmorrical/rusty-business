@@ -35,7 +35,8 @@ two sides loosely coupled: either can be replaced, and neither has to be
 running for the other to work.
 
 "For now" is meant. The rule is the project's owner's, and it stands until
-a pull request changes this page.
+a pull request changes this page. [AGENTS.md](AGENTS.md) sets it beside
+every other rule of the project.
 
 ## The file
 

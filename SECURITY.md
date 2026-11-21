@@ -117,6 +117,9 @@ I want to hear about:
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only.
 
+[AGENTS.md](AGENTS.md) sets the rules a change follows to keep these
+promises, for people and for the AI models that work for them.
+
 ## What is not covered
 
 Please report these to their makers:

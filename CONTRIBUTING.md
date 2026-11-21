@@ -5,6 +5,9 @@ two roles. Contributors send changes, and maintainers review and merge them.
 Every maintainer is a contributor too and follows the same rules, but a
 contributor is not a maintainer.
 
+[AGENTS.md](AGENTS.md) sets every rule of the project in one place, for
+people and for the AI models that work for them. Read it first.
+
 ## The rules for every change
 
 - **Offline first.** On-device chat works with both network gates off. The
