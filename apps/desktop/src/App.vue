@@ -84,6 +84,11 @@ import {
   withPick,
   webPrompt,
   WEB_TOOL,
+  VIEW_END,
+  VIEW_START,
+  VIEW_STAY,
+  viewAfterMove,
+  viewTarget,
 } from "./chat.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -222,7 +227,10 @@ const TOOL_STATUS = { running: "Running", asked: "Waiting for you", done: "Done"
 /** Settles the change waiting for Apply or Skip. */
 let approve = null;
 let checkAgain = false;
-let stickToBottom = true;
+// Where the chat's view goes while answers come in (see viewAfterMove in
+// chat.js), and where the app last left it.
+let view = VIEW_START;
+let viewTop = 0;
 
 function blankSession(project = null) {
   return { id: "", title: "", model: "", createdAt: 0, updatedAt: 0, messages: [], project, pinned: false };
@@ -965,8 +973,7 @@ async function openSession(id) {
       if (turn.tool && ["asked", "running"].includes(turn.tool.status)) turn.tool.status = "skipped";
     }
     pickModels(chatModels(current.value), picked.value);
-    stickToBottom = true;
-    scrollDown();
+    jumpToEnd();
     focusComposer();
   } catch (error) {
     problem.value = String(error);
@@ -1163,9 +1170,9 @@ async function send() {
   attached.value = [];
   busy.value = true;
   stopAll = false;
-  stickToBottom = true;
+  view = VIEW_START;
   resizeComposer();
-  scrollDown();
+  followAnswer();
   // Saved before the models answer, so the question survives a crash.
   await persist();
   // The engine answers one at a time, so a look for memories still under way
@@ -1233,7 +1240,7 @@ async function send() {
     checkEngine();
   }
   await persist();
-  scrollDown();
+  followAnswer();
   focusComposer();
   // An outside engine looks for memories only when Settings allows it.
   if (answered && text && (learnOutside.value || !isOutside(asked[0].id))) learning = learn(text, asked[0].id, project);
@@ -1286,7 +1293,7 @@ async function work(session, entry, project, system, first) {
       session.messages = session.messages.filter((turn) => turn !== reply);
       return false;
     }
-    scrollDown();
+    followAnswer();
     const error = await ask(reply, entry, messages);
     if (error || (!reply.content && !reply.thinking)) {
       session.messages = session.messages.filter((turn) => turn !== reply);
@@ -1351,7 +1358,7 @@ async function ask(reply, entry, messages) {
       reply.thinking = event.thinking;
       reply.content = event.answer;
     }
-    scrollDown();
+    followAnswer();
   };
   chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
@@ -1392,7 +1399,7 @@ async function grade(session, round, judge) {
   const at = session.messages.indexOf(round.answers.at(-1)) + 1;
   session.messages.splice(at, 0, { role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true });
   const reply = session.messages[at];
-  scrollDown();
+  followAnswer();
   const error = await ask(reply, judge, messages);
   if (error || reply.stopped || !reply.content.trim()) {
     session.messages = session.messages.filter((turn) => turn !== reply);
@@ -1447,7 +1454,7 @@ async function useTool(project, call, reply) {
   }
   if (WRITE_TOOLS.includes(call.tool) && !autoApply.value) {
     reply.tool.status = "asked";
-    scrollDown();
+    followAnswer(".tool.asked");
     const yes = await new Promise((resolve) => (approve = resolve));
     approve = null;
     if (stopAll) {
@@ -1557,16 +1564,58 @@ function focusComposer() {
   nextTick(() => composer.value?.focus());
 }
 
-function onScroll() {
-  const pane = thread.value;
-  if (pane) stickToBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 60;
+// Brad, 2026-11-22: "the reader should choose the viewport position."
+// Scrolling up stops the view at once, before the scroll lands.
+function onWheel(event) {
+  if (event.deltaY < 0) view = VIEW_STAY;
 }
 
-function scrollDown() {
-  if (!stickToBottom) return;
+function onScroll() {
+  const pane = thread.value;
+  if (!pane) return;
+  view = viewAfterMove(view, viewTop, pane);
+  viewTop = pane.scrollTop;
+}
+
+/**
+ * Moves the view down to the newest line while the reader lets it: the last
+ * question's round, or the part named by `selector` that waits on the reader.
+ * The only place the app moves the chat's view while answers come in.
+ */
+function followAnswer(selector = ".round:last-of-type") {
   nextTick(() => {
     const pane = thread.value;
-    if (pane) pane.scrollTop = pane.scrollHeight;
+    if (!pane) return;
+    // A scroll the page has not reported yet still counts.
+    view = viewAfterMove(view, viewTop, pane);
+    viewTop = pane.scrollTop;
+    if (view === VIEW_STAY) return;
+    const target = viewTarget(view, pane, boxOf(pane, pane.querySelector(selector)));
+    if (target === null) return;
+    pane.scrollTop = target;
+    viewTop = pane.scrollTop;
+  });
+}
+
+/** Where `element` sits in the chat, with the chat's own padding around it. */
+function boxOf(pane, element) {
+  if (!element) return null;
+  const style = getComputedStyle(pane);
+  const top = element.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+  return {
+    top: top - parseFloat(style.paddingTop),
+    bottom: top + element.offsetHeight + parseFloat(style.paddingBottom),
+  };
+}
+
+/** A saved chat opens at its end. */
+function jumpToEnd() {
+  view = VIEW_END;
+  nextTick(() => {
+    const pane = thread.value;
+    if (!pane) return;
+    pane.scrollTop = pane.scrollHeight;
+    viewTop = pane.scrollTop;
   });
 }
 
@@ -2412,7 +2461,7 @@ onBeforeUnmount(() => {
         </h2>
       </header>
 
-      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll">
+      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll" @wheel.passive="onWheel">
         <div v-if="!current.messages.length" class="empty">
           <div v-if="offers.length" class="first-run">
             <p class="display lead">Pick a model to start.</p>

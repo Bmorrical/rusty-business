@@ -1090,3 +1090,45 @@ export function graderFor(saved, models) {
 export function gradesLine(grader) {
   return `${grader.name} grades the answers once all are in.`;
 }
+
+// Brad, 2026-11-22: "the reader should choose the viewport position."
+//
+// While answers come in, the chat's view is in one of three states:
+// "start" follows the newest line until the question reaches the top, then
+// holds; "end" follows the newest line; "stay" never moves. A question sent
+// begins in "start". The reader changes it by scrolling: up, or anywhere
+// short of the end, is "stay"; down to the end is "end".
+export const VIEW_START = "start";
+export const VIEW_END = "end";
+export const VIEW_STAY = "stay";
+
+// How close to the end, in pixels, still counts as at the end.
+export const END_SLACK = 16;
+
+/**
+ * The view's state once the reader may have scrolled. `was` is where the
+ * view stood when the app last looked, and `pane` the scrolling box now
+ * (`scrollTop`, `scrollHeight`, and `clientHeight`). A view the page pulled
+ * up because the chat got shorter is not the reader's move.
+ */
+export function viewAfterMove(mode, was, pane) {
+  const moved = pane.scrollTop - was;
+  const fromEnd = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+  if (Math.abs(moved) < 1) return mode;
+  if (moved < 0 && fromEnd <= 1) return mode;
+  if (moved > 0 && fromEnd <= END_SLACK) return VIEW_END;
+  return VIEW_STAY;
+}
+
+/**
+ * Where to move the view, or null to leave it. `box` is the part being
+ * answered, `top` and `bottom` measured from the start of the chat. The view
+ * only ever moves down, so it never takes back a line the reader has.
+ */
+export function viewTarget(mode, pane, box) {
+  const end = Math.max(0, pane.scrollHeight - pane.clientHeight);
+  let target = null;
+  if (mode === VIEW_END) target = end;
+  else if (mode === VIEW_START && box) target = Math.min(end, box.bottom - pane.clientHeight, box.top);
+  return target !== null && target > pane.scrollTop + 0.5 ? target : null;
+}
