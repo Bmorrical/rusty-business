@@ -159,7 +159,7 @@ test('one page shows at a time, and a chat takes the window back', () => {
   assert.ok(app.includes('const page = ref("chat");'), 'the window no longer opens on the chat');
   assert.ok(!/settingsOpen|settingsTitle|openSettings|closeSettings/.test(app), 'the old Settings switch is back beside the pages');
   assert.equal(app.split(`v-show="page === 'chat'"`).length, 4, 'the chat header, thread, and box no longer hide together');
-  assert.equal(app.split(`v-if="page === '`).length, 4, 'a page was added or lost without this check changing');
+  assert.equal(app.split(`v-if="page === '`).length, 5, 'a page was added or lost without this check changing');
   for (const name of ['newChat', 'openSession']) {
     assert.match(functionOf(app, name), /page\.value = "chat";/, `${name} leaves a page open over the chat`);
   }

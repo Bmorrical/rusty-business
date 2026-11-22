@@ -16,6 +16,7 @@ mod starter;
 mod sync;
 mod uninstall;
 mod update;
+mod utilities;
 mod web;
 mod workspace;
 
@@ -42,6 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine::Chats::default())
         .manage(update::Updates::default())
+        .manage(utilities::Made::default())
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             // The app's own models folder, which `llama-server` reads on
@@ -140,6 +142,11 @@ pub fn run() {
             deactivated::set_model_active,
             uninstall::uninstall_model,
             uninstall::uninstall_place,
+            utilities::utilities_status,
+            utilities::heic_pictures,
+            utilities::heic_to_jpeg,
+            utilities::pick_heic,
+            utilities::show_jpeg,
         ])
         .build(context)
         .expect("error while building tauri application");
