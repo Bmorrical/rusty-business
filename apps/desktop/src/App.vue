@@ -92,12 +92,16 @@ import {
 } from "./chat.js";
 import {
   addPictures,
+  isHeic,
   passedLine,
   pictureLine,
   pictureSummary,
   QUALITY,
   QUALITY_HIGH,
   QUALITY_LOW,
+  scoreLine,
+  smallDownloadLine,
+  splitDrop,
 } from "./utilities.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -294,10 +298,21 @@ const heicQuality = ref(QUALITY);
 const heicKeepPlace = ref(false);
 const heicNote = ref("");
 const heicBusy = ref(false);
+// The picture check: its model is installed only when the person asks, from
+// the Installers page. A score lives here, on the page, and nowhere else; it
+// is cleared each time the page opens.
+const PICTURE_CHECK = "picture-check";
+const pictureCheck = ref(null);
+const pictureScore = ref(null);
+const pictureNote = ref("");
+const pictureBusy = ref("");
+const pictureReady = computed(() => pictureCheck.value?.installed === true);
 // What a drop does, on the page it lands on.
 const dropWords = computed(() =>
   page.value === "utilities"
-    ? ["Drop to convert", "HEIC pictures, or a folder of them"]
+    ? pictureReady.value
+      ? ["Drop a picture", "HEIC to convert, or JPEG, PNG, or WebP to check"]
+      : ["Drop to convert", "HEIC pictures, or a folder of them"]
     : ["Drop to attach", "PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files"],
 );
 const canSend = computed(
@@ -755,6 +770,7 @@ async function openPage(name) {
   await readMakers();
   await readOutside();
   await readOff();
+  if (name === "installers") await readPictureCheck();
 }
 
 /** Back to the chat. */
@@ -1371,22 +1387,124 @@ function detach(index) {
 function onDrop(event) {
   const kind = event.payload?.type;
   const chatting = page.value === "chat";
-  const converting = page.value === "utilities" && heicReady.value;
-  if (kind === "enter" || kind === "over") dropping.value = chatting || converting;
+  const utilities = page.value === "utilities" && (heicReady.value || pictureReady.value);
+  if (kind === "enter" || kind === "over") dropping.value = chatting || utilities;
   else if (kind === "leave") dropping.value = false;
   else if (kind === "drop") {
     dropping.value = false;
     if (chatting) attachPaths(event.payload.paths);
-    else if (converting) addHeic(event.payload.paths);
+    else if (utilities) dropOnUtilities(event.payload.paths);
   }
 }
 
-/** Whether this computer can convert HEIC, asked once the page opens. */
+/**
+ * Whether this computer can convert HEIC and whether the picture check is
+ * installed, asked once the page opens. A score from an earlier visit is
+ * cleared.
+ */
 async function readUtilities() {
+  pictureScore.value = null;
+  pictureNote.value = "";
   try {
     heicReady.value = (await invoke("utilities_status")).heic;
   } catch {
     heicReady.value = false;
+  }
+  await readPictureCheck();
+}
+
+/**
+ * A drop on Utilities: a JPEG, PNG, or WebP picture goes to the picture
+ * check when it is installed, and everything else to HEIC to JPEG.
+ */
+function dropOnUtilities(paths) {
+  const { check, rest } = pictureReady.value ? splitDrop(paths) : { check: [], rest: paths ?? [] };
+  if (check.length) scorePicture(check[0], check.length > 1);
+  if (rest.length && heicReady.value) addHeic(rest);
+}
+
+async function readPictureCheck() {
+  try {
+    pictureCheck.value = await invoke("picture_check_status");
+  } catch {
+    pictureCheck.value = null;
+  }
+}
+
+/**
+ * Brad, 2026-11-22: "one click install on marqo should the user choose, and
+ * uninstall too". Install downloads the model through the WAN gate; Cancel
+ * is the same Cancel as a model's.
+ */
+async function installPictureCheck() {
+  if (downloading.value || !gate.value) return;
+  downloading.value = PICTURE_CHECK;
+  progress.value = { done: 0, total: pictureCheck.value?.bytes ?? 0 };
+  pictureNote.value = "";
+  const channel = new Channel();
+  channel.onmessage = (update) => {
+    progress.value = update;
+  };
+  try {
+    const report = await invoke("install_picture_check", { onProgress: channel });
+    if (report.stopped) pictureNote.value = "The download of the picture check stopped, and none of it was kept.";
+  } catch (error) {
+    pictureNote.value = String(error);
+  } finally {
+    downloading.value = "";
+    progress.value = null;
+    stopping.value = false;
+    await readPictureCheck();
+  }
+}
+
+/** Uninstall moves the model's folder to the Trash. Nothing is deleted. */
+async function uninstallPictureCheck() {
+  askUninstall.value = "";
+  if (downloading.value || pictureBusy.value) return;
+  pictureNote.value = "";
+  try {
+    await invoke("uninstall_picture_check");
+    pictureScore.value = null;
+    pictureNote.value = uninstalledLine("The picture check", uninstallPlace.value);
+  } catch (error) {
+    pictureNote.value = String(error);
+  } finally {
+    await readPictureCheck();
+  }
+}
+
+/** The system's own picker, for one picture to check. */
+async function pickPicture() {
+  pictureNote.value = "";
+  try {
+    const picked = await invoke("pick_picture");
+    if (picked) await scorePicture(picked, false);
+  } catch (error) {
+    pictureNote.value = String(error);
+  }
+}
+
+/**
+ * Scores one picture on this computer. Rust reads it into memory and gives
+ * back two numbers; the page shows them with the caution and keeps them
+ * nowhere else.
+ */
+async function scorePicture(path, more) {
+  if (pictureBusy.value) return;
+  const name = String(path).split(/[\\/]/).pop();
+  pictureBusy.value = name;
+  pictureScore.value = null;
+  pictureNote.value = more ? "The check scores one picture at a time, so only the first was checked." : "";
+  try {
+    const score = await invoke("score_picture", { path });
+    pictureScore.value = { name, nsfw: score.nsfw, sfw: score.sfw };
+  } catch (error) {
+    pictureNote.value = isHeic(path)
+      ? "Make a JPEG copy with HEIC to JPEG first, then check the copy."
+      : String(error);
+  } finally {
+    pictureBusy.value = "";
   }
 }
 
@@ -2194,6 +2312,67 @@ onBeforeUnmount(() => {
           <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
           <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
 
+          <h3 class="gap-above">Picture check</h3>
+          <p class="quiet">
+            A small model, 22 MB, that scores a picture on this computer, from the Utilities page. It is off until you
+            install it, nothing downloads until you press Install, and Uninstall moves it to the Trash.
+          </p>
+          <p v-if="!gate && !pictureCheck?.installed" class="gate-ask">
+            <span>Turn on the WAN gate to install the picture check.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the WAN gate</button>
+          </p>
+          <ul class="offers" aria-label="Picture check">
+            <li class="offer">
+              <span class="offer-text">
+                <span class="offer-name">nsfw-image-detection-384 by Marqo</span>
+                <span class="quiet small">{{ pictureCheck?.installed ? "Installed" : "22.4 MB, not installed" }}</span>
+              </span>
+              <template v-if="downloading === PICTURE_CHECK">
+                <span class="offer-progress">
+                  <progress
+                    :value="progress?.total ? downloaded(progress) : undefined"
+                    max="1"
+                    aria-label="How much of the picture check has downloaded"
+                  ></progress>
+                  <span class="quiet small">{{ stopping ? "Stopping..." : smallDownloadLine(progress) }}</span>
+                </span>
+                <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+              </template>
+              <template v-else-if="pictureCheck?.installed && askUninstall === PICTURE_CHECK">
+                <span class="ask-uninstall small">{{ uninstallAsk("the picture check", { trash: uninstallPlace?.trash }) }}</span>
+                <button
+                  class="link"
+                  type="button"
+                  aria-label="Yes, move the picture check"
+                  :disabled="Boolean(downloading) || Boolean(pictureBusy)"
+                  @click="uninstallPictureCheck"
+                >
+                  Yes
+                </button>
+                <button class="link" type="button" @click="askUninstall = ''">No</button>
+              </template>
+              <button
+                v-else-if="pictureCheck?.installed"
+                type="button"
+                aria-label="Uninstall the picture check"
+                :disabled="Boolean(downloading) || Boolean(pictureBusy)"
+                @click="askUninstall = PICTURE_CHECK"
+              >
+                Uninstall
+              </button>
+              <button
+                v-else
+                type="button"
+                aria-label="Install the picture check"
+                :disabled="!gate || Boolean(downloading) || !pictureCheck"
+                @click="installPictureCheck"
+              >
+                Install
+              </button>
+            </li>
+          </ul>
+          <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
+
           <h3 class="gap-above">Outside engines</h3>
           <p class="quiet">
             Each engine here answers from its maker's computers, not this one. Give the path to a file that holds your
@@ -2324,6 +2503,37 @@ onBeforeUnmount(() => {
                 </ul>
               </template>
             </template>
+          </article>
+          <article class="utility" aria-labelledby="picture-title">
+            <h3 id="picture-title">Picture check</h3>
+            <p class="quiet">
+              Scores a picture with a small model on this computer. The picture is read into memory and never copied,
+              and its score shows here and is saved nowhere.
+            </p>
+            <p v-if="!pictureReady" class="gate-ask">
+              <span>The picture check is not installed. It is off until you choose it.</span>
+              <button type="button" @click="openPage('installers')">Open Installers</button>
+            </p>
+            <template v-else>
+              <div class="utility-drop">
+                <p class="quiet">
+                  Drop a JPEG, PNG, or WebP picture here{{ pictureCheck?.picker ? ", or choose one" : "" }}.
+                </p>
+                <span v-if="pictureCheck?.picker" class="settings-actions">
+                  <button type="button" class="primary" :disabled="Boolean(pictureBusy)" @click="pickPicture">
+                    Choose a picture
+                  </button>
+                </span>
+              </div>
+              <p v-if="pictureBusy" class="small" role="status">Checking {{ pictureBusy }}…</p>
+              <div v-if="pictureScore" class="picture-score" role="status">
+                <span class="offer-name">{{ pictureScore.name }}</span>
+                <span>{{ scoreLine(pictureScore) }}</span>
+                <span class="quiet small">{{ pictureCheck.caution }}</span>
+                <button type="button" @click="pictureScore = null">Clear</button>
+              </div>
+            </template>
+            <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
           </article>
         </div>
       </section>
@@ -4413,6 +4623,14 @@ textarea.memory:focus,
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+/* A score, with its caution under it. It reads the same high or low. */
+.picture-score {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
   margin-top: 1rem;
 }
 
