@@ -93,6 +93,12 @@ import {
   unseenModels,
   unseenShort,
   withPick,
+  END_SLACK,
+  VIEW_END,
+  VIEW_START,
+  VIEW_STAY,
+  viewAfterMove,
+  viewTarget,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -1167,4 +1173,44 @@ test("a model the engine leaves out says so on its row in Settings and on the In
   assert.equal(makers[0].models[0].unseen, undefined, "the makers Rust sent are not changed");
   assert.equal(markUnseen(makers, { ...threeOfFive, unseen: [] }), makers);
   assert.deepEqual(markUnseen(undefined, threeOfFive), []);
+});
+
+// Brad, 2026-11-22: "when model 2 is thinking, I can't keep my scroll position
+// on question 1, the browser is forced to the bottom following whoever is
+// answering, instead the reader should choose the viewport position."
+test("the reader's scroll decides where the chat's view stays", () => {
+  const pane = (scrollTop, scrollHeight = 3000, clientHeight = 600) => ({ scrollTop, scrollHeight, clientHeight });
+  // Nothing moved: the state holds, whatever it is.
+  assert.equal(viewAfterMove(VIEW_START, 400, pane(400)), VIEW_START);
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2400)), VIEW_END);
+  // Up, even a little, while model 2 thinks: the view stays where the reader put it.
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2390)), VIEW_STAY);
+  assert.equal(viewAfterMove(VIEW_START, 900, pane(100)), VIEW_STAY);
+  // Down but short of the end: still the reader's place.
+  assert.equal(viewAfterMove(VIEW_START, 100, pane(900)), VIEW_STAY);
+  // Down to the end, or within END_SLACK of it: follow the newest line again.
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400 - END_SLACK)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400 - END_SLACK - 1)), VIEW_STAY);
+  // The chat got shorter and the page pulled the view up to its new end:
+  // not the reader's move.
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2000, 2600)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_START, 2400, pane(2000, 2600)), VIEW_START);
+});
+
+test("the view follows the answer only while the reader lets it, and only down", () => {
+  const pane = { scrollTop: 0, scrollHeight: 3000, clientHeight: 600 };
+  // "stay" never moves, whatever comes in.
+  assert.equal(viewTarget(VIEW_STAY, pane, { top: 0, bottom: 3000 }), null);
+  // "end" follows the newest line.
+  assert.equal(viewTarget(VIEW_END, pane, null), 2400);
+  assert.equal(viewTarget(VIEW_END, { ...pane, scrollTop: 2400 }, null), null, "already there");
+  // "start" follows the answer until the question reaches the top, then holds.
+  assert.equal(viewTarget(VIEW_START, pane, { top: 500, bottom: 900 }), 300);
+  assert.equal(viewTarget(VIEW_START, pane, { top: 500, bottom: 2800 }), 500, "the question stays in view");
+  assert.equal(viewTarget(VIEW_START, { ...pane, scrollTop: 500 }, { top: 500, bottom: 2800 }), null);
+  assert.equal(viewTarget(VIEW_START, pane, null), null, "nothing to follow");
+  // Never up: a line the reader has is never taken back.
+  assert.equal(viewTarget(VIEW_START, { ...pane, scrollTop: 800 }, { top: 500, bottom: 2800 }), null);
+  assert.equal(viewTarget(VIEW_END, { scrollTop: 0, scrollHeight: 400, clientHeight: 600 }, null), null, "a short chat has nowhere to go");
 });
