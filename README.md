@@ -126,6 +126,11 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   numbered and without the models' names. An outside engine grades, Grok
   first, then GPT, then Claude, then Gemini, until you pick another model, or No grading,
   in Settings.
+- **Your own votes.** Rate any answer up or down, and when several models
+  answer one question, vote one of them the best. Settings keeps a tally per
+  model, with the questions each one won. Votes stay with their chats on
+  this computer and are never sent to a model. They start on, and a switch
+  in Settings turns them off.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
   is.

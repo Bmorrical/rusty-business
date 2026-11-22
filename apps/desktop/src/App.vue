@@ -9,11 +9,14 @@ import Workflow from "./Workflow.vue";
 import {
   answersLine,
   arrangeSessions,
+  bestChanges,
+  canPickBest,
   canGrade,
   canRemove,
   chatModels,
   checkedLine,
   chipDetail,
+  dayLabel,
   downloaded,
   downloadLine,
   firstRunOffers,
@@ -89,6 +92,9 @@ import {
   VIEW_STAY,
   viewAfterMove,
   viewTarget,
+  tallyLine,
+  voteTally,
+  withRating,
   withWide,
 } from "./chat.js";
 import {
@@ -128,6 +134,11 @@ const ICONS = {
   check: "M20 6 9 17l-5-5",
   wide: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
   narrow: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  thumbsUp:
+    "M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z",
+  thumbsDown:
+    "M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z",
 };
 
 const SUGGESTIONS = [
@@ -216,6 +227,11 @@ const learnOn = ref(stored("learn", "on") !== "off");
 // Off to start: learning from an outside engine sends your message and memory to its maker once more.
 const learnOutside = ref(stored("learnOutside", "off") === "on");
 const autoApply = ref(stored("autoApply", "off") === "on");
+// Votes on answers, on to start. Brad, 2026-11-22: "voting is optional and
+// it's on by default and user can turn it off in settings".
+const votesOn = ref(stored("votes", "on") !== "off");
+const tally = ref([]);
+const votesNote = ref("");
 const learnedNote = ref("");
 const theme = ref(stored("theme", "system"));
 const sideOpen = ref(stored("side", "open") !== "closed");
@@ -443,6 +459,7 @@ watch(learnOutside, (on) => store("learnOutside", on ? "on" : "off"));
 watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
 watch(webOn, (on) => store("web", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
+watch(votesOn, (on) => store("votes", on ? "on" : "off"));
 
 /**
  * "the next step is user can run the same question in 1-nth models and checks
@@ -996,6 +1013,33 @@ async function persist() {
     problem.value = String(error);
   }
 }
+
+/** Rates an answer up or down; the same click again takes the rating back. */
+function rate(turn, rating) {
+  Object.assign(turn, withRating(turn, rating));
+  persist();
+}
+
+/** Votes an answer the best of its question, or takes that vote back. */
+function pickBest(round, turn) {
+  for (const [answer, change] of bestChanges(round.answers, turn)) Object.assign(answer, change);
+  persist();
+}
+
+/** The tally on the Votes tab, read fresh from every saved chat. */
+async function loadVotes() {
+  if (!inApp) return;
+  try {
+    tally.value = voteTally(await invoke("list_votes"));
+    votesNote.value = "";
+  } catch (error) {
+    votesNote.value = String(error);
+  }
+}
+
+watch([page, settingsTab], ([where, tab]) => {
+  if (where === "settings" && tab === "votes") loadVotes();
+});
 
 function newChat(project = null) {
   if (busy.value) return;
@@ -2559,6 +2603,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
             <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
             <button type="button" :class="{ here: settingsTab === 'web' }" @click="settingsTab = 'web'">Web</button>
+            <button type="button" :class="{ here: settingsTab === 'votes' }" @click="settingsTab = 'votes'">Votes</button>
             <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
           </nav>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
@@ -2811,6 +2856,40 @@ onBeforeUnmount(() => {
               from this computer too, go to {{ grader.maker }} each time it grades. That happens only while the gate is on.
             </p>
           </div>
+          <div v-else-if="settingsTab === 'votes'" class="settings-pane">
+            <h3>Votes</h3>
+            <p class="quiet">
+              Rate any answer up or down. When several models answer one question, you can also vote one of them the best. Votes
+              stay with their chats on this computer and are never sent to a model.
+            </p>
+            <label class="check">
+              <input v-model="votesOn" type="checkbox" />
+              <span>
+                Vote on answers
+                <span class="quiet small block">On to start. Off hides the vote buttons in the chat; votes already given stay with their chats and in the tally.</span>
+              </span>
+            </label>
+            <h3>Tally</h3>
+            <p v-if="votesNote" class="quiet small">{{ votesNote }}</p>
+            <p v-else-if="!tally.length" class="quiet small">No votes yet.</p>
+            <ul v-else class="tally">
+              <li v-for="row in tally" :key="row.model">
+                <strong>{{ modelName(row.model) || row.model }}</strong>
+                <span class="quiet small block">{{ tallyLine(row) }}</span>
+                <details v-if="row.won.length" class="won">
+                  <summary class="small">Questions it won</summary>
+                  <ul>
+                    <li v-for="(win, index) in row.won" :key="index">
+                      <button class="link" type="button" @click="openSession(win.session)">{{ win.question || "A question with no words" }}</button>
+                      <span class="quiet small block">
+                        <template v-if="win.title && !win.question.startsWith(win.title)">{{ win.title }} · </template>{{ dayLabel(win.votedAt) }}<template v-if="win.over.length">, over {{ namesLine(win.over.map((id) => modelName(id) || id)) }}</template>
+                      </span>
+                    </li>
+                  </ul>
+                </details>
+              </li>
+            </ul>
+          </div>
           <div v-else class="settings-pane">
             <h3>Appearance</h3>
             <p class="quiet">Follow the system, or keep one look.</p>
@@ -2969,7 +3048,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
-            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn) }">
+            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn), best: votesOn && turn.best }">
               <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
               <button
                 v-if="round.answers.length > 1"
@@ -3025,6 +3104,42 @@ onBeforeUnmount(() => {
                 <button v-if="replyText(turn)" class="copy" type="button" :aria-label="copied === turn ? 'Copied' : 'Copy'" :title="copied === turn ? 'Copied' : 'Copy'" @click="copyText(turn, replyText(turn))">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="copied === turn ? ICONS.check : ICONS.copy" /></svg>
                 </button>
+                <span v-if="votesOn && replyText(turn)" class="votes">
+                  <button
+                    v-if="canPickBest(round)"
+                    class="copy vote"
+                    :class="{ on: turn.best }"
+                    type="button"
+                    :aria-pressed="Boolean(turn.best)"
+                    :aria-label="turn.best ? 'Voted best' : 'Best answer'"
+                    :title="turn.best ? 'Voted best' : 'Best answer'"
+                    @click="pickBest(round, turn)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.star" /></svg>
+                  </button>
+                  <button
+                    class="copy vote"
+                    :class="{ on: turn.rating === 'up' }"
+                    type="button"
+                    :aria-pressed="turn.rating === 'up'"
+                    aria-label="Good answer"
+                    title="Good answer"
+                    @click="rate(turn, 'up')"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.thumbsUp" /></svg>
+                  </button>
+                  <button
+                    class="copy vote"
+                    :class="{ on: turn.rating === 'down' }"
+                    type="button"
+                    :aria-pressed="turn.rating === 'down'"
+                    aria-label="Poor answer"
+                    title="Poor answer"
+                    @click="rate(turn, 'down')"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.thumbsDown" /></svg>
+                  </button>
+                </span>
                 <p class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
               </div>
             </section>
@@ -4273,6 +4388,40 @@ button.switch.model-switch {
 .answers.many > .turn.opened {
   grid-column: 1 / -1;
   order: -1;
+}
+
+/* The answer voted best in its question wears the accent. */
+.answers.many > .turn.best {
+  border-color: var(--accent);
+}
+
+.vote.on {
+  color: var(--accent-text);
+}
+
+.vote.on svg {
+  fill: currentColor;
+}
+
+.votes {
+  display: inline-flex;
+  gap: 0.15rem;
+}
+
+.tally {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tally .won ul {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0 0 0 0.75rem;
+  display: grid;
+  gap: 0.4rem;
 }
 
 .answers.many > .turn > .card-head {

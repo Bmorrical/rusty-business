@@ -41,6 +41,15 @@ pub struct Turn {
     /// Files attached to a message, with their text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<serde_json::Value>,
+    /// The person's rating of an answer: "up" or "down".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<String>,
+    /// True on the answer the person voted best of those to its question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub best: Option<bool>,
+    /// When the person last voted on this answer, in milliseconds since 1970.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voted_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -101,6 +110,102 @@ pub fn latest_answers(messages: &[Turn]) -> Vec<String> {
         }
     }
     models
+}
+
+/// One model's answer to a question someone voted on.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VotedAnswer {
+    pub model: String,
+    /// "up", "down", or none.
+    pub rating: Option<String>,
+    pub best: bool,
+}
+
+/// A question with at least one vote on its answers, and the chat it is in.
+/// Brad, 2026-11-20: "it keeps track of which answers were asked when it got
+/// voted the best one."
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VotedRound {
+    pub session: String,
+    pub title: String,
+    /// The question, cut to `QUESTION_LIMIT` characters.
+    pub question: String,
+    /// The latest vote on its answers, in milliseconds since 1970.
+    pub voted_at: u64,
+    /// Every model that answered, each once, in the order they answered.
+    pub answers: Vec<VotedAnswer>,
+}
+
+const QUESTION_LIMIT: usize = 160;
+
+/// The questions in a chat that have a vote on an answer. A rating counts on
+/// any answer. A best counts only where two or more models answered, and only
+/// the first answer marked best, in case a file was edited by hand.
+pub fn voted_rounds(session: &Session) -> Vec<VotedRound> {
+    let mut rounds: Vec<(String, Vec<&Turn>)> = Vec::new();
+    for turn in &session.messages {
+        if turn.role == "user" || rounds.is_empty() {
+            // A step's result goes back to the model as a message; the
+            // question stays the one the person asked.
+            let question = if turn.role == "user" && turn.tool_result != Some(true) {
+                turn.content.clone()
+            } else {
+                rounds
+                    .last()
+                    .map(|round| round.0.clone())
+                    .unwrap_or_default()
+            };
+            rounds.push((question, Vec::new()));
+        }
+        let named = turn.model.as_ref().is_some_and(|model| !model.is_empty());
+        if turn.role == "assistant" && named {
+            rounds.last_mut().expect("a round was pushed").1.push(turn);
+        }
+    }
+    let mut voted = Vec::new();
+    for (question, turns) in rounds {
+        let mut answers: Vec<VotedAnswer> = Vec::new();
+        let mut voted_at = 0;
+        let mut any = false;
+        let mut best_taken = false;
+        let several = turns.len() > 1;
+        for turn in turns {
+            let model = turn.model.clone().unwrap_or_default();
+            let rating = turn
+                .rating
+                .clone()
+                .filter(|rating| rating == "up" || rating == "down");
+            let best = several && !best_taken && turn.best == Some(true);
+            best_taken |= best;
+            if rating.is_some() || best {
+                any = true;
+                voted_at = voted_at.max(turn.voted_at.unwrap_or(0));
+            }
+            match answers.iter_mut().find(|answer| answer.model == model) {
+                Some(answer) => {
+                    answer.rating = answer.rating.take().or(rating);
+                    answer.best |= best;
+                }
+                None => answers.push(VotedAnswer {
+                    model,
+                    rating,
+                    best,
+                }),
+            }
+        }
+        if any {
+            voted.push(VotedRound {
+                session: session.id.clone(),
+                title: session.title.clone(),
+                question: question.trim().chars().take(QUESTION_LIMIT).collect(),
+                voted_at,
+                answers,
+            });
+        }
+    }
+    voted
 }
 
 /// A chat that matched a search, with the words around the first match.
@@ -231,6 +336,15 @@ impl Store {
         Ok(())
     }
 
+    /// Every question with a vote on its answers, from every saved chat, the
+    /// latest vote first. A chat in the trash is left out.
+    pub fn votes(&self) -> Result<Vec<VotedRound>, String> {
+        let mut rounds = Vec::new();
+        self.each(|session| rounds.extend(voted_rounds(&session)))?;
+        rounds.sort_by_key(|round| std::cmp::Reverse(round.voted_at));
+        Ok(rounds)
+    }
+
     /// Chats whose title or words hold `query`, ignoring case, newest first.
     pub fn search(&self, query: &str) -> Result<Vec<Found>, String> {
         let needle = query.trim().to_lowercase();
@@ -327,6 +441,11 @@ impl Store {
 #[tauri::command]
 pub fn list_sessions(store: tauri::State<'_, Store>) -> Result<Vec<SessionSummary>, String> {
     store.list()
+}
+
+#[tauri::command]
+pub fn list_votes(store: tauri::State<'_, Store>) -> Result<Vec<VotedRound>, String> {
+    store.votes()
 }
 
 #[tauri::command]
@@ -592,6 +711,154 @@ mod tests {
             ],
             "the model that graded is named as one that answered",
         );
+    }
+
+    fn voted(model: &str, content: &str, rating: Option<&str>, best: bool, at: u64) -> Turn {
+        Turn {
+            rating: rating.map(str::to_string),
+            best: best.then_some(true),
+            voted_at: Some(at),
+            ..answer(model, content)
+        }
+    }
+
+    fn question(content: &str) -> Turn {
+        Turn {
+            role: "user".to_string(),
+            content: content.to_string(),
+            ..Turn::default()
+        }
+    }
+
+    // Brad, 2026-11-20: "I should be able to rate answers, and it keeps track
+    // of which answers were asked when it got voted the best one."
+    #[test]
+    fn a_vote_is_saved_with_its_answer_and_comes_back_whole() {
+        let store = scratch_store();
+        let mut session = chat("Nails");
+        session.messages.push(question("Why do nails rust?"));
+        session.messages.push(voted(
+            "mlx-community/phi-4-4bit",
+            "Oxygen.",
+            Some("down"),
+            false,
+            5,
+        ));
+        session.messages.push(voted(
+            "mlx-community/gpt-oss-20b-MXFP4-Q8",
+            "Water and air.",
+            Some("up"),
+            true,
+            7,
+        ));
+        let saved = store.save(session).unwrap();
+        let loaded = store.load(&saved.id).unwrap();
+        assert_eq!(loaded, saved, "a vote does not come back whole");
+        let best = &loaded.messages[4];
+        assert_eq!(best.rating.as_deref(), Some("up"));
+        assert_eq!(best.best, Some(true));
+        assert_eq!(best.voted_at, Some(7));
+        let text = serde_json::to_string(&chat("Sums")).unwrap();
+        assert!(
+            !text.contains("rating") && !text.contains("best") && !text.contains("votedAt"),
+            "a chat with no votes saves empty vote fields"
+        );
+    }
+
+    #[test]
+    fn the_votes_name_the_question_every_model_that_answered_and_the_best() {
+        let store = scratch_store();
+        let mut session = chat("Nails");
+        // The first question has an answer with no vote, so it is left out.
+        session.messages.push(question("Why do nails rust?"));
+        session
+            .messages
+            .push(voted("mlx-community/phi-4-4bit", "Oxygen.", None, false, 0));
+        session.messages.push(voted(
+            "mlx-community/gpt-oss-20b-MXFP4-Q8",
+            "Water and air.",
+            None,
+            true,
+            9,
+        ));
+        session.messages.push(Turn {
+            role: "grade".to_string(),
+            content: "Answer 1: B.".to_string(),
+            model: Some("xai:grok-4".to_string()),
+            best: Some(true),
+            ..Turn::default()
+        });
+        session.messages.push(question("And copper?"));
+        session.messages.push(voted(
+            "mlx-community/phi-4-4bit",
+            "It goes green.",
+            Some("up"),
+            false,
+            4,
+        ));
+        let saved = store.save(session).unwrap();
+        let votes = store.votes().unwrap();
+        assert_eq!(votes.len(), 2, "the question with no vote is in the list");
+        assert_eq!(
+            votes[0],
+            VotedRound {
+                session: saved.id.clone(),
+                title: "Nails".to_string(),
+                question: "Why do nails rust?".to_string(),
+                voted_at: 9,
+                answers: vec![
+                    VotedAnswer {
+                        model: "mlx-community/phi-4-4bit".to_string(),
+                        rating: None,
+                        best: false,
+                    },
+                    VotedAnswer {
+                        model: "mlx-community/gpt-oss-20b-MXFP4-Q8".to_string(),
+                        rating: None,
+                        best: true,
+                    },
+                ],
+            },
+            "the latest vote comes first, with the question and every model that answered; the grader is no answer",
+        );
+        assert_eq!(votes[1].question, "And copper?");
+        assert_eq!(votes[1].answers[0].rating.as_deref(), Some("up"));
+    }
+
+    #[test]
+    fn a_best_needs_two_answers_and_a_rating_is_up_or_down() {
+        let mut session = chat("Sums");
+        session.messages[1] = voted("mlx-community/phi-4-4bit", "4.", Some("meh"), true, 3);
+        assert!(
+            voted_rounds(&session).is_empty(),
+            "a lone answer was voted best, or a rating other than up or down counted"
+        );
+        session.messages.push(question(&"long ".repeat(100)));
+        session.messages.push(voted("a", "One.", None, true, 1));
+        session.messages.push(voted("b", "Two.", None, true, 2));
+        let rounds = voted_rounds(&session);
+        assert_eq!(rounds.len(), 1);
+        assert_eq!(
+            rounds[0]
+                .answers
+                .iter()
+                .filter(|answer| answer.best)
+                .count(),
+            1,
+            "two answers to one question were both best"
+        );
+        assert_eq!(rounds[0].question.chars().count(), QUESTION_LIMIT);
+    }
+
+    #[test]
+    fn a_chat_in_the_trash_takes_its_votes_with_it() {
+        let store = scratch_store();
+        let mut session = chat("Sums");
+        session.messages[1] = voted("mlx-community/phi-4-4bit", "4.", Some("up"), false, 3);
+        let saved = store.save(session).unwrap();
+        assert_eq!(store.votes().unwrap().len(), 1);
+        store.trash(&saved.id).unwrap();
+        assert!(store.votes().unwrap().is_empty());
     }
 
     #[test]

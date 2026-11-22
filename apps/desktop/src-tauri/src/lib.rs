@@ -112,6 +112,7 @@ pub fn run() {
             board::open_sample_board,
             board::save_board_note,
             sessions::list_sessions,
+            sessions::list_votes,
             sessions::load_session,
             sessions::save_session,
             sessions::trash_session,

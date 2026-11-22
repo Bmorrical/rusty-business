@@ -280,7 +280,7 @@ export function dayLabel(milliseconds, now = Date.now()) {
 /** A turn as it is saved: no window-only fields, no empty ones. */
 export function savedTurn(turn) {
   const saved = { role: turn.role, content: turn.content ?? "" };
-  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult", "attachments"]) {
+  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult", "attachments", "rating", "best", "votedAt"]) {
     const value = turn[key];
     if (value !== undefined && value !== null && value !== "" && value !== false) saved[key] = value;
   }
@@ -1143,4 +1143,81 @@ export function withWide(wide, answers, turn) {
   const next = new Set([...wide].filter((open) => !answers.includes(open)));
   if (!wide.has(turn)) next.add(turn);
   return next;
+}
+
+/**
+ * An answer's rating after a click on up or down: the same one again takes it
+ * back. Brad, 2026-11-20: "I should be able to rate answers".
+ */
+export function withRating(turn, rating, now = Date.now()) {
+  return { rating: turn.rating === rating ? undefined : rating, votedAt: now };
+}
+
+/**
+ * Whether the best of a question's answers can be picked: every answer is in,
+ * and two or more of them have words.
+ */
+export function canPickBest(round) {
+  const answers = (round?.answers ?? []).filter((turn) => turn.role === "assistant");
+  if (answers.some((turn) => turn.pending || turn.waiting)) return false;
+  return answers.filter((turn) => String(turn.content ?? "").trim()).length > 1;
+}
+
+/**
+ * What changes when an answer is voted best: it becomes the round's one best,
+ * or, when it already was, the round has none. Each change is a pair of the
+ * answer and the fields it gets.
+ */
+export function bestChanges(answers, turn, now = Date.now()) {
+  const pick = turn.best ? null : turn;
+  const changes = (answers ?? []).filter((answer) => answer.best && answer !== pick).map((answer) => [answer, { best: undefined }]);
+  if (pick) changes.push([pick, { best: true, votedAt: now }]);
+  return changes;
+}
+
+/**
+ * The votes by model, from the questions Rust found votes on, newest first:
+ * how often each model was voted best and out of how many questions where a
+ * best was picked among its answers, its ups and downs, and the questions it
+ * won. Brad, 2026-11-20: "it keeps track of which answers were asked when it
+ * got voted the best one."
+ */
+export function voteTally(rounds) {
+  const rows = new Map();
+  const row = (model) => {
+    if (!rows.has(model)) rows.set(model, { model, best: 0, of: 0, up: 0, down: 0, won: [] });
+    return rows.get(model);
+  };
+  for (const round of rounds ?? []) {
+    const answers = round.answers ?? [];
+    const picked = answers.some((answer) => answer.best);
+    for (const answer of answers) {
+      const entry = row(answer.model);
+      if (answer.rating === "up") entry.up += 1;
+      if (answer.rating === "down") entry.down += 1;
+      if (!picked) continue;
+      entry.of += 1;
+      if (!answer.best) continue;
+      entry.best += 1;
+      entry.won.push({
+        session: round.session,
+        title: round.title,
+        question: round.question,
+        votedAt: round.votedAt,
+        over: answers.filter((other) => other !== answer).map((other) => other.model),
+      });
+    }
+  }
+  return [...rows.values()]
+    .filter((entry) => entry.of || entry.up || entry.down)
+    .sort((a, b) => b.best - a.best || b.up - b.down - (a.up - a.down) || a.model.localeCompare(b.model));
+}
+
+/** "Best in 3 of 5 questions; 4 up, 1 down": one model's votes in a line. */
+export function tallyLine(entry) {
+  const parts = [];
+  if (entry.of) parts.push(`best in ${entry.best} of ${entry.of} ${entry.of === 1 ? "question" : "questions"}`);
+  if (entry.up || entry.down) parts.push(`${entry.up} up, ${entry.down} down`);
+  const line = parts.join("; ");
+  return line ? line[0].toUpperCase() + line.slice(1) : "";
 }
