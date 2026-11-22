@@ -24,6 +24,7 @@ No version went out as 0.1.0, 0.4.0, or 0.8.2.
 
 - **The Utilities page.** Small tools that run on this computer alone, so they work with both gates off. Opened from the side, next to Installers.
 - **HEIC to JPEG.** The first utility, on a Mac for now. Drop pictures or a folder, or choose them, and each one gets a JPEG copy saved beside it. The original is never changed and a file already there is never replaced: a taken name gets `-1`, `-2`, and so on. Where a picture was taken is left out of its copy unless you keep it with the switch. Quality starts at 90, and Show opens the copy in Finder.
+- **Picture check, if you want it.** An optional small model, nsfw-image-detection-384 by Marqo, installed in one click from Installers and uninstalled to the Trash the same way. Once installed, drop a JPEG, PNG, or WebP on Utilities and it shows a score on screen, with the caution that the model can make mistakes. It is a score, never a verdict. The picture is read on this computer and never copied or saved, and the score is never kept, logged, or put in a chat. Nothing installs it but you, and checking works with both gates off.
 
 ## 0.8.3
 

@@ -8,6 +8,7 @@ mod gate;
 mod makers;
 mod models;
 mod outside;
+mod picture;
 mod projects;
 mod remote;
 mod sessions;
@@ -89,6 +90,8 @@ pub fn run() {
             app.manage(web::Web::new(data.join("web.json")));
             // Boards: the local copies the Workflow view reads, and the notes on them.
             app.manage(board::Boards::new(data.join("boards")));
+            // The picture check: its model, once the person installs it.
+            app.manage(picture::PictureCheck::new(data.join("picture-check")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -140,6 +143,11 @@ pub fn run() {
             outside::remove_outside,
             deactivated::deactivated_models,
             deactivated::set_model_active,
+            picture::picture_check_status,
+            picture::install_picture_check,
+            picture::uninstall_picture_check,
+            picture::score_picture,
+            picture::pick_picture,
             uninstall::uninstall_model,
             uninstall::uninstall_place,
             utilities::utilities_status,

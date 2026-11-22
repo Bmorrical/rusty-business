@@ -51,6 +51,12 @@ trash = "5.4"
 # of its own: update.rs fetches the files through the outbound gate and hands
 # it the bytes.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["native-tls"] }
+# The picture check (picture.rs): a small vision model that scores a picture
+# on this computer, in memory. candle runs the model, and image decodes the
+# picture. 0.11 rather than 0.9: 0.9 brings an old zip with open advisories.
+candle-core = "=0.11.1"
+candle-nn = "=0.11.1"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
