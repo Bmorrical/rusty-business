@@ -1132,3 +1132,15 @@ export function viewTarget(mode, pane, box) {
   else if (mode === VIEW_START && box) target = Math.min(end, box.bottom - pane.clientHeight, box.top);
   return target !== null && target > pane.scrollTop + 0.5 ? target : null;
 }
+
+/**
+ * The answers open wide once the reader clicks one. `wide` holds the answers
+ * open now, and `answers` is the round the clicked one sits in. Opening an
+ * answer closes any other in its round, and a second click closes it, back to
+ * side by side. Nothing else changes, and nothing is saved.
+ */
+export function withWide(wide, answers, turn) {
+  const next = new Set([...wide].filter((open) => !answers.includes(open)));
+  if (!wide.has(turn)) next.add(turn);
+  return next;
+}
