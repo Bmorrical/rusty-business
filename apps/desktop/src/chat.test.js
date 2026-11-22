@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   answerRoom,
   answersLine,
+  bestChanges,
   canGrade,
+  canPickBest,
   canRemove,
   chatModels,
   checkedLine,
@@ -99,6 +101,9 @@ import {
   VIEW_STAY,
   viewAfterMove,
   viewTarget,
+  tallyLine,
+  voteTally,
+  withRating,
   withWide,
 } from "./chat.js";
 
@@ -1234,4 +1239,94 @@ test("one answer opens wide and closes again, one at most in each round", () => 
 
   const elsewhere = withWide(none, [other], other);
   assert.deepEqual(new Set(withWide(elsewhere, round, first)), new Set([other, first]), "another round keeps its own");
+});
+
+// Brad, 2026-11-20: "I should be able to rate answers, and it keeps track of
+// which answers were asked when it got voted the best one."
+test("a rating toggles, and the same click again takes it back", () => {
+  assert.deepEqual(withRating({}, "up", 5), { rating: "up", votedAt: 5 });
+  assert.deepEqual(withRating({ rating: "up" }, "down", 6), { rating: "down", votedAt: 6 });
+  assert.deepEqual(withRating({ rating: "up" }, "up", 7), { rating: undefined, votedAt: 7 });
+});
+
+test("a best can be picked only once two or more answers are in", () => {
+  const answer = (content, extra = {}) => ({ role: "assistant", content, ...extra });
+  assert.equal(canPickBest({ answers: [answer("One")] }), false, "one answer has nothing to beat");
+  assert.equal(canPickBest({ answers: [answer("One"), answer("Two")] }), true);
+  assert.equal(canPickBest({ answers: [answer("One"), answer("Two", { pending: true })] }), false, "wait for every answer");
+  assert.equal(canPickBest({ answers: [answer("One"), answer("  ")] }), false, "an empty answer does not count");
+});
+
+test("voting one answer best clears the others, and a second click clears it", () => {
+  const first = { role: "assistant", content: "One" };
+  const second = { role: "assistant", content: "Two", best: true };
+  const changes = bestChanges([first, second], first, 9);
+  assert.deepEqual(changes, [
+    [second, { best: undefined }],
+    [first, { best: true, votedAt: 9 }],
+  ]);
+  assert.deepEqual(bestChanges([first, second], second, 10), [[second, { best: undefined }]]);
+});
+
+test("the tally counts each model's wins, ups, and downs, and names the questions it won", () => {
+  const rounds = [
+    {
+      session: "b",
+      title: "Rates",
+      question: "How do rates work?",
+      votedAt: 20,
+      answers: [
+        { model: "phi4", rating: "up", best: true },
+        { model: "gpt-oss", rating: "down", best: false },
+      ],
+    },
+    {
+      session: "a",
+      title: "Letters",
+      question: "Write a cover letter",
+      votedAt: 10,
+      answers: [
+        { model: "phi4", rating: null, best: false },
+        { model: "gpt-oss", rating: "up", best: true },
+        { model: "nemotron", rating: null, best: false },
+      ],
+    },
+    { session: "c", title: "Solo", question: "Hi", votedAt: 5, answers: [{ model: "nemotron", rating: "up", best: false }] },
+  ];
+  const tally = voteTally(rounds);
+  assert.deepEqual(
+    tally.map((row) => [row.model, row.best, row.of, row.up, row.down]),
+    [
+      ["phi4", 1, 2, 1, 0],
+      ["gpt-oss", 1, 2, 1, 1],
+      ["nemotron", 0, 1, 1, 0],
+    ],
+  );
+  assert.deepEqual(tally[0].won, [{ session: "b", title: "Rates", question: "How do rates work?", votedAt: 20, over: ["gpt-oss"] }]);
+  assert.deepEqual(tally[1].won[0].over, ["phi4", "nemotron"]);
+  assert.equal(tallyLine(tally[0]), "Best in 1 of 2 questions; 1 up, 0 down");
+  assert.equal(tallyLine({ best: 0, of: 0, up: 2, down: 0 }), "2 up, 0 down");
+  assert.equal(tallyLine({ best: 1, of: 1, up: 0, down: 0 }), "Best in 1 of 1 question");
+  assert.deepEqual(voteTally([]), []);
+});
+
+test("a saved chat keeps each answer's votes", () => {
+  const saved = savedTurn({ role: "assistant", content: "One", rating: "up", best: true, votedAt: 3, pending: false });
+  assert.equal(saved.rating, "up");
+  assert.equal(saved.best, true);
+  assert.equal(saved.votedAt, 3);
+});
+
+test("votes are never sent to a model", () => {
+  const turns = [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Hello", model: "phi4", rating: "up", best: true, votedAt: 3 },
+    { role: "user", content: "Again" },
+  ];
+  const sent = requestMessages(turns, "phi4");
+  assert.deepEqual(sent, [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Hello" },
+    { role: "user", content: "Again" },
+  ]);
 });

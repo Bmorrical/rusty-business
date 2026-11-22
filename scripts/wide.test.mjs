@@ -48,7 +48,7 @@ test('each answer beside others has one button that opens it and closes it', () 
   assert.match(widen, /@click="wide = withWide\(wide, round\.answers, turn\)"/, 'a click no longer opens or closes the answer');
   assert.match(widen, /:aria-pressed="wide\.has\(turn\)"/, 'a screen reader is no longer told whether the answer is open');
   assert.match(widen, /:aria-label="wide\.has\(turn\) \? 'Back to side by side' : 'Open wide'"/);
-  assert.match(app, /class="turn assistant" :class="\{ opened: wide\.has\(turn\) \}"/);
+  assert.match(app, /class="turn assistant" :class="\{ opened: wide\.has\(turn\)[ ,]/);
   assert.match(app, /\n {2}withWide,\n/, 'App.vue takes withWide from chat.js');
 });
 
