@@ -36,9 +36,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   first: the Vulkan build from llama.cpp's own releases, pinned to one
   release and checked by its SHA-256, which uses the Vulkan loader. Until
   then, the app starts `llama-server` when it is installed on the computer.
-- **Reading images.** Images dropped on a message, and scanned PDFs, are
-  read by a model that can see. That means mlx-vlm in the engine and a
-  vision model on the Models list, such as Qwen2.5-VL 7B at about 5 GB.
+- **Reading images.** Phi-3.5 Vision reads pictures on a Mac. Next:
+  mlx-vlm carried in the Mac download, Phi-4-multimodal and Molmo-7B-O on
+  the Pictures tab, pictures on Windows and Linux, and scanned PDFs.
 - **Making images.** Ask for a picture and it appears in the chat, made on
   this computer: mflux in the engine and a FLUX model of 6 to 12 GB.
 

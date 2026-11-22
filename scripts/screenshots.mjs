@@ -41,7 +41,7 @@ export const SCALE = 2;
  * One picture each. `open` is the id of the saved chat to show, `thinking`
  * opens that chat's thinking, `top` shows the chat from its first question
  * rather than its last answer, `page` opens the Installers or Settings page,
- * `tab` opens one of Settings' tabs, by its name,
+ * `tab` opens one of that page's tabs, by its name,
  * `engine: 'off'` is the app with no engine answering, and
  * `engine: 'first-run'` is the app on a computer with none of its models yet.
  */
@@ -53,11 +53,33 @@ export const SCENES = [
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
   { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers' },
+  { file: 'pictures.png', scheme: 'light', engine: 'on', page: 'installers', tab: 'Pictures' },
   { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings', tab: 'Models' },
 ];
 
 /** The button in the side bar that opens each page a picture shows. */
 export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
+
+/**
+ * The models that read pictures, as makers_status offers them on a Mac. The
+ * first-run offers leave them out, so the engine's report does too.
+ */
+export const PICTURE_OFFERS = [
+  { id: 'mlx-community/Phi-3.5-vision-instruct-4bit', name: 'Phi-3.5 Vision', maker: 'Microsoft', license: 'MIT', bytes: 2336262939 },
+];
+
+/**
+ * What picture_engine_status gives on a Mac with no model that reads pictures
+ * on the disk: nothing answers, so nothing is started.
+ */
+export const VISION_NOT_INSTALLED = {
+  supported: true,
+  url: 'http://127.0.0.1:8081/v1',
+  reachable: false,
+  models: [],
+  onDisk: [],
+  startHint: 'pip install mlx-vlm',
+};
 
 /** The outside engines as outside_status gives them before anyone adds one. */
 export const OUTSIDE_NOT_ADDED = [
@@ -128,19 +150,22 @@ export function forMakers(report, picked) {
 
 /**
  * Every maker on the app's list with its models, as makers_status gives it.
- * The recording offers every model on the list, so its offers are the list.
+ * The recording offers every model on the list, so its offers are the list,
+ * with the models that read pictures after each maker's own.
  * The stand-in carries this function into the page, so it uses nothing else.
  */
-export function makersStatus(report, picked) {
-  const names = [...new Set(report.offers.map((offer) => offer.maker))];
+export function makersStatus(report, picked, pictureOffers = []) {
+  const offers = [...report.offers, ...pictureOffers];
+  const names = [...new Set(offers.map((offer) => offer.maker))];
   return names.map((name) => ({
     name,
     picked: picked.includes(name),
-    models: report.offers
+    models: offers
       .filter((offer) => offer.maker === name)
       .map((offer) => ({
         name: offer.name,
         license: offer.license,
+        pictures: pictureOffers.some((entry) => entry.id === offer.id),
         onDisk: report.onDisk.some((model) => model.name === offer.name),
         ids: report.onDisk.filter((model) => model.name === offer.name).map((model) => model.id),
         offer,
@@ -203,7 +228,7 @@ export function engineFor(scene, engine, sessions) {
 }
 
 /**
- * The script that stands in for Rust inside the page. It answers the ten
+ * The script that stands in for Rust inside the page. It answers the twelve
  * calls the pictures need and refuses the rest, a download and a change of
  * makers among them. Grok is not added. Asked to start the engine, it starts
  * nothing and gives the reason it was handed, by default that the engine's
@@ -211,7 +236,8 @@ export function engineFor(scene, engine, sessions) {
  * the stack is running. The outbound gate is off, as it is on a first run.
  * The makers are picked as the app picks them before the person does, and
  * the engine's report holds only their models. No model is switched off, and
- * Uninstall would move one to the Trash, as on a Mac.
+ * Uninstall would move one to the Trash, as on a Mac. Phi-3.5 Vision is
+ * offered, as on a Mac, and no model that reads pictures is on the disk.
  */
 export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUNNING) {
   return `(() => {
@@ -221,12 +247,15 @@ export function standIn(engine, sessions, start = NOT_STARTED, stack = STACK_RUN
     const notStarted = ${JSON.stringify(start)};
     const stack = ${JSON.stringify(stack)};
     const outside = ${JSON.stringify(OUTSIDE_NOT_ADDED)};
+    const pictureOffers = ${JSON.stringify(PICTURE_OFFERS)};
+    const vision = ${JSON.stringify(VISION_NOT_INSTALLED)};
     const forMakers = ${forMakers};
     const makersStatus = ${makersStatus};
     const latestAnswers = ${latestAnswers};
     const answers = {
       engine_status: () => forMakers(engine, picked),
-      makers_status: () => makersStatus(engine, picked),
+      makers_status: () => makersStatus(engine, picked, pictureOffers),
+      picture_engine_status: () => vision,
       start_engine: () => notStarted,
       start_stack: () => stack,
       gate_status: () => false,
@@ -409,12 +438,13 @@ async function takePicture(send, address, scene, engine, sessions) {
     await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${label}).click()`);
     if (scene.tab) {
       const name = JSON.stringify(scene.tab);
-      await until(send, tab, `document.querySelector('.settings-tabs') !== null`, "Settings' tabs");
+      await until(send, tab, `document.querySelector('.settings-tabs') !== null`, "the page's tabs");
       await inPage(send, tab, `[...document.querySelectorAll('.settings-tabs button')].find((button) => button.textContent.trim() === ${name}).click()`);
     }
-    await until(send, tab, `document.querySelectorAll('.makers > li').length > 0`, 'the model makers');
-    // Scrolled to the first maker, the picture holds every maker on the list.
-    await inPage(send, tab, `document.querySelector('.makers > li').scrollIntoView({ block: 'start' })`);
+    await until(send, tab, `document.querySelectorAll('.makers > li, .offers > li').length > 0`, 'the models');
+    // Scrolled to the first maker, or the first model that reads pictures,
+    // the picture holds the whole list.
+    await inPage(send, tab, `document.querySelector('.makers > li, .offers > li').scrollIntoView({ block: 'start' })`);
   }
 
   // Wait for the fonts, then for two frames, so the picture is of a settled page.

@@ -120,10 +120,17 @@ export function datesIn(text) {
   return patterns.flatMap((pattern) => text.match(pattern) ?? []);
 }
 
-/** The makers on the app's list of models, read from the Rust that holds it. */
+/**
+ * The makers of the chat models on the app's list, one per model, read from
+ * the Rust that holds it. A model that reads pictures runs on its own engine
+ * and is counted apart, so an entry with `pictures: true` is left out.
+ */
 export function makersIn(rust) {
   const list = /const CATALOG: &\[CatalogEntry\] = &\[([\s\S]*?)\n\];/.exec(rust)?.[1] ?? '';
-  return [...list.matchAll(/maker: "([^"]+)"/g)].map((match) => match[1]);
+  return list
+    .split(/CatalogEntry \{/)
+    .filter((entry) => !/pictures: true/.test(entry))
+    .flatMap((entry) => [...entry.matchAll(/maker: "([^"]+)"/g)].map((match) => match[1]));
 }
 
 /** Where a content security policy lets a page connect: the sources after `connect-src`. */
@@ -391,6 +398,11 @@ test('sections, reasons, addresses, and policies are read from the text', () => 
   assert.deepEqual(
     makersIn('const CATALOG: &[CatalogEntry] = &[\n    CatalogEntry { maker: "A", context: 1 },\n    CatalogEntry { maker: "B", context: 2 },\n];\nconst OTHER: &str = "maker: \\"C\\"";'),
     ['A', 'B'],
+  );
+  assert.deepEqual(
+    makersIn('const CATALOG: &[CatalogEntry] = &[\n    CatalogEntry { maker: "A", pictures: false },\n    CatalogEntry { maker: "A", pictures: true },\n];'),
+    ['A'],
+    'a model that reads pictures is counted apart',
   );
   assert.deepEqual(makersIn('nothing here'), []);
 

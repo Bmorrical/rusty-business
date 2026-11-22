@@ -10,6 +10,7 @@ The desktop app's Rust code.
 | `engine.rs`   | The engine adapter: finds the model engine on this computer, filters its models to the allowed list, names the models on the disk that the engine does not list, says whether this window started the engine that answers, streams a chat, and separates thinking from the answer |
 | `models.rs`   | The models already on this computer: reads the folder the engine reads, the Hugging Face cache on a Mac or the app's own models folder on Windows and Linux, and reports the app's models that are whole there |
 | `starter.rs`  | The engine's start: when no engine answers, finds the engine's program on this computer and starts it, `mlx_lm.server` on a Mac and llama.cpp's `llama-server` on Windows and Linux |
+| `vision.rs`   | The picture engine: `mlx_vlm.server` on a Mac, on its own loopback port, for a model that reads pictures. A picture is refused for an outside engine and for a model that cannot read it |
 | `downloads.rs` | The models' download: on a first run, brings the model picked from Hugging Face into the models folder the engine reads |
 | `makers.rs`   | The model makers picked: Microsoft until the person picks others, and always one |
 | `deactivated.rs` | The models switched off: left out of questions, grading, and comparisons, with their files kept |

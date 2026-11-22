@@ -40,7 +40,7 @@ use crate::engine;
 pub const PROGRAM_VARIABLE: &str = "RUSTY_ENGINE_PROGRAM";
 
 /// How long the app waits for an engine it started to answer.
-const PATIENCE: Duration = Duration::from_secs(60);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(60);
 
 /// How long it waits between one look and the next.
 const PAUSE: Duration = Duration::from_millis(250);
@@ -59,6 +59,9 @@ pub enum Engine {
     /// `mlx_lm.server`, on a Mac. It finds its models in the Hugging Face
     /// cache.
     Mlx,
+    /// `mlx_vlm.server`, on a Mac: the picture engine, for the models that
+    /// read pictures (`vision.rs`). It finds its models in the same cache.
+    MlxVlm,
     /// llama.cpp's `llama-server`, on Windows and Linux, serving the GGUF
     /// models in the app's own models folder, `models`.
     Llama { models: PathBuf },
@@ -90,6 +93,7 @@ impl Engine {
     fn program_on(&self, os: &str) -> &'static str {
         match self {
             Engine::Mlx => "mlx_lm.server",
+            Engine::MlxVlm => "mlx_vlm.server",
             Engine::Llama { .. } if os == "windows" => "llama-server.exe",
             Engine::Llama { .. } => "llama-server",
         }
@@ -98,7 +102,7 @@ impl Engine {
     /// How this engine's program is started.
     fn command(&self, program: &Path, address: &Address) -> Command {
         match self {
-            Engine::Mlx => command(program, address),
+            Engine::Mlx | Engine::MlxVlm => command(program, address),
             Engine::Llama { models } => llama_command(
                 program,
                 address,
@@ -412,7 +416,12 @@ pub fn look() -> Found {
     Found {
         engine,
         program,
-        models: crate::models::on_disk().len(),
+        // A model that reads pictures runs on the picture engine, so it is
+        // no reason to start this one.
+        models: crate::models::on_disk()
+            .iter()
+            .filter(|model| !engine::reads_pictures(&model.id))
+            .count(),
     }
 }
 

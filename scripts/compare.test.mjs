@@ -72,7 +72,8 @@ test('the models answer one at a time, and Stop asks no more of them', () => {
   const body = loop.slice(0, loop.indexOf('\n  }\n'));
   assert.match(body, /^\s+if \(stopAll\) break;$/m, 'Stop does not keep the models still waiting from being asked');
   assert.ok(body.indexOf('if (stopAll) break;') < body.indexOf('await ask('), 'a model is asked before Stop is looked at');
-  assert.match(body, /const error = await ask\(reply, entry, requestMessages\(history, entry\.id\)\);/, 'a model is not asked with its own side of the chat, or not waited for');
+  // Since 0.8.4 it also says whether the model reads pictures.
+  assert.match(body, /const error = await ask\(reply, entry, requestMessages\(history, entry\.id, "", entry\.pictures === true\)\);/, 'a model is not asked with its own side of the chat, or not waited for');
   // One model failing does not keep the next from answering.
   assert.match(body, /if \(error\) failed\.push\(`\$\{entry\.name\}: \$\{error\}`\);/, 'a failed model is not named');
   assert.doesNotMatch(body.slice(body.indexOf('const error')), /\b(return|throw)\b|if \(error\)[^;]*break/, 'one model failing stops the rest');

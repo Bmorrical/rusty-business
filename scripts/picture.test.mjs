@@ -72,7 +72,8 @@ function script(app) {
 test('the Installers page installs the picture check in one click, and nothing installs it otherwise', () => {
   const app = read(APP);
   const installers = page(app, 'installers', 'utilities');
-  assert.match(installers, /<h3 class="gap-above">Picture check<\/h3>/);
+  // Since 0.8.4 it has a tab of its own on Installers.
+  assert.match(installers, /installersTab === 'check'" class="settings-pane">\s*<h3>Picture check<\/h3>/);
   assert.match(installers, /<button[^>]*aria-label="Install the picture check"[^>]*@click="installPictureCheck"/s);
   // Install is the only way in: one call in the page, from one function,
   // which only the button calls.
