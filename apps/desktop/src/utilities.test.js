@@ -3,7 +3,13 @@ import { test } from "node:test";
 
 import {
   addPictures,
+  isCheckable,
+  isHeic,
   passedLine,
+  percent,
+  scoreLine,
+  smallDownloadLine,
+  splitDrop,
   pictureLine,
   pictureSize,
   pictureSummary,
@@ -60,4 +66,34 @@ test("the summary counts what was converted and what failed", () => {
   assert.equal(passedLine(0), "");
   assert.equal(passedLine(1), "1 item was not a HEIC picture and was left out.");
   assert.equal(passedLine(3), "3 items were not HEIC pictures and were left out.");
+});
+
+// Brad, 2026-11-22: "one click install on marqo should the user choose, and
+// uninstall too"
+
+test("the picture check reads JPEG, PNG, and WebP, and HEIC goes to HEIC to JPEG", () => {
+  for (const name of ["a.jpg", "/x/B.JPEG", "c.png", "C:\\d\\e.WebP"]) assert.ok(isCheckable(name), name);
+  for (const name of ["a.heic", "b.HEIF", "c.gif", "notes", ".png", ""]) assert.ok(!isCheckable(name), name);
+  assert.ok(isHeic("/x/IMG_1.HEIC") && !isHeic("a.jpg"));
+  assert.deepEqual(splitDrop(["/a.png", "/b.heic", "/folder", "/c.jpg"]), {
+    check: ["/a.png", "/c.jpg"],
+    rest: ["/b.heic", "/folder"],
+  });
+  assert.deepEqual(splitDrop(undefined), { check: [], rest: [] });
+});
+
+test("a score reads as the model's two numbers, the same way high or low", () => {
+  assert.equal(scoreLine({ nsfw: 0.0845, sfw: 0.9155 }), "NSFW 8.5%, SFW 91.5%");
+  assert.equal(scoreLine({ nsfw: 0.97, sfw: 0.03 }), "NSFW 97.0%, SFW 3.0%");
+  assert.equal(percent(2), "100.0%");
+  assert.equal(percent(undefined), "0.0%");
+  for (const score of [{ nsfw: 0.01, sfw: 0.99 }, { nsfw: 0.99, sfw: 0.01 }]) {
+    assert.doesNotMatch(scoreLine(score), /safe|unsafe|explicit|blocked|flagged|warning/i);
+  }
+});
+
+test("the picture check's download reads in MB", () => {
+  assert.equal(smallDownloadLine({ done: 3_100_000, total: 22_404_720 }), "3.1 of 22.4 MB");
+  assert.equal(smallDownloadLine({ done: 99, total: 0 }), "0.0 of 0.0 MB");
+  assert.equal(smallDownloadLine(null), "0.0 of 0.0 MB");
 });

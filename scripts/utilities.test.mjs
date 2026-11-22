@@ -93,7 +93,12 @@ test('the converter stays on this computer and adds no crate', () => {
   const rust = read(RUST);
   assert.doesNotMatch(rust, /reqwest|gate::|http/, 'nothing reaches past this computer');
   assert.match(rust, /#\[link\(name = "ImageIO", kind = "framework"\)\]/, 'the Mac reads and writes the pictures');
-  assert.doesNotMatch(read(CARGO), /^(image|libheif|libheif-rs|heic|core-foundation|core-graphics)\s*=/m);
+  assert.doesNotMatch(read(CARGO), /^(libheif|libheif-rs|heic|core-foundation|core-graphics)\s*=/m);
+  // The picture check brings the image crate, for JPEG, PNG, and WebP only.
+  // HEIC stays with ImageIO: the converter never uses it, and it never reads HEIC.
+  assert.doesNotMatch(rust, /\bimage::|use image\b/, 'the converter does not use the image crate');
+  const image = read(CARGO).match(/^image = .*$/m)?.[0] ?? '';
+  assert.doesNotMatch(image, /heif|heic|avif/i, 'the image crate reads no HEIC');
 });
 
 test('Show opens only a JPEG this window made, and the commands are registered', () => {
