@@ -99,6 +99,7 @@ import {
   VIEW_STAY,
   viewAfterMove,
   viewTarget,
+  withWide,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -1213,4 +1214,24 @@ test("the view follows the answer only while the reader lets it, and only down",
   // Never up: a line the reader has is never taken back.
   assert.equal(viewTarget(VIEW_START, { ...pane, scrollTop: 800 }, { top: 500, bottom: 2800 }), null);
   assert.equal(viewTarget(VIEW_END, { scrollTop: 0, scrollHeight: 400, clientHeight: 600 }, null), null, "a short chat has nowhere to go");
+});
+
+// Brad, 2026-11-22: "I should be able to open and close view, like split view
+// to read more of one."
+test("one answer opens wide and closes again, one at most in each round", () => {
+  const first = { model: "a" };
+  const second = { model: "b" };
+  const other = { model: "c" };
+  const round = [first, second];
+  const none = new Set();
+
+  const opened = withWide(none, round, first);
+  assert.deepEqual([...opened], [first]);
+  assert.equal(none.size, 0, "the set it was given is left as it was");
+
+  assert.deepEqual([...withWide(opened, round, second)], [second], "opening another closes the first");
+  assert.equal(withWide(opened, round, first).size, 0, "a second click closes it, back to side by side");
+
+  const elsewhere = withWide(none, [other], other);
+  assert.deepEqual(new Set(withWide(elsewhere, round, first)), new Set([other, first]), "another round keeps its own");
 });
