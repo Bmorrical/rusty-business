@@ -64,21 +64,73 @@ function threadFor(turns, modelId) {
  * models refuse a chat whose turns do not alternate. Given a model, each
  * question carries one answer, that model's own when it gave one.
  */
-export function requestMessages(turns, modelId, system = "") {
+export function requestMessages(turns, modelId, system = "", seesPictures = false) {
   const messages = [];
   const instructions = String(system ?? "").trim();
   if (instructions) messages.push({ role: "system", content: instructions });
   for (const turn of modelId ? threadFor(turns, modelId) : (turns ?? [])) {
-    const content = withAttachments(turn);
-    if (!content || !["system", "user", "assistant"].includes(turn.role)) continue;
+    if (!["system", "user", "assistant"].includes(turn.role)) continue;
+    const pictures = turn.role === "user" ? picturesOf(turn) : [];
+    let content = withAttachments(turn);
+    if (pictures.length && !seesPictures) {
+      // A model that cannot read pictures is told one was attached, and is
+      // never sent it.
+      content = [content, pictureUnseenLine(pictures.length)].filter(Boolean).join("\n\n");
+    } else if (pictures.length && !content) {
+      content = pictures.length === 1 ? "The user attached a picture." : "The user attached pictures.";
+    }
+    if (!content) continue;
+    const images = seesPictures ? pictures : [];
     const last = messages[messages.length - 1];
     if (last && last.role === turn.role && turn.role !== "system") {
       last.content = `${last.content}\n\n${content}`;
+      if (images.length) last.images = [...(last.images ?? []), ...images].slice(-PICTURES_PER_QUESTION);
     } else {
-      messages.push({ role: turn.role, content });
+      messages.push(images.length ? { role: turn.role, content, images } : { role: turn.role, content });
     }
   }
   return messages;
+}
+
+/**
+ * Brad, 2026-11-22: "allow all 3 models, user can on click to install, start
+ * a grouping, maybe tabbed screens". A question can carry pictures, which go
+ * only to a model on this computer that reads them.
+ */
+export const PICTURES_PER_QUESTION = 4;
+
+/** The kinds of picture a question can carry, by their file's end. */
+export const PICTURE_ENDS = ["jpg", "jpeg", "png", "webp"];
+
+/** True when the path names a picture a model can read. */
+export function isPicturePath(path) {
+  const end = String(path ?? "").split(/[\\/]/).pop().split(".");
+  return end.length > 1 && PICTURE_ENDS.includes(end.pop().toLowerCase());
+}
+
+/** The pictures a turn carries, as data URLs. */
+export function picturesOf(turn) {
+  return (turn?.attachments ?? [])
+    .map((file) => file?.picture)
+    .filter((url) => typeof url === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(url));
+}
+
+/** Said to a model that cannot read the pictures a question carries. */
+export function pictureUnseenLine(count) {
+  return count === 1
+    ? "(The user attached a picture, which this model cannot see.)"
+    : `(The user attached ${count} pictures, which this model cannot see.)`;
+}
+
+/**
+ * The size a picture is shrunk to before it is sent: its long side at most
+ * `long` pixels, never made larger.
+ */
+export function shrunkSize(width, height, long = 1344) {
+  const w = Math.max(1, Math.round(Number(width) || 1));
+  const h = Math.max(1, Math.round(Number(height) || 1));
+  const scale = Math.min(1, long / Math.max(w, h));
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
 
 /**
@@ -745,6 +797,7 @@ export function attachmentTokens(files) {
 
 /** "PDF · 12K characters": a file's label in the chat. */
 export function attachmentLine(file) {
+  if (file?.picture) return file.width && file.height ? `Picture · ${file.width} × ${file.height}` : "Picture";
   const size = Number(file?.chars ?? 0);
   const amount = size >= 1000 ? `${Math.round(size / 1000)}K characters` : `${size} characters`;
   return `${file?.kind ?? "File"} · ${amount}${file?.cut ? ", cut short" : ""}`;

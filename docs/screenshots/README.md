@@ -1,6 +1,6 @@
 # Screenshots
 
-Eight pictures of the chat window. Each is 1,840 pixels wide, taken from a
+Nine pictures of the chat window. Each is 1,840 pixels wide, taken from a
 window 920 points wide, so the words are large enough to read. Select a
 picture to open it full size.
 
@@ -60,19 +60,31 @@ Installers page.
 
 ## The Installers page
 
-[![The Installers page in the dark theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate, and Outside engines below](installers.png)](installers.png?raw=true)
+[![The Installers page in the dark theme, on its Chat tab, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Microsoft's Phi-3.5 Vision marked Reads pictures, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate](installers.png)](installers.png?raw=true)
 
 The Installers page, opened from the foot of the window above Settings,
-lists every model on the app's list, from every maker, with its license and
-download size. Install downloads one, once the outbound gate is on, then
+groups the models by type in tabs: Chat, Pictures, Picture check, and
+Outside engines. Its Chat tab lists every model on the app's list, from every
+maker, with its license and download size, and marks the one that reads
+pictures, so it shows on both the Chat and Pictures tabs. Install downloads one, once the outbound gate is on, then
 adds its maker so the model shows at the top of the window. Here the gate is
 off, so Install waits. A model already on this computer whose maker is not
-added has a Show button instead. Grok, GPT, Claude, and Gemini are added below,
-under Outside engines, each on its own card.
+added has a Show button instead. Grok, GPT, Claude, and Gemini are added on the
+Outside engines tab, each on its own card.
+
+## Models that read pictures
+
+[![The Installers page in the light theme, on its Pictures tab, beside the Chat, Picture check, and Outside engines tabs: Microsoft's Phi-3.5 Vision at 2.3 GB with an Install button that waits for the outbound gate, and Phi-4-multimodal and Molmo-7B-O listed as coming in a later build, with no button](pictures.png)](pictures.png?raw=true)
+
+The Pictures tab lists the models that read a picture attached or pasted in
+the chat. Phi-3.5 Vision installs in one click, once the outbound gate is on,
+and runs on this computer through mlx-vlm. Phi-4-multimodal and Molmo-7B-O
+are listed as coming in a later build, with nothing to download yet. For now
+these models need a Mac, and a picture never goes to an outside engine.
 
 ## Settings: the models, and their makers
 
-[![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, and Google and Meta not picked, each with an Add button and its model's license and download size](settings.png)](settings.png?raw=true)
+[![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, Microsoft's Phi-3.5 Vision at 2.3 GB, and Google and Meta not picked, each with an Add button and its model's license and download size](settings.png)](settings.png?raw=true)
 
 Settings, opened from the foot of the window, lists under Models every maker
 on the app's list with its models. Add and Remove pick a maker with one click. Here the
@@ -134,5 +146,6 @@ nowhere else.
 | `engine-off.png` | The app with no engine answering                               |
 | `first-run.png`  | The first run, with none of the app's models on this computer  |
 | `installers.png` | The Installers page, with every maker's models                 |
+| `pictures.png`   | The Installers page's Pictures tab, with the models that read pictures |
 | `settings.png`   | Settings, Models, with a switch and Uninstall for each model   |
 | `chats.json`     | What the pictures are made from: the engine's report, the models offered, and five recorded chats |

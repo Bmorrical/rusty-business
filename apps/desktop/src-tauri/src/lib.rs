@@ -18,6 +18,7 @@ mod sync;
 mod uninstall;
 mod update;
 mod utilities;
+mod vision;
 mod web;
 mod workspace;
 
@@ -66,6 +67,10 @@ pub fn run() {
                 data.join("memory.md"),
             ));
             app.manage(starter::Starter::new(data.join("engine.log")));
+            // The picture engine, kept apart from the chat engine.
+            app.manage(vision::PictureStarter(starter::Starter::new(
+                data.join("picture-engine.log"),
+            )));
             // Keep the existing WAN preference and start LAN off.
             let gate = gate::Gate::new(data.join("gate"));
             app.manage(gate::LanGate::new(data.join("lan-gate")));
@@ -104,6 +109,9 @@ pub fn run() {
             engine::stop_chat,
             starter::start_engine,
             starter::free_memory,
+            vision::picture_engine_status,
+            vision::start_picture_engine,
+            vision::read_picture,
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,

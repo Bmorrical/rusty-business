@@ -181,6 +181,17 @@ pub fn offers() -> Vec<Offer> {
     offers_from(pins_here())
 }
 
+/// The models that read pictures the app can download. They run only on a
+/// Mac for now, and are never offered as a first model, since the chat
+/// engine does not serve them.
+pub fn picture_offers() -> Vec<Offer> {
+    if cfg!(target_os = "macos") {
+        offers_of(pins_here(), true)
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn remote_offers() -> Vec<Offer> {
     offers_from(&GGUF_PINNED)
 }
@@ -194,10 +205,16 @@ pub(crate) fn remote_model(id: &str) -> Option<String> {
     Some(format!("{id}:{}", tag.to_ascii_uppercase()))
 }
 
+/// The chat models these pins offer, without the models that read pictures.
 fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
+    offers_of(pins, false)
+}
+
+fn offers_of(pins: &[Pinned], pictures: bool) -> Vec<Offer> {
     let ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
     engine::allowed_models(&ids)
         .into_iter()
+        .filter(|model| engine::reads_pictures(&model.id) == pictures)
         .filter_map(|model| {
             let bytes = pinned(pins, &model.id)?.bytes();
             let license = engine::license_of(&model.name)?.to_string();
@@ -1115,6 +1132,7 @@ mod tests {
     }
 
     const PHI: &str = "mlx-community/phi-4-4bit";
+    const PHI_VISION: &str = "mlx-community/Phi-3.5-vision-instruct-4bit";
     const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 
     type Files = Vec<(String, Vec<u8>)>;
@@ -1339,6 +1357,7 @@ mod tests {
             sizes,
             [
                 (PHI, 8_256_384_748),
+                (PHI_VISION, 2_336_262_939),
                 ("mlx-community/gpt-oss-20b-MXFP4-Q8", 12_104_215_835),
                 (
                     "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
@@ -1573,6 +1592,36 @@ mod tests {
             names_of(&offers_from(pins_for(Layout::Hub))),
             names_of(&offers_from(pins_for(Layout::Gguf)))
         );
+    }
+
+    // Brad, 2026-11-22: "allow all 3 models, user can on click to install".
+    // Phi-3.5 Vision is pinned for a Mac and offered only on its own row,
+    // never as a first model.
+    #[test]
+    fn the_picture_model_is_pinned_for_a_mac_and_offered_apart() {
+        assert!(PINNED.iter().any(|pin| pin.id == PHI_VISION));
+        assert!(
+            GGUF_PINNED
+                .iter()
+                .all(|pin| !engine::reads_pictures(&pin.id))
+        );
+        assert!(
+            names_of(&offers_from(&PINNED))
+                .iter()
+                .all(|name| *name != "Phi-3.5 Vision")
+        );
+        let pictures = offers_of(&PINNED, true);
+        assert_eq!(names_of(&pictures), ["Phi-3.5 Vision"]);
+        assert_eq!(pictures[0].license, "MIT");
+        assert_eq!(pictures[0].maker, "Microsoft");
+        if cfg!(target_os = "macos") {
+            assert_eq!(picture_offers(), pictures);
+        } else {
+            assert!(picture_offers().is_empty());
+        }
+        let pin = PINNED.iter().find(|pin| pin.id == PHI_VISION).unwrap();
+        // No file of the model's own code is downloaded.
+        assert!(pin.files.iter().all(|file| !file.name.ends_with(".py")));
     }
 
     #[test]
