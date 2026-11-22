@@ -31,6 +31,7 @@ const RELEASES = 'https://github.com/Bmorrical/rusty-business/releases';
  * beginning if possible". Their notes stay.
  */
 const OUT = {
+  '0.8.3': '2026-11-21',
   '0.8.1': '2026-11-20',
   '0.8.0': '2026-11-20',
   '0.7.0': '2026-11-20',

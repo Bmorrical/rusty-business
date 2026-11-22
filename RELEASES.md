@@ -14,7 +14,20 @@ alone. A release that is out is never changed, so their notes are here.
 
 No version went out as 0.1.0, 0.4.0, or 0.8.2.
 
+## 0.8.4
+
+**Fixed**
+
+- **You keep your place while models answer.** Scroll up to read an earlier answer and the chat stays where you put it, even while another model is still answering. Scroll back to the end and it follows the answers again.
+
+**New**
+
+- **The Utilities page.** Small tools that run on this computer alone, so they work with both gates off. Opened from the side, next to Installers.
+- **HEIC to JPEG.** The first utility, on a Mac for now. Drop pictures or a folder, or choose them, and each one gets a JPEG copy saved beside it. The original is never changed and a file already there is never replaced: a taken name gets `-1`, `-2`, and so on. Where a picture was taken is left out of its copy unless you keep it with the switch. Quality starts at 90, and Show opens the copy in Finder.
+
 ## 0.8.3
+
+Released 2026-11-21.
 
 One release for everything merged since 0.8.1.
 

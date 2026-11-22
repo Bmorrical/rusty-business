@@ -90,6 +90,15 @@ import {
   viewAfterMove,
   viewTarget,
 } from "./chat.js";
+import {
+  addPictures,
+  passedLine,
+  pictureLine,
+  pictureSummary,
+  QUALITY,
+  QUALITY_HIGH,
+  QUALITY_LOW,
+} from "./utilities.js";
 
 // The page only works inside the app's own window, where Rust answers.
 const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -275,6 +284,22 @@ const attached = ref([]);
 const attaching = ref(0);
 const dropping = ref(false);
 let stopDropping = null;
+
+// The Utilities page. HEIC to JPEG runs on a Mac only, for now; where the
+// picture was taken is left out unless the person keeps it, and that choice
+// is not saved, so each visit starts with it left out.
+const heicReady = ref(false);
+const heicList = ref([]);
+const heicQuality = ref(QUALITY);
+const heicKeepPlace = ref(false);
+const heicNote = ref("");
+const heicBusy = ref(false);
+// What a drop does, on the page it lands on.
+const dropWords = computed(() =>
+  page.value === "utilities"
+    ? ["Drop to convert", "HEIC pictures, or a folder of them"]
+    : ["Drop to attach", "PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files"],
+);
 const canSend = computed(
   () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && chosen.value.length > 0 && !attaching.value,
 );
@@ -717,6 +742,11 @@ async function openPage(name) {
   page.value = name;
   menuFor.value = "";
   if (name === "workflow") return;
+  if (name === "utilities") {
+    nextTick(() => pageTitle.value?.focus());
+    await readUtilities();
+    return;
+  }
   if (name === "settings") {
     memoryDraft.value = memory.value;
     memorySaved.value = "";
@@ -1334,16 +1364,98 @@ function detach(index) {
   attached.value = attached.value.filter((_, at) => at !== index);
 }
 
-/** Files dropped on the window are attached, while a chat is open. */
+/**
+ * Files dropped on the window are attached while a chat is open, and go on
+ * the HEIC list while Utilities is open.
+ */
 function onDrop(event) {
   const kind = event.payload?.type;
   const chatting = page.value === "chat";
-  if (kind === "enter" || kind === "over") dropping.value = chatting;
+  const converting = page.value === "utilities" && heicReady.value;
+  if (kind === "enter" || kind === "over") dropping.value = chatting || converting;
   else if (kind === "leave") dropping.value = false;
   else if (kind === "drop") {
     dropping.value = false;
     if (chatting) attachPaths(event.payload.paths);
+    else if (converting) addHeic(event.payload.paths);
   }
+}
+
+/** Whether this computer can convert HEIC, asked once the page opens. */
+async function readUtilities() {
+  try {
+    heicReady.value = (await invoke("utilities_status")).heic;
+  } catch {
+    heicReady.value = false;
+  }
+}
+
+/** The system's own picker, for pictures or a folder of them. */
+async function pickHeic(folder) {
+  heicNote.value = "";
+  try {
+    await addHeic(await invoke("pick_heic", { folder }));
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+}
+
+/** Puts the HEIC pictures among `paths` on the list, then converts them. */
+async function addHeic(paths) {
+  if (!paths?.length) return;
+  heicNote.value = "";
+  try {
+    const found = await invoke("heic_pictures", { paths });
+    heicList.value = addPictures(heicList.value, found.pictures);
+    heicNote.value = found.pictures.length ? passedLine(found.passed) : "No HEIC pictures were found there.";
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+  convertWaiting();
+}
+
+/**
+ * Converts the waiting pictures one at a time, each with the quality and the
+ * choice about where it was taken as they stand when its turn comes.
+ */
+async function convertWaiting() {
+  if (heicBusy.value) return;
+  heicBusy.value = true;
+  try {
+    for (;;) {
+      const item = heicList.value.find((one) => one.status === "waiting");
+      if (!item) break;
+      item.status = "working";
+      try {
+        const made = await invoke("heic_to_jpeg", {
+          path: item.path,
+          quality: Number(heicQuality.value),
+          keepLocation: heicKeepPlace.value,
+        });
+        Object.assign(item, { status: "done", out: made.path, outName: made.name, outBytes: made.bytes });
+      } catch (error) {
+        Object.assign(item, { status: "failed", error: String(error) });
+      }
+    }
+  } finally {
+    heicBusy.value = false;
+  }
+}
+
+/** Shows a JPEG made here in the Finder. */
+async function showJpeg(item) {
+  try {
+    await invoke("show_jpeg", { path: item.out });
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+}
+
+/** Clears the list once nothing on it is converting. */
+function clearHeic() {
+  if (heicBusy.value) return;
+  heicList.value = [];
+  heicNote.value = "";
 }
 
 /** Streams one model's reply into `reply`. Gives back why it failed, or nothing. */
@@ -1924,6 +2036,14 @@ onBeforeUnmount(() => {
         <button
           class="wide"
           type="button"
+          :aria-current="page === 'utilities' ? 'page' : undefined"
+          @click="togglePage('utilities')"
+        >
+          Utilities
+        </button>
+        <button
+          class="wide"
+          type="button"
           :aria-current="page === 'settings' ? 'page' : undefined"
           @click="togglePage('settings')"
         >
@@ -1970,8 +2090,8 @@ onBeforeUnmount(() => {
 
     <main class="main">
       <div v-if="dropping" class="drop" aria-hidden="true">
-        <p class="display">Drop to attach</p>
-        <p class="quiet small">PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files</p>
+        <p class="display">{{ dropWords[0] }}</p>
+        <p class="quiet small">{{ dropWords[1] }}</p>
       </div>
       <section v-if="showsUpdate(update, updateLater)" class="update" role="status" aria-label="New version">
         <div class="update-words">
@@ -2140,6 +2260,71 @@ onBeforeUnmount(() => {
             <p v-if="outsideNotes[entry.id]" class="small" role="alert">{{ outsideNotes[entry.id] }}</p>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+        </div>
+      </section>
+      <section v-if="page === 'utilities'" class="settings" aria-labelledby="utilities-title" @keydown.esc="closePage">
+        <header class="bar">
+          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
+          </button>
+          <h2 id="utilities-title" ref="pageTitle" tabindex="-1">Utilities</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
+        </header>
+        <div class="settings-body">
+          <p class="quiet">Small tools that run on this computer alone, so they work with both gates off.</p>
+          <article class="utility" aria-labelledby="heic-title">
+            <h3 id="heic-title">HEIC to JPEG</h3>
+            <p class="quiet">
+              Makes a JPEG copy of each picture, saved beside it. The picture itself is never changed, and a file
+              already there is never replaced: the copy takes the next free name.
+            </p>
+            <p v-if="!heicReady" class="gate-ask">
+              <span>HEIC to JPEG needs a Mac for now.</span>
+            </p>
+            <template v-else>
+              <label class="check">
+                <input v-model="heicKeepPlace" type="checkbox" />
+                <span>
+                  Keep where each picture was taken
+                  <span class="quiet small block">Off, the copies leave out the location saved in each picture.</span>
+                </span>
+              </label>
+              <label class="utility-quality">
+                <span>Quality <strong>{{ heicQuality }}</strong></span>
+                <input v-model.number="heicQuality" type="range" :min="QUALITY_LOW" :max="QUALITY_HIGH" step="1" />
+              </label>
+              <div class="utility-drop">
+                <p class="quiet">Drop HEIC pictures or a folder here, or choose them.</p>
+                <span class="settings-actions">
+                  <button type="button" class="primary" @click="pickHeic(false)">Choose pictures</button>
+                  <button type="button" @click="pickHeic(true)">Choose a folder</button>
+                </span>
+              </div>
+              <p v-if="heicNote" class="small" role="alert">{{ heicNote }}</p>
+              <template v-if="heicList.length">
+                <p class="utility-summary">
+                  <span class="small" role="status">{{ pictureSummary(heicList) }}</span>
+                  <button type="button" :disabled="heicBusy" @click="clearHeic">Clear the list</button>
+                </p>
+                <ul class="offers" aria-label="Pictures to convert">
+                  <li v-for="item in heicList" :key="item.path" class="offer">
+                    <span class="offer-text">
+                      <span class="offer-name">{{ item.name }}</span>
+                      <span class="quiet small">{{ pictureLine(item) }}</span>
+                    </span>
+                    <button
+                      v-if="item.status === 'done'"
+                      type="button"
+                      :aria-label="`Show ${item.outName} in the Finder`"
+                      @click="showJpeg(item)"
+                    >
+                      Show
+                    </button>
+                  </li>
+                </ul>
+              </template>
+            </template>
+          </article>
         </div>
       </section>
       <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
@@ -4191,6 +4376,44 @@ textarea.memory:focus,
   display: flex;
   align-items: center;
   gap: 0.8rem;
+}
+
+/* The Utilities page: each utility a card. */
+.utility {
+  margin-top: 1rem;
+  padding: 1rem 1.2rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+}
+
+.utility-quality {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  max-width: 22rem;
+}
+
+.utility-quality input {
+  accent-color: var(--accent);
+}
+
+.utility-drop {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 2px dashed var(--line);
+  border-radius: 14px;
+}
+
+.utility-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
 }
 
 .check {
