@@ -1519,6 +1519,7 @@ mod tests {
             messages: vec![engine::ChatMessage {
                 role: "user".into(),
                 content: "What is 2+2?".into(),
+                images: Vec::new(),
             }],
             max_tokens: None,
         }
@@ -2480,6 +2481,7 @@ mod tests {
         let message = |role: &str, content: &str| engine::ChatMessage {
             role: role.into(),
             content: content.into(),
+            images: Vec::new(),
         };
         let asked = |messages: Vec<engine::ChatMessage>| ChatRequest {
             model: "anthropic:claude-opus-5-5".into(),
@@ -2830,6 +2832,7 @@ mod tests {
         let message = |role: &str, content: &str| engine::ChatMessage {
             role: role.into(),
             content: content.into(),
+            images: Vec::new(),
         };
         let asked = |messages: Vec<engine::ChatMessage>| ChatRequest {
             model: "google:gemini-3.5-flash".into(),

@@ -39,9 +39,11 @@ import {
   NO_MODEL,
   OUTSIDE_NOT_ADDED,
   PAGE_BUTTONS,
+  PICTURE_OFFERS,
   SCALE,
   SCENES,
   STACK_RUNNING,
+  VISION_NOT_INSTALLED,
   WIDTH,
   engineFor,
   engineOff,
@@ -66,6 +68,7 @@ const STACK = 'apps/desktop/src-tauri/src/stack.rs';
 const PINNED = 'apps/desktop/src-tauri/pinned-models.json';
 const MAKERS = 'apps/desktop/src-tauri/src/makers.rs';
 const OUTSIDE = 'apps/desktop/src-tauri/src/outside.rs';
+const VISION = 'apps/desktop/src-tauri/src/vision.rs';
 
 // The pages that show the app's pictures.
 const PAGES = ['README.md', 'apps/desktop/README.md', GALLERY];
@@ -165,14 +168,21 @@ function offPanel() {
 
 /** The app's allow-list, read from the Rust source. */
 function catalog() {
-  const entry = /CatalogEntry \{\s+needle: "([^"]+)",\s+name: "([^"]+)",\s+maker: "([^"]+)",\s+license: "([^"]+)",\s+context: ([\d_]+),?\s+\}/g;
-  return [...read(ENGINE).matchAll(entry)].map(([, needle, name, maker, license, context]) => ({
+  const entry =
+    /CatalogEntry \{\s+needle: "([^"]+)",\s+name: "([^"]+)",\s+maker: "([^"]+)",\s+license: "([^"]+)",\s+context: ([\d_]+),\s+pictures: (true|false),?\s+\}/g;
+  return [...read(ENGINE).matchAll(entry)].map(([, needle, name, maker, license, context, pictures]) => ({
     needle,
     name,
     maker,
     license,
     context: Number(context.replaceAll('_', '')),
+    pictures: pictures === 'true',
   }));
+}
+
+/** The chat models on the list: a model that reads pictures runs elsewhere. */
+function chatCatalog() {
+  return catalog().filter((entry) => !entry.pictures);
 }
 
 test('the first, wide picture is kept, and shown only in the gallery', () => {
@@ -284,11 +294,12 @@ test('each scene is a picture the script can make', () => {
       assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
     }
     if (scene.tab) {
-      assert.equal(scene.page, 'settings', `${scene.file} opens a tab, and only Settings has tabs`);
+      const holder = { settings: 'settingsTab', installers: 'installersTab' }[scene.page];
+      assert.ok(holder, `${scene.file} opens a tab, and only Settings and Installers have tabs`);
       assert.match(
         read('apps/desktop/src/App.vue'),
-        new RegExp(`@click="settingsTab = '[a-z]+'">${scene.tab}</button>`),
-        `${scene.file} opens a tab Settings has`,
+        new RegExp(`@click="${holder} = '[a-z]+'">${scene.tab}</button>`),
+        `${scene.file} opens a tab its page has`,
       );
     }
     if (scene.thinking) {
@@ -343,8 +354,13 @@ test('the recorded engine offers only models on the app\'s list', () => {
   }
   assert.deepEqual(
     engine.offers.map((offer) => offer.name),
-    allowed.map((entry) => entry.name),
-    'every model on the list is offered, in the list\'s order',
+    chatCatalog().map((entry) => entry.name),
+    'every chat model on the list is offered, in the list\'s order',
+  );
+  // A model that reads pictures is offered on its own, through PICTURE_OFFERS.
+  assert.deepEqual(
+    PICTURE_OFFERS.map((offer) => offer.name),
+    allowed.filter((entry) => entry.pictures).map((entry) => entry.name),
   );
 
   // A chat names the model it was started with. Its answers may come from
@@ -383,7 +399,9 @@ test('the recorded downloads are the pinned ones, in order, with their sizes', (
   const pins = JSON.parse(read(PINNED));
   assert.deepEqual(
     recorded().engine.offers.map((offer) => ({ id: offer.id, bytes: offer.bytes })),
-    pins.map((pin) => ({ id: pin.id, bytes: pin.files.reduce((sum, file) => sum + file.bytes, 0) })),
+    pins
+      .filter((pin) => !PICTURE_OFFERS.some((offer) => offer.id === pin.id))
+      .map((pin) => ({ id: pin.id, bytes: pin.files.reduce((sum, file) => sum + file.bytes, 0) })),
   );
 });
 
@@ -446,7 +464,8 @@ test('the page downloads a model only when its Download button is pressed', () =
   const installs = [...page.matchAll(/\binstall\(/g)].map((match) => page.slice(match.index - 30, match.index));
   assert.deepEqual(
     installs.map((before) => /async function $|@click="$/.test(before)),
-    [true, true],
+    // One Install on the Chat tab, one on the Pictures tab.
+    [true, true, true],
     'install() is defined once and called only from a button',
   );
   assert.match(page, /\{\{ formatSize\(offer\.bytes\) \}\}/, 'each offer shows its size');
@@ -673,7 +692,7 @@ test('the stand-in picks the makers as the app does before the person picks', ()
   );
 });
 
-test('the stand-in answers the ten calls the pictures need, and refuses the rest', async () => {
+test('the stand-in answers the twelve calls the pictures need, and refuses the rest', async () => {
   const { engine, chats } = recorded();
   const sessions = sessionsFrom(chats, new Date(2026, 0, 15, 9, 0));
 
@@ -685,7 +704,26 @@ test('the stand-in answers the ten calls the pictures need, and refuses the rest
   assert.equal(cleared, 1, 'what the page kept from an earlier picture is cleared');
   const picked = pickedAtFirst(engine);
   assert.deepEqual(plain(await invoke('engine_status')), plain(forMakers(engine, picked)));
-  assert.deepEqual(plain(await invoke('makers_status')), plain(makersStatus(engine, picked)));
+  assert.deepEqual(plain(await invoke('makers_status')), plain(makersStatus(engine, picked, PICTURE_OFFERS)));
+
+  // Phi-3.5 Vision is offered under Microsoft after Phi-4, as on a Mac, and
+  // marked as reading pictures. The engine's offers, the first run's, leave it
+  // out, and no picture engine answers, so none is started.
+  const microsoft = (await invoke('makers_status')).find((maker) => maker.name === 'Microsoft');
+  assert.deepEqual(microsoft.models.map((model) => [model.name, model.pictures]), [['Phi-4', false], ['Phi-3.5 Vision', true]]);
+  assert.ok(!(await invoke('engine_status')).offers.some((offer) => offer.name === 'Phi-3.5 Vision'));
+  const pins = JSON.parse(read(PINNED));
+  for (const offer of PICTURE_OFFERS) {
+    const pin = pins.find((entry) => entry.id === offer.id);
+    assert.ok(pin, `${offer.name} is pinned`);
+    assert.equal(offer.bytes, pin.files.reduce((sum, file) => sum + file.bytes, 0), `${offer.name} is offered at its pinned size`);
+    assert.ok(read(ENGINE).includes(`name: "${offer.name}"`), `engine.rs names ${offer.name}`);
+  }
+  assert.deepEqual(plain(await invoke('picture_engine_status')), VISION_NOT_INSTALLED);
+  const [, visionBody] = read(VISION).match(/pub struct PictureEngine \{\n([^}]+)\}/) ?? [];
+  const visionFields = [...(visionBody ?? '').matchAll(/^\s*pub (\w+):/gm)].map(([, field]) => field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()));
+  assert.deepEqual(Object.keys(VISION_NOT_INSTALLED), visionFields, 'the stand-in gives the picture engine in the fields vision.rs gives');
+  assert.ok(read(VISION).includes(`"${VISION_NOT_INSTALLED.startHint}"`), 'vision.rs gives the same command to install the picture engine');
   assert.deepEqual(
     plain(await invoke('list_sessions')),
     sessions.map((entry) => ({

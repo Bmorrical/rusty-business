@@ -105,6 +105,11 @@ import {
   voteTally,
   withRating,
   withWide,
+  isPicturePath,
+  pictureUnseenLine,
+  picturesOf,
+  shrunkSize,
+  PICTURES_PER_QUESTION,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -1329,4 +1334,69 @@ test("votes are never sent to a model", () => {
     { role: "assistant", content: "Hello" },
     { role: "user", content: "Again" },
   ]);
+});
+
+// Brad, 2026-11-22: "allow all 3 models, user can on click to install, start a
+// grouping, maybe tabbed screens, for each "type" collections of models, they
+// can exists in more than one tab where applicable." He took a picture in the
+// chat in 0.8.4, on a Mac first.
+const DOT = "data:image/png;base64,iVBORw0KGgo=";
+
+test("only JPEG, PNG, and WebP files are pictures a model can read", () => {
+  for (const path of ["/a/b.jpg", "C:\\x\\Y.JPEG", "p.png", "q.webp"]) assert.equal(isPicturePath(path), true, path);
+  for (const path of ["/a/b.heic", "c.gif", "notes.txt", "png", "/a.b/c"]) assert.equal(isPicturePath(path), false, path);
+});
+
+test("a turn's pictures are its data URLs of a known kind, nothing else", () => {
+  const turn = {
+    attachments: [{ picture: DOT }, { text: "words" }, { picture: "https://example.com/x.png" }, { picture: "data:image/gif;base64,R0lG" }],
+  };
+  assert.deepEqual(picturesOf(turn), [DOT]);
+  assert.deepEqual(picturesOf({}), []);
+});
+
+test("a picture is shrunk to 1344 pixels on its long side, never made larger", () => {
+  assert.deepEqual(shrunkSize(4032, 3024), { width: 1344, height: 1008 });
+  assert.deepEqual(shrunkSize(3024, 4032), { width: 1008, height: 1344 });
+  assert.deepEqual(shrunkSize(640, 480), { width: 640, height: 480 });
+  assert.deepEqual(shrunkSize(0, 0), { width: 1, height: 1 });
+});
+
+test("a model that reads pictures is sent them with the words", () => {
+  const turns = [{ role: "user", content: "What is this?", attachments: [{ name: "a.png", kind: "Picture", picture: DOT }] }];
+  assert.deepEqual(requestMessages(turns, "", "", true), [{ role: "user", content: "What is this?", images: [DOT] }]);
+});
+
+test("a model that cannot read pictures is never sent one, only told", () => {
+  const turns = [{ role: "user", content: "What is this?", attachments: [{ picture: DOT }, { picture: DOT }] }];
+  const [message] = requestMessages(turns, "", "", false);
+  assert.equal(message.images, undefined);
+  assert.equal(message.content, `What is this?\n\n${pictureUnseenLine(2)}`);
+  assert.match(pictureUnseenLine(1), /a picture, which this model cannot see/);
+});
+
+test("a picture sent alone still makes a question, and only a person's turn carries pictures", () => {
+  const turns = [
+    { role: "user", content: "", attachments: [{ picture: DOT }] },
+    { role: "assistant", content: "A dot.", attachments: [{ picture: DOT }] },
+  ];
+  assert.deepEqual(requestMessages(turns, "", "", true), [
+    { role: "user", content: "The user attached a picture.", images: [DOT] },
+    { role: "assistant", content: "A dot." },
+  ]);
+});
+
+test("joined turns keep at most four pictures", () => {
+  const many = (count) => Array.from({ length: count }, () => ({ picture: DOT }));
+  const turns = [
+    { role: "user", content: "one", attachments: many(3) },
+    { role: "user", content: "two", attachments: many(3) },
+  ];
+  const [message] = requestMessages(turns, "", "", true);
+  assert.equal(message.images.length, PICTURES_PER_QUESTION);
+});
+
+test("a picture's label gives its size", () => {
+  assert.equal(attachmentLine({ picture: DOT, width: 1344, height: 1008 }), "Picture · 1344 × 1008");
+  assert.equal(attachmentLine({ picture: DOT }), "Picture");
 });

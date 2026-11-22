@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use crate::gate::{Gate, LanGate};
 use crate::makers::Makers;
 use crate::outside::{self, Outside};
+use crate::vision;
 
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 pub(crate) const DEFAULT_MAX_TOKENS: u32 = 4096;
@@ -129,6 +130,9 @@ struct CatalogEntry {
     maker: &'static str,
     license: &'static str,
     context: u32,
+    /// True for a model that reads pictures as well as words. It runs on the
+    /// picture engine (`vision.rs`), never on the chat engine.
+    pictures: bool,
 }
 
 /// The allow-list. A model the engine holds that is not here is never shown
@@ -141,6 +145,15 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Microsoft",
         license: "MIT",
         context: 16_384,
+        pictures: false,
+    },
+    CatalogEntry {
+        needle: "phi-3.5-vision",
+        name: "Phi-3.5 Vision",
+        maker: "Microsoft",
+        license: "MIT",
+        context: 131_072,
+        pictures: true,
     },
     CatalogEntry {
         needle: "gpt-oss-20b",
@@ -148,6 +161,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "OpenAI",
         license: "Apache 2.0",
         context: 131_072,
+        pictures: false,
     },
     CatalogEntry {
         needle: "nemotron-3.5-lightning",
@@ -155,6 +169,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "NVIDIA",
         license: "OpenMDW 1.1",
         context: 262_144,
+        pictures: false,
     },
     CatalogEntry {
         needle: "gemma-4-26b-a4b",
@@ -162,6 +177,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Google",
         license: "Apache 2.0",
         context: 262_144,
+        pictures: false,
     },
     CatalogEntry {
         needle: "llama-3.1-8b-instruct",
@@ -169,6 +185,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Meta",
         license: "Llama 3.1 Community License",
         context: 131_072,
+        pictures: false,
     },
 ];
 
@@ -207,6 +224,18 @@ pub struct ModelInfo {
     pub name: String,
     pub maker: String,
     pub context: u32,
+}
+
+/// True when the model, by its id, reads pictures.
+pub fn reads_pictures(id: &str) -> bool {
+    catalog_entry(id).is_some_and(|entry| entry.pictures)
+}
+
+/// True when the model, by its name on the list, reads pictures.
+pub fn reads_pictures_by_name(name: &str) -> bool {
+    CATALOG
+        .iter()
+        .any(|entry| entry.name == name && entry.pictures)
 }
 
 fn catalog_entry(id: &str) -> Option<&'static CatalogEntry> {
@@ -438,7 +467,12 @@ async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus 
 /// the disk that it leaves out.
 fn answered(status: &mut EngineStatus, ids: &[String]) {
     status.reachable = true;
-    status.models = allowed_models(ids);
+    // A model that reads pictures runs on the picture engine, so the chat
+    // engine never lists it, even when it finds it in the same folder.
+    status.models = allowed_models(ids)
+        .into_iter()
+        .filter(|model| !reads_pictures(&model.id))
+        .collect();
     status.hidden = ids.len().saturating_sub(status.models.len());
     status.unseen = unseen(&status.on_disk, &status.models);
 }
@@ -681,6 +715,10 @@ struct Usage {
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Pictures with the message, each a `data:` URL. Only a model on this
+    /// computer that reads pictures is ever sent one (`vision.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -731,7 +769,8 @@ fn checked_request(request: &ChatRequest) -> Result<(), String> {
     if catalog_entry(&request.model).is_none() {
         return Err("That model is not on this app's list.".to_string());
     }
-    checked_messages(&request.messages)
+    checked_messages(&request.messages)?;
+    vision::checked_pictures(&request.model, &request.messages)
 }
 
 /// The messages any engine is sent: at least one, each in a role an engine
@@ -757,7 +796,7 @@ async fn run_chat(
     checked_request(request)?;
     let body = serde_json::json!({
         "model": request.model,
-        "messages": request.messages,
+        "messages": vision::body_messages(&request.messages),
         "stream": true,
         "stream_options": { "include_usage": true },
         "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
@@ -935,14 +974,24 @@ pub async fn chat_stream(
         .lock()
         .map_err(|_| "Could not start the chat.".to_string())?
         .insert(chat_id.clone(), stop);
-    let result = if outside::is_outside(&request.model) {
+    let result = if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {
+        // A picture never leaves this computer.
+        Err(vision::STAYS_HERE.to_string())
+    } else if outside::is_outside(&request.model) {
         // An engine outside this computer waits for no turn here.
         outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
             let _ = on_event.send(event);
         })
         .await
     } else {
-        match base_url() {
+        // A model that reads pictures answers on the picture engine, on this
+        // computer, and takes its turn with the chat engine's models.
+        let base = if reads_pictures(&request.model) {
+            Ok(vision::PICTURE_BASE_URL.to_string())
+        } else {
+            base_url()
+        };
+        match base {
             Ok(base) => {
                 chat_on_engine(&base, &lan, &chats, &request, &mut stopped, |event| {
                     let _ = on_event.send(event);
@@ -992,6 +1041,7 @@ mod tests {
                 messages: vec![ChatMessage {
                     role: "user".to_string(),
                     content: "Hello".to_string(),
+                    images: Vec::new(),
                 }],
                 max_tokens: Some(8),
             };
@@ -1162,7 +1212,10 @@ mod tests {
             makers(),
             ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]
         );
-        assert_eq!(models_by("Microsoft"), [("Phi-4", "MIT")]);
+        assert_eq!(
+            models_by("Microsoft"),
+            [("Phi-4", "MIT"), ("Phi-3.5 Vision", "MIT")]
+        );
         assert_eq!(models_by("OpenAI"), [("gpt-oss 20B", "Apache 2.0")]);
         assert_eq!(
             models_by("NVIDIA"),
@@ -1185,6 +1238,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "hi".to_string(),
+                images: Vec::new(),
             }],
             max_tokens: None,
         };
@@ -1539,6 +1593,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "What is 2+2? One short sentence.".to_string(),
+                images: Vec::new(),
             }],
             max_tokens: Some(200),
         };

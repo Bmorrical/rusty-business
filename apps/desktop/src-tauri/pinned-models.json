@@ -51,6 +51,52 @@
     ]
   },
   {
+    "id": "mlx-community/Phi-3.5-vision-instruct-4bit",
+    "revision": "9055619fe9dec921b8323f689064c23cd2c540d3",
+    "files": [
+      {
+        "name": "config.json",
+        "bytes": 4568,
+        "sha256": "ecc4f4a9b20a675a314e472677890c5b10b73772b06acbe985bdd499c96b8f5d"
+      },
+      {
+        "name": "model.safetensors",
+        "bytes": 2334279041,
+        "sha256": "1c8245bf344f7583eed66311ede1c2bf8d9ebaff7a833b618463e95bb4261219"
+      },
+      {
+        "name": "model.safetensors.index.json",
+        "bytes": 117158,
+        "sha256": "cac8025f34afc6dfbd4997a04ae4b05904349ecab7cfcaffa49137faf29c1b13"
+      },
+      {
+        "name": "preprocessor_config.json",
+        "bytes": 448,
+        "sha256": "72011d7349d33e79e71b635c27736ac8eab427b91a57b9cf4e2f4643774a9f13"
+      },
+      {
+        "name": "processor_config.json",
+        "bytes": 119,
+        "sha256": "286a9e7fb58a489eae6825b79be69f62068c2028435c29ee52c3a485d071707b"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "bytes": 670,
+        "sha256": "f9535fada19315e0d8eb89521cebe111c008fee98d16e7c6744acfb50505d8c3"
+      },
+      {
+        "name": "tokenizer.json",
+        "bytes": 1851388,
+        "sha256": "478fb6fd0bf1403eb2ffda892e285f5ae968b9e0c06eb2815552ebedacb8ca93"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "bytes": 9547,
+        "sha256": "d637971d627e4f8ce0422401bd0a305d9f763657ad21e8205afe8d36b6672524"
+      }
+    ]
+  },
+  {
     "id": "mlx-community/gpt-oss-20b-MXFP4-Q8",
     "revision": "773a7da77e569019bb0fd17a554b263738d669a3",
     "files": [

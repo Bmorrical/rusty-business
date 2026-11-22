@@ -96,6 +96,9 @@ import {
   voteTally,
   withRating,
   withWide,
+  isPicturePath,
+  shrunkSize,
+  PICTURES_PER_QUESTION,
 } from "./chat.js";
 import {
   addPictures,
@@ -241,6 +244,9 @@ const found = ref([]);
 const searchBox = ref(null);
 const menuFor = ref("");
 const settingsTab = ref("memory");
+// "start a grouping, maybe tabbed screens, for each "type" collections of
+// models, they can exists in more than one tab where applicable."
+const installersTab = ref("chat");
 const projectDialog = ref(null);
 const editing = ref(null);
 let editingFrom = {};
@@ -274,8 +280,13 @@ const outsideListed = computed(() => outside.value.filter((entry) => entry.added
 const outsideModels = computed(() => (gate.value ? outsideListed.value : []));
 const lanEngine = computed(() => engine.value?.remote === true);
 const engineModels = computed(() => (lanEngine.value && !lanGate.value ? [] : engine.value?.models ?? []));
+// The picture engine: models that read pictures, on a Mac, on this computer.
+const vision = ref(null);
+const visionNote = ref("");
+let visionStarting = false;
+const visionModels = computed(() => (vision.value?.reachable ? (vision.value.models ?? []) : []).map((entry) => ({ ...entry, pictures: true })));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...engineModels.value, ...outsideModels.value]);
+const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -321,6 +332,11 @@ const heicBusy = ref(false);
 // the Installers page. A score lives here, on the page, and nowhere else; it
 // is cleared each time the page opens.
 const PICTURE_CHECK = "picture-check";
+// "allow all 3 models" with "Phi-3.5 now, rest later": listed, not offered.
+const PICTURE_MODELS_COMING = [
+  { name: "Phi-4-multimodal", maker: "Microsoft", license: "MIT" },
+  { name: "Molmo-7B-O", maker: "Ai2", license: "Apache-2.0" },
+];
 const pictureCheck = ref(null);
 const pictureScore = ref(null);
 const pictureNote = ref("");
@@ -332,11 +348,15 @@ const dropWords = computed(() =>
     ? pictureReady.value
       ? ["Drop a picture", "HEIC to convert, or JPEG, PNG, or WebP to check"]
       : ["Drop to convert", "HEIC pictures, or a folder of them"]
-    : ["Drop to attach", "PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files"],
+    : ["Drop to attach", "PDF, Word, PowerPoint, spreadsheets, CSV, text or code files, and JPEG, PNG, or WebP pictures"],
 );
 const canSend = computed(
   () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && chosen.value.length > 0 && !attaching.value,
 );
+/** Pictures waiting to go with the next message. */
+const attachedPictures = computed(() => attached.value.filter((file) => file.picture));
+/** The models picked that cannot read the pictures waiting. */
+const blindPicked = computed(() => (attachedPictures.value.length ? chosen.value.filter((entry) => entry.pictures !== true) : []));
 /** The model picked with the smallest window, which files must fit. */
 const tightest = computed(() =>
   chosen.value.filter((entry) => entry.context).reduce((least, entry) => (!least || entry.context < least.context ? entry : least), null),
@@ -372,6 +392,11 @@ const displayMakers = computed(() => {
     }),
   }));
 });
+// The models that read pictures, with their maker, for the Pictures tab. They
+// show under Chat too, since they answer words as well.
+const pictureEntries = computed(() =>
+  displayMakers.value.flatMap((maker) => maker.models.filter((entry) => entry.pictures).map((entry) => ({ maker, entry }))),
+);
 const side = computed(() => arrangeSessions(sessions.value, projects.value, now.value));
 const searching = computed(() => Boolean(query.value.trim()));
 const currentProject = computed(() => projects.value.find((project) => project.id === current.value.project) ?? null);
@@ -494,6 +519,7 @@ async function checkEngine() {
       startNote.value = "";
     }
     pickModels(picked.value, chatModels(current.value));
+    checkVision();
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -503,6 +529,32 @@ async function checkEngine() {
       checkAgain = false;
       checkEngine();
     }
+  }
+}
+
+/**
+ * Reads the picture engine, and starts it when a model that reads pictures
+ * is on the disk and no engine answers. It never holds up the chat engine.
+ */
+async function checkVision() {
+  if (!inApp) return;
+  try {
+    vision.value = await invoke("picture_engine_status");
+    if (vision.value?.supported && !vision.value.reachable && vision.value.onDisk?.length && !visionStarting) {
+      visionStarting = true;
+      try {
+        const start = await invoke("start_picture_engine");
+        visionNote.value = start.answering ? "" : (start.reason ?? "");
+        if (start.answering) vision.value = await invoke("picture_engine_status");
+      } finally {
+        visionStarting = false;
+      }
+    } else if (vision.value?.reachable) {
+      visionNote.value = "";
+    }
+    pickModels(picked.value, chatModels(current.value));
+  } catch {
+    vision.value = null;
   }
 }
 
@@ -1305,7 +1357,7 @@ async function send() {
     if (stopAll) break;
     const reply = replies[index];
     reply.waiting = false;
-    const error = await ask(reply, entry, requestMessages(history, entry.id));
+    const error = await ask(reply, entry, requestMessages(history, entry.id, "", entry.pictures === true));
     // One model failing does not keep the next from answering.
     if (error) failed.push(`${entry.name}: ${error}`);
   }
@@ -1380,7 +1432,7 @@ async function work(session, entry, project, system, first) {
       await persist();
       return false;
     }
-    const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id);
+    const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id, "", entry.pictures === true);
     session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true });
     reply = session.messages.at(-1);
     await persist();
@@ -1399,11 +1451,73 @@ async function work(session, entry, project, system, first) {
   }
 }
 
-/** Reads files into text, to go with the next message. */
+/**
+ * Shrinks a picture in the page before it is sent: its long side at most
+ * 1344 pixels, as a JPEG on white. The shrunk copy is what the chat keeps.
+ */
+function shrinkPicture(url, name) {
+  return new Promise((resolve, reject) => {
+    const picture = new Image();
+    picture.onload = () => {
+      const size = shrunkSize(picture.naturalWidth, picture.naturalHeight);
+      const canvas = document.createElement("canvas");
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const pen = canvas.getContext("2d");
+      pen.fillStyle = "#fff";
+      pen.fillRect(0, 0, size.width, size.height);
+      pen.drawImage(picture, 0, 0, size.width, size.height);
+      resolve({ name, kind: "Picture", picture: canvas.toDataURL("image/jpeg", 0.85), width: size.width, height: size.height });
+    };
+    picture.onerror = () => reject(`${name} could not be read as a picture.`);
+    picture.src = url;
+  });
+}
+
+/** Adds a picture to the next message, up to four. */
+async function attachPicture(read) {
+  if (attachedPictures.value.length >= PICTURES_PER_QUESTION) {
+    problem.value = `A question can carry at most ${PICTURES_PER_QUESTION} pictures.`;
+    return;
+  }
+  const file = await shrinkPicture(read.url, read.name);
+  if (!attached.value.some((known) => known.picture === file.picture)) attached.value = [...attached.value, file];
+}
+
+/** A picture pasted into the message box goes with the next message. */
+async function onPaste(event) {
+  const items = [...(event.clipboardData?.items ?? [])].filter((item) => item.kind === "file" && /^image\/(jpeg|png|webp)$/.test(item.type));
+  if (!items.length) return;
+  event.preventDefault();
+  for (const item of items) {
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    attaching.value += 1;
+    try {
+      const url = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject("The pasted picture could not be read.");
+        reader.readAsDataURL(blob);
+      });
+      await attachPicture({ url, name: blob.name || "Pasted picture" });
+    } catch (error) {
+      problem.value = String(error);
+    } finally {
+      attaching.value -= 1;
+    }
+  }
+}
+
+/** Reads files into text, and pictures as pictures, to go with the next message. */
 async function attachPaths(paths) {
   for (const path of paths ?? []) {
     attaching.value += 1;
     try {
+      if (isPicturePath(path)) {
+        await attachPicture(await invoke("read_picture", { path }));
+        continue;
+      }
       const file = await invoke("read_attachment", { path });
       if (!attached.value.some((known) => known.name === file.name && known.text === file.text)) {
         attached.value = [...attached.value, file];
@@ -2304,6 +2418,13 @@ onBeforeUnmount(() => {
           <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
+          <nav class="settings-tabs" aria-label="Installers">
+            <button type="button" :class="{ here: installersTab === 'chat' }" @click="installersTab = 'chat'">Chat</button>
+            <button type="button" :class="{ here: installersTab === 'pictures' }" @click="installersTab = 'pictures'">Pictures</button>
+            <button type="button" :class="{ here: installersTab === 'check' }" @click="installersTab = 'check'">Picture check</button>
+            <button type="button" :class="{ here: installersTab === 'outside' }" @click="installersTab = 'outside'">Outside engines</button>
+          </nav>
+          <div v-if="installersTab === 'chat'" class="settings-pane">
           <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
           <p v-if="lanEngine" class="quiet">
             Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
@@ -2325,7 +2446,10 @@ onBeforeUnmount(() => {
               <ul class="maker-models">
                 <li v-for="entry in maker.models" :key="entry.name" class="offer">
                   <span class="offer-text">
-                    <span class="offer-name">{{ entry.name }}</span>
+                    <span class="offer-name">
+                      {{ entry.name }}
+                      <span v-if="entry.pictures" class="tag small">Reads pictures</span>
+                    </span>
                     <span class="quiet small">{{ installLine(maker, entry) }}</span>
                   </span>
                   <template v-if="entry.offer && downloading === entry.offer.id">
@@ -2363,8 +2487,90 @@ onBeforeUnmount(() => {
           </ul>
           <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
           <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+          </div>
 
-          <h3 class="gap-above">Picture check</h3>
+          <div v-else-if="installersTab === 'pictures'" class="settings-pane">
+          <h3>Models that read pictures</h3>
+          <p class="quiet">
+            Attach or paste a JPEG, PNG, or WebP in the chat, and a model here reads it with your words. Each runs on this
+            computer, through mlx-vlm, and a picture never goes to an outside engine. Nothing downloads until you press
+            Install.
+          </p>
+          <p v-if="vision && !vision.supported" class="gate-ask">
+            <span>Models that read pictures need a Mac for now.</span>
+          </p>
+          <template v-else>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to install a model.</span>
+              <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
+            </p>
+            <ul class="offers" aria-label="Models that read pictures">
+              <li v-for="{ maker, entry } in pictureEntries" :key="entry.name" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ entry.name }} <span class="quiet small">by {{ maker.name }}</span></span>
+                  <span class="quiet small">{{ installLine(maker, entry) }}</span>
+                </span>
+                <template v-if="entry.offer && downloading === entry.offer.id">
+                  <span class="offer-progress">
+                    <progress
+                      :value="progress?.total ? downloaded(progress) : undefined"
+                      max="1"
+                      :aria-label="`How much of ${entry.name} has downloaded`"
+                    ></progress>
+                    <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
+                  </span>
+                  <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                </template>
+                <template v-else-if="entry.ids?.length && askUninstall === entry.name">
+                  <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
+                  <button
+                    class="link"
+                    type="button"
+                    :aria-label="`Yes, move ${entry.name}`"
+                    :disabled="busy || Boolean(downloading)"
+                    @click="uninstall(entry)"
+                  >
+                    Yes
+                  </button>
+                  <button class="link" type="button" @click="askUninstall = ''">No</button>
+                </template>
+                <button
+                  v-else-if="entry.onDisk && entry.ids?.length"
+                  type="button"
+                  :aria-label="`Uninstall ${entry.name}`"
+                  :disabled="busy || Boolean(downloading) || Boolean(uninstalling)"
+                  @click="askUninstall = entry.name"
+                >
+                  {{ uninstalling === entry.name ? "Moving..." : "Uninstall" }}
+                </button>
+                <button
+                  v-else-if="entry.offer && !entry.onDisk"
+                  type="button"
+                  :aria-label="`Install ${entry.name}`"
+                  :disabled="makersLocked || !canDownload"
+                  @click="install(maker.name, entry.offer)"
+                >
+                  Install
+                </button>
+              </li>
+              <li v-for="coming in PICTURE_MODELS_COMING" :key="coming.name" class="offer coming">
+                <span class="offer-text">
+                  <span class="offer-name">{{ coming.name }} <span class="quiet small">by {{ coming.maker }}</span></span>
+                  <span class="quiet small">{{ coming.license }}, coming in a later build</span>
+                </span>
+              </li>
+            </ul>
+            <p v-if="modelNote" class="small" role="alert">{{ modelNote }}</p>
+            <p v-if="vision?.reachable" class="quiet small">The picture engine is answering at {{ vision.url }}.</p>
+            <p v-else-if="vision?.onDisk?.length" class="quiet small">
+              {{ visionNote || "The picture engine is not answering yet." }} It starts with
+              <code>mlx_vlm.server</code>; to install it, run <code>{{ vision.startHint }}</code>.
+            </p>
+          </template>
+          </div>
+
+          <div v-else-if="installersTab === 'check'" class="settings-pane">
+          <h3>Picture check</h3>
           <p class="quiet">
             A small model, 22 MB, that scores a picture on this computer, from the Utilities page. It is off until you
             install it, nothing downloads until you press Install, and Uninstall moves it to the Trash.
@@ -2424,8 +2630,10 @@ onBeforeUnmount(() => {
             </li>
           </ul>
           <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
+          </div>
 
-          <h3 class="gap-above">Outside engines</h3>
+          <div v-else class="settings-pane">
+          <h3>Outside engines</h3>
           <p class="quiet">
             Each engine here answers from its maker's computers, not this one. Give the path to a file that holds your
             key from that maker. Rusty Business™ reads the key from that file when it asks the engine and sends it only
@@ -2491,6 +2699,7 @@ onBeforeUnmount(() => {
             <p v-if="outsideNotes[entry.id]" class="small" role="alert">{{ outsideNotes[entry.id] }}</p>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+          </div>
         </div>
       </section>
       <section v-if="page === 'utilities'" class="settings" aria-labelledby="utilities-title" @keydown.esc="closePage">
@@ -3032,8 +3241,9 @@ onBeforeUnmount(() => {
         <article v-for="round in rounds" :key="round.key" class="round">
           <div v-if="round.question && !round.question.toolResult" class="turn user">
             <ul v-if="round.question.attachments?.length" class="files sent" aria-label="Attached files">
-              <li v-for="(file, at) in round.question.attachments" :key="at" class="file" :title="file.name">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+              <li v-for="(file, at) in round.question.attachments" :key="at" class="file" :class="{ picture: file.picture }" :title="file.name">
+                <img v-if="file.picture" class="file-thumb" :src="file.picture" :alt="file.name" />
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
                 <span class="file-text">
                   <span class="file-name">{{ file.name }}</span>
                   <span class="file-line">{{ attachmentLine(file) }}</span>
@@ -3171,7 +3381,8 @@ onBeforeUnmount(() => {
         <div class="box">
           <ul v-if="attached.length || attaching" class="files" aria-label="Files to send">
             <li v-for="(file, at) in attached" :key="at" class="file" :title="file.name">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+              <img v-if="file.picture" class="file-thumb" :src="file.picture" alt="" />
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
               <span class="file-text">
                 <span class="file-name">{{ file.name }}</span>
                 <span class="file-line">{{ attachmentLine(file) }}</span>
@@ -3182,6 +3393,9 @@ onBeforeUnmount(() => {
             </li>
             <li v-if="attaching" class="file reading quiet small">Reading...</li>
           </ul>
+          <p v-if="blindPicked.length" class="too-big small blind-note">
+            {{ namesLine(blindPicked.map((entry) => entry.name)) }} {{ blindPicked.length === 1 ? "does" : "do" }} not read pictures, so {{ blindPicked.length === 1 ? "it is" : "they are" }} only told one is there. Phi-3.5 Vision reads them, on a Mac.
+          </p>
           <p v-if="tooBig" class="too-big small">These files may not fit in {{ tightest.name }}'s window. Try fewer, or a model with a bigger one.</p>
           <textarea
             ref="composer"
@@ -3192,6 +3406,7 @@ onBeforeUnmount(() => {
             :disabled="!chosen.length"
             @input="resizeComposer"
             @keydown="onKeydown"
+            @paste="onPaste"
           ></textarea>
           <div class="box-row">
             <button class="icon attach" type="button" aria-label="Attach files" title="Attach files" :disabled="busy" @click="pickFiles">
@@ -4124,6 +4339,20 @@ button.switch {
   padding: 0;
   display: grid;
   gap: 0.55rem;
+}
+
+.tag {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--quiet);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.offer.coming {
+  opacity: 0.75;
 }
 
 .offer {
@@ -5205,6 +5434,21 @@ textarea.memory:focus,
 
 .file > svg {
   color: var(--accent);
+}
+
+.file-thumb {
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--raised);
+}
+
+.files.sent .file.picture .file-thumb {
+  width: 7rem;
+  height: 7rem;
 }
 
 .file.reading {

@@ -91,5 +91,6 @@ test('the tally names each model and the questions it won', () => {
 test('votes stay on this computer and never reach a model', () => {
   const sent = functionOf(read(CHAT), 'requestMessages');
   for (const word of ['rating', 'best', 'votedAt']) assert.ok(!sent.includes(word), `requestMessages must not read ${word}`);
-  assert.match(sent, /messages\.push\(\{ role: turn\.role, content \}\);/);
+  // Since 0.8.4 a picture can ride along, for a model that reads it.
+  assert.match(sent, /messages\.push\(images\.length \? \{ role: turn\.role, content, images \} : \{ role: turn\.role, content \}\);/);
 });
