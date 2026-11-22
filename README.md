@@ -120,6 +120,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time. Grok,
   GPT, Claude, and Gemini, once added, can be among them, or answer alone.
+  Open one answer wide to read more of it, and put it back the same way.
 - **Answers graded and summed up.** Once every answer is in, one model grades
   each from A to F and sums them up. It reads the question and the answers,
   numbered and without the models' names. An outside engine grades, Grok

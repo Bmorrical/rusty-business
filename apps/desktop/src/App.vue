@@ -1,6 +1,6 @@
 <script setup>
 import { renderMarkdown } from "./markdown.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -89,6 +89,7 @@ import {
   VIEW_STAY,
   viewAfterMove,
   viewTarget,
+  withWide,
 } from "./chat.js";
 import {
   addPictures,
@@ -125,6 +126,8 @@ const ICONS = {
   back: "m15 18-6-6 6-6",
   copy: "M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
   check: "M20 6 9 17l-5-5",
+  wide: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
+  narrow: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
 };
 
 const SUGGESTIONS = [
@@ -997,6 +1000,7 @@ async function persist() {
 function newChat(project = null) {
   if (busy.value) return;
   current.value = blankSession(project);
+  wide.value = new Set();
   page.value = "chat";
   problem.value = "";
   askTrash.value = "";
@@ -1014,6 +1018,7 @@ async function openSession(id) {
   askTrash.value = "";
   try {
     current.value = await invoke("load_session", { id });
+    wide.value = new Set();
     // A step left waiting or running when the app closed never ran.
     for (const turn of current.value.messages) {
       if (turn.tool && ["asked", "running"].includes(turn.tool.status)) turn.tool.status = "skipped";
@@ -1713,6 +1718,9 @@ function replyText(turn) {
 }
 
 const copied = ref(null);
+// The answers opened wide, one at most in each round. Brad, 2026-11-22: "I
+// should be able to open and close view, like split view to read more of one."
+const wide = shallowRef(new Set());
 let copiedTimer;
 
 /** Puts a message's text on the clipboard, and marks its button for a moment. */
@@ -2961,8 +2969,19 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
-            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
+            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn) }">
               <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <button
+                v-if="round.answers.length > 1"
+                class="copy widen"
+                type="button"
+                :aria-pressed="wide.has(turn)"
+                :aria-label="wide.has(turn) ? 'Back to side by side' : 'Open wide'"
+                :title="wide.has(turn) ? 'Back to side by side' : 'Open wide'"
+                @click="wide = withWide(wide, round.answers, turn)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="wide.has(turn) ? ICONS.narrow : ICONS.wide" /></svg>
+              </button>
               <p v-if="gradeOf(round, index)" class="grade small">
                 <span class="grade-letter"><span class="sr-only">Grade </span>{{ gradeOf(round, index).letter }}</span>
                 <span>{{ gradeOf(round, index).why }}</span>
@@ -4241,10 +4260,29 @@ button.switch.model-switch {
 }
 
 .answers.many > .turn {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.7rem 0.85rem;
   background: var(--page);
+}
+
+/* One answer opened wide moves to the top of its question and takes the
+   round's whole width, so it stays in view; the others wait below it, still
+   side by side. */
+.answers.many > .turn.opened {
+  grid-column: 1 / -1;
+  order: -1;
+}
+
+.answers.many > .turn > .card-head {
+  padding-right: 2rem;
+}
+
+.widen {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
 }
 
 .card-head {
