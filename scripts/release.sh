@@ -18,6 +18,11 @@
 # v<version> at this commit, with the thirteen files, marked as the newest,
 # which is the one the README links and Install and restart reads.
 #
+# The release's notes open with the version's own note: what RELEASES.md
+# holds under "## <version>". With no note there, it stops before it asks
+# GitHub anything, so a version never goes out ahead of its note. The steps
+# to install follow, under "Install".
+#
 # It reads GITHUB_REPOSITORY and GITHUB_SHA, which GitHub sets, GH_TOKEN,
 # which the workflow passes on, and MAC_SIGNED, true or false, from the sign
 # job, which picks the notes' steps to open the Mac app. Nothing here removes,
@@ -35,6 +40,8 @@ TGZ=Rusty-Business-linux-x64.tar.gz
 # restart reads, which goes last.
 DOWNLOADS=("${DMG}" "${APP_TGZ}" "${EXE}" "${DEB}" "${RPM}" "${TGZ}")
 MANIFEST=latest.json
+# Where each version's note is written, under "## <version>".
+NOTES_FILE=RELEASES.md
 USAGE="use: scripts/release.sh publish <folder>"
 
 fail() {
@@ -96,11 +103,11 @@ On 64-bit Windows 10 or 11. The installer carries no model engine yet: the app s
 1. Download ${EXE} and open it.
 2. It is not signed yet, so Windows may stop it the first time: choose More info, then Run anyway.
 
-On 64-bit Linux on an Intel or AMD processor. The files carry no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.
+On 64-bit Linux on an Intel or AMD processor. The three files carry the engine inside them, llama.cpp's llama-server, the Vulkan build pinned by checksum.
 
 - On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}
 - On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}
-- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.
+- Anywhere else, download ${TGZ}, unpack it, and run ${TGZ%.tar.gz}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.
 
 To check a download first, put it and its .sha256 file in one folder. On a Mac, run:
 
@@ -120,11 +127,29 @@ Built from https://github.com/${repository}/commit/${commit} by the Release work
 NOTES
 }
 
+# The version's own note: what RELEASES.md holds under "## <version>", up to
+# the next "## ". Blank lines at its top and its foot are left out.
+changes_for() {
+    local version="$1"
+    [ -f "${NOTES_FILE}" ] ||
+        fail "${NOTES_FILE} is missing, so ${version} has no note: write one under \"## ${version}\" before this version is built"
+    awk -v heading="## ${version}" '
+        $0 == heading { found = 1; next }
+        found && /^## / { exit }
+        found && !started && /^[ \t]*$/ { next }
+        found { started = 1; print }
+    ' "${NOTES_FILE}"
+}
+
 publish() {
-    local dir="$1" version tag listed expected name sum found i
+    local dir="$1" version tag changes notes listed expected name sum found i
     local -a sums=() files=()
     version="$(version_of_app)"
     tag="v${version}"
+    changes="$(changes_for "${version}")"
+    [ -n "${changes//[[:space:]]/}" ] ||
+        fail "${NOTES_FILE} has no note for ${version}: write one under \"## ${version}\" before this version is built"
+    notes="${changes}"$'\n\n'"## Install"$'\n\n'"$(notes_for "${version}")"
 
     [ -d "${dir}" ] || fail "${dir} is not a folder"
     for name in "${DOWNLOADS[@]}"; do
@@ -159,7 +184,7 @@ publish() {
         --repo "${repository}" \
         --target "${commit}" \
         --title "Rusty Business™ ${version}" \
-        --notes "$(notes_for "${version}")" \
+        --notes "${notes}" \
         --latest \
         "${files[@]}"
     echo "Released ${tag}: https://github.com/${repository}/releases/tag/${tag}"

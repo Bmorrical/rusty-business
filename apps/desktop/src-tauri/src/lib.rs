@@ -1,4 +1,6 @@
 mod attachments;
+mod board;
+mod cli;
 mod deactivated;
 mod downloads;
 mod engine;
@@ -6,17 +8,27 @@ mod gate;
 mod makers;
 mod models;
 mod outside;
+mod picture;
 mod projects;
 mod remote;
 mod sessions;
 mod stack;
 mod starter;
+mod sync;
 mod uninstall;
 mod update;
+mod utilities;
+mod vision;
 mod web;
 mod workspace;
 
 use tauri::Manager;
+
+/// The `board` command, for a terminal. It gives back what to leave with, or
+/// `None` when the app was started the usual way and its window should open.
+pub fn command(args: Vec<String>) -> Option<i32> {
+    cli::run(&args)
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -33,17 +45,32 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine::Chats::default())
         .manage(update::Updates::default())
+        .manage(utilities::Made::default())
         .setup(|app| {
             let data = app.path().app_data_dir()?;
             // The app's own models folder, which `llama-server` reads on
             // Windows and Linux. A Mac's engine reads the Hugging Face cache.
             models::use_own_folder(data.join("models"));
+            // The app's resource folder, which holds the engine on Windows
+            // and Linux. Tauri's own resource_dir reads the name we mark with
+            // ™ below, so the folder is worked out from the un-marked name
+            // and the place the binary is installed.
+            let resource = app.config().product_name.as_deref().and_then(|name| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| starter::resource_folder(&exe, name))
+            });
+            starter::use_resource_folder(resource);
             app.manage(sessions::Store::new(data.join("sessions")));
             app.manage(projects::Projects::new(
                 data.join("projects"),
                 data.join("memory.md"),
             ));
             app.manage(starter::Starter::new(data.join("engine.log")));
+            // The picture engine, kept apart from the chat engine.
+            app.manage(vision::PictureStarter(starter::Starter::new(
+                data.join("picture-engine.log"),
+            )));
             // Keep the existing WAN preference and start LAN off.
             let gate = gate::Gate::new(data.join("gate"));
             app.manage(gate::LanGate::new(data.join("lan-gate")));
@@ -66,6 +93,10 @@ pub fn run() {
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             // Web search: the path to a Brave key, never the key.
             app.manage(web::Web::new(data.join("web.json")));
+            // Boards: the local copies the Workflow view reads, and the notes on them.
+            app.manage(board::Boards::new(data.join("boards")));
+            // The picture check: its model, once the person installs it.
+            app.manage(picture::PictureCheck::new(data.join("picture-check")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -78,10 +109,18 @@ pub fn run() {
             engine::stop_chat,
             starter::start_engine,
             starter::free_memory,
+            vision::picture_engine_status,
+            vision::start_picture_engine,
+            vision::read_picture,
             stack::start_stack,
             downloads::download_model,
             downloads::stop_download,
+            board::list_boards,
+            board::load_board,
+            board::open_sample_board,
+            board::save_board_note,
             sessions::list_sessions,
+            sessions::list_votes,
             sessions::load_session,
             sessions::save_session,
             sessions::trash_session,
@@ -113,8 +152,18 @@ pub fn run() {
             outside::remove_outside,
             deactivated::deactivated_models,
             deactivated::set_model_active,
+            picture::picture_check_status,
+            picture::install_picture_check,
+            picture::uninstall_picture_check,
+            picture::score_picture,
+            picture::pick_picture,
             uninstall::uninstall_model,
             uninstall::uninstall_place,
+            utilities::utilities_status,
+            utilities::heic_pictures,
+            utilities::heic_to_jpeg,
+            utilities::pick_heic,
+            utilities::show_jpeg,
         ])
         .build(context)
         .expect("error while building tauri application");

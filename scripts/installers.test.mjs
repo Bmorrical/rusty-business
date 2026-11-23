@@ -119,8 +119,10 @@ test('the outside engines are added on the Installers page, and nowhere else', (
   // the way Grok is, on a card of its own beside Grok's.
   const app = read(APP);
   const page = pageOf(app, 'installers');
+  // Since 0.8.4 they have a tab of their own, so the heading opens it.
+  assert.ok(page.includes(`@click="installersTab = 'outside'">Outside engines</button>`), 'the Installers page has lost its Outside engines tab');
   for (const part of [
-    '<h3 class="gap-above">Outside engines</h3>',
+    '<h3>Outside engines</h3>',
     'v-for="entry in outside"',
     '<form v-else class="key-path" @submit.prevent="addOutside(entry.id)">',
     'Path to your {{ entry.maker }} key file',
@@ -159,7 +161,7 @@ test('one page shows at a time, and a chat takes the window back', () => {
   assert.ok(app.includes('const page = ref("chat");'), 'the window no longer opens on the chat');
   assert.ok(!/settingsOpen|settingsTitle|openSettings|closeSettings/.test(app), 'the old Settings switch is back beside the pages');
   assert.equal(app.split(`v-show="page === 'chat'"`).length, 4, 'the chat header, thread, and box no longer hide together');
-  assert.equal(app.split(`v-if="page === '`).length, 3, 'a page was added or lost without this check changing');
+  assert.equal(app.split(`v-if="page === '`).length, 5, 'a page was added or lost without this check changing');
   for (const name of ['newChat', 'openSession']) {
     assert.match(functionOf(app, name), /page\.value = "chat";/, `${name} leaves a page open over the chat`);
   }

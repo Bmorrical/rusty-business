@@ -15,6 +15,11 @@
 // next". Install and restart reads latest.json from the newest release, and
 // on a Mac puts the app from the .app.tar.gz in place, so the release
 // carries both.
+//
+// Brad, 2026-11-21: "each tag gets a release note", and "and it should be
+// enforced that the notes were published before the build can go out". The
+// release's notes open with the version's own note from RELEASES.md, and
+// with no note there the script stops before it asks GitHub anything.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -46,6 +51,7 @@ const read = (file) => readFileSync(path.join(REPO, file), 'utf8');
 const DMG = /^DMG=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
 const APP_TGZ = /^APP_TGZ=(\S+)$/m.exec(read('scripts/mac-app.sh'))?.[1];
 const MANIFEST = 'latest.json';
+const NOTES = 'RELEASES.md';
 const EXE = /^EXE=(\S+)$/m.exec(read('scripts/windows-app.sh'))?.[1];
 const [DEB, RPM, TGZ] = ['DEB', 'RPM', 'TGZ'].map((name) => new RegExp(`^${name}=(\\S+)$`, 'm').exec(read('scripts/linux-app.sh'))?.[1]);
 const { version: VERSION } = JSON.parse(read('apps/desktop/package.json'));
@@ -219,10 +225,10 @@ test('a release asks once whether the tag is there, then makes it at this commit
     `    (Get-FileHash ${EXE}).Hash -eq (Get-Content ${EXE}.sha256).Split()[0]`,
     // The roadmap, for Linux: "A `.deb`, an `.rpm`, and a `.tar.gz`, linked
     // from the README beside the Mac's `.dmg` and the Windows `.exe`".
-    "On 64-bit Linux on an Intel or AMD processor. The files carry no model engine yet: the app starts llama.cpp's llama-server when it finds it on this computer, and otherwise the window opens and says so.",
+    "On 64-bit Linux on an Intel or AMD processor. The three files carry the engine inside them, llama.cpp's llama-server, the Vulkan build pinned by checksum.",
     `On Ubuntu 22.04 or later, or Debian 12 or later, download ${DEB} and run: sudo apt install ./${DEB}`,
     `On Fedora, download ${RPM} and run: sudo dnf install ./${RPM}`,
-    `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.`,
+    `Anywhere else, download ${TGZ}, unpack it, and run ${TGZ.replace(/\.tar\.gz$/, '')}/bin/rusty-business. It needs WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.`,
     `    sha256sum -c ${DEB}.sha256`,
     // Brad, 2026-11-19, asked how Install and restart should start: "Click
     // to install". And for Linux: ".deb and .rpm".
@@ -475,6 +481,9 @@ test("the app's three version numbers must agree, and the release is named for t
         const text = read(file).replace(at[name], line[name](versions[name] ?? VERSION));
         writeFileSync(path.join(tree, file), name === 'cargo' ? text + cargoAfter : text);
       }
+      // Every version these runs can reach has a note, so each one stops, or
+      // goes on, for its versions alone.
+      writeFileSync(path.join(tree, NOTES), `# Release notes\n\n## ${NEXT}\n\n- A made-up note.\n\n## ${VERSION}\n\n- A made-up note.\n`);
       return run((folder) => ['publish', distIn(folder)], { script: path.join(tree, 'scripts/release.sh') });
     } finally {
       rmSync(tree, { recursive: true, force: true });
@@ -510,6 +519,111 @@ test("the app's three version numbers must agree, and the release is named for t
   const other = withVersions({}, { cargoAfter: '\n[workspace.package]\nversion = "9.9.9"\n' });
   assert.equal(other.status, 0, other.stderr);
   assert.deepEqual(other.calls[0], ASK(TAG));
+});
+
+/** What a notes page holds under "## <version>", up to the next "## ", or null with no such heading. */
+function noteIn(page, version) {
+  const lines = page.split('\n');
+  const from = lines.indexOf(`## ${version}`);
+  if (from < 0) return null;
+  const rest = lines.slice(from + 1);
+  const to = rest.findIndex((line) => line.startsWith('## '));
+  return (to < 0 ? rest : rest.slice(0, to)).join('\n').trim();
+}
+
+/**
+ * Runs a copy of the script in a copy of the tree, with the app's own
+ * versions and the notes page given, or none when it is null.
+ */
+function withNotes(page) {
+  const tree = mkdtempSync(path.join(tmpdir(), 'release-notes-'));
+  try {
+    mkdirSync(path.join(tree, 'scripts'));
+    mkdirSync(path.join(tree, 'apps/desktop/src-tauri'), { recursive: true });
+    copyFileSync(SCRIPT, path.join(tree, 'scripts/release.sh'));
+    for (const file of ['apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json', 'apps/desktop/src-tauri/Cargo.toml']) {
+      copyFileSync(path.join(REPO, file), path.join(tree, file));
+    }
+    if (page !== null) writeFileSync(path.join(tree, NOTES), page);
+    return run((folder) => ['publish', distIn(folder)], { script: path.join(tree, 'scripts/release.sh') });
+  } finally {
+    rmSync(tree, { recursive: true, force: true });
+  }
+}
+
+// Brad, 2026-11-21: "and it should be enforced that the notes were published
+// before the build can go out".
+test('a version with no note in RELEASES.md is not released: the script stops before it asks GitHub anything', () => {
+  assert.equal(/^NOTES_FILE=(\S+)$/m.exec(read('scripts/release.sh'))?.[1], NOTES, 'release.sh reads its notes from another file');
+  const older = '## 0.0.1\n\nReleased long ago.\n\n- An older note.\n';
+  for (const [name, page] of [
+    ['no notes page', null],
+    ['an empty page', ''],
+    ['no section for this version', `# Release notes\n\n${older}`],
+    ['a section with nothing in it', `# Release notes\n\n## ${VERSION}\n\n${older}`],
+    ['a section of blank lines', `# Release notes\n\n## ${VERSION}\n\n \n\t\n   \n\n${older}`],
+    ['a section with nothing in it, last on the page', `# Release notes\n\n${older}\n## ${VERSION}\n`],
+    ['a longer version', `# Release notes\n\n## ${VERSION}0\n\n- A note.\n\n${older}`],
+    ['a v before the version', `# Release notes\n\n## v${VERSION}\n\n- A note.\n\n${older}`],
+    ['a smaller heading', `# Release notes\n\n### ${VERSION}\n\n- A note.\n\n${older}`],
+    ['words after the version', `# Release notes\n\n## ${VERSION} (soon)\n\n- A note.\n\n${older}`],
+    ['the version in a sentence', `# Release notes\n\nNext is ${VERSION}.\n\n${older}`],
+  ]) {
+    const result = withNotes(page);
+    assert.notEqual(result.status, 0, `${name}: the run went on`);
+    assert.match(result.stderr, page === null ? /^release: RELEASES\.md is missing, so / : /^release: RELEASES\.md has no note for /m, `${name}: the run did not say why it stopped`);
+    assert.ok(result.stderr.includes(`"## ${VERSION}"`), `${name}: the run did not say where the note goes`);
+    assert.deepEqual(result.calls, [], `${name}: gh was asked something`);
+    assert.equal(result.summary, '', `${name}: a summary was written`);
+  }
+});
+
+// Brad, 2026-11-21: "each tag gets a release note". The note is what a
+// person reads first on the version's page, and the steps to install follow.
+test("a release's notes open with the version's own note from RELEASES.md, then give the steps to install", () => {
+  const steps = `Rusty Business™ ${VERSION}, for a Mac, for Windows, and for Linux.`;
+  const page = [
+    '# Release notes',
+    '',
+    'A made-up page.',
+    '',
+    `## ${NEXT}`,
+    '',
+    '- A note for a later version.',
+    '',
+    `## ${VERSION}`,
+    '',
+    '',
+    'One made-up release.',
+    '',
+    '**New**',
+    '',
+    '- A made-up thing, with `code` and a "quote" and $HOME in it.',
+    '',
+    '## 0.0.1',
+    '',
+    '- An older note.',
+    '',
+  ].join('\n');
+  const made = withNotes(page);
+  assert.equal(made.status, 0, made.stderr);
+  assert.deepEqual(made.calls[0], ASK(TAG));
+  assert.equal(made.calls[1][9], '--notes');
+  const notes = made.calls[1][10];
+  const note = 'One made-up release.\n\n**New**\n\n- A made-up thing, with `code` and a "quote" and $HOME in it.';
+  assert.equal(noteIn(page, VERSION), note);
+  assert.ok(notes.startsWith(`${note}\n\n## Install\n\n${steps}\n`), `the notes do not open with the version's note, then the steps:\n${notes.slice(0, 400)}`);
+  assert.ok(!notes.includes('An older note'), "the notes hold an older version's note");
+  assert.ok(!notes.includes('A note for a later version'), "the notes hold a later version's note");
+  assert.ok(!notes.includes('A made-up page'), "the notes hold the page's opening words");
+  assert.equal(notes.split('## Install').length, 2, 'the steps to install are not there once');
+
+  // The real page, as it stands.
+  const real = run((folder) => ['publish', distIn(folder)]);
+  assert.equal(real.status, 0, real.stderr);
+  const written = noteIn(read(NOTES), VERSION);
+  assert.ok(written, `${NOTES} has no note for ${VERSION}`);
+  assert.ok(real.calls[1][10].startsWith(`${written}\n\n## Install\n\n${steps}\n`), `the release would not open with ${NOTES}'s note for ${VERSION}`);
 });
 
 test("the lockfiles, the README, and SECURITY.md give the app's version too", () => {

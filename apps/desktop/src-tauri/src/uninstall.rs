@@ -17,7 +17,7 @@ use crate::engine;
 use crate::models::{self, Layout};
 
 /// Where a model goes, as the person's system names it.
-const TRASH: &str = if cfg!(windows) {
+pub(crate) const TRASH: &str = if cfg!(windows) {
     "the Recycle Bin"
 } else {
     "the Trash"
@@ -64,7 +64,7 @@ fn uninstall(
 /// Moves a file or folder to the system's Trash. On a Mac it asks the file
 /// manager, not Finder, so the person is not asked to let the app control
 /// Finder.
-fn to_trash(place: &Path) -> Result<(), String> {
+pub(crate) fn to_trash(place: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let context = {
         use trash::macos::{DeleteMethod, TrashContextExtMacos};

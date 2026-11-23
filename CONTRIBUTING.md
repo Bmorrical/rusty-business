@@ -5,6 +5,9 @@ two roles. Contributors send changes, and maintainers review and merge them.
 Every maintainer is a contributor too and follows the same rules, but a
 contributor is not a maintainer.
 
+[AGENTS.md](AGENTS.md) sets every rule of the project in one place, for
+people and for the AI models that work for them. Read it first.
+
 ## The rules for every change
 
 - **Offline first.** On-device chat works with both network gates off. The
@@ -50,6 +53,10 @@ Maintainers may also review and merge.
 - Never force-push to `main`, and never change a release once it is
   published.
 - A release runs from `main`, and only after the gate there is green.
+- Every version gets one release note, written in [RELEASES.md](RELEASES.md)
+  before the version is built. The gate fails without it, and the release
+  run stops. A merge into `main` gets no note of its own: what it changed
+  goes in the note of the version it goes out in.
 
 ## Who decides
 

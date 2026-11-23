@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   answerRoom,
   answersLine,
+  bestChanges,
   canGrade,
+  canPickBest,
   canRemove,
   chatModels,
   checkedLine,
@@ -50,6 +52,7 @@ import {
   keptPicks,
   latestAnswers,
   listedLine,
+  markUnseen,
   looksLikePath,
   meterLine,
   moreLine,
@@ -72,6 +75,7 @@ import {
   UPDATE_EVERY,
   updateDetail,
   updateLine,
+  startedElsewhere,
   startLine,
   titleFrom,
   tokensPerSecond,
@@ -87,7 +91,25 @@ import {
   switchedOn,
   uninstallAsk,
   uninstalledLine,
+  unseenLine,
+  unseenModels,
+  unseenShort,
   withPick,
+  END_SLACK,
+  VIEW_END,
+  VIEW_START,
+  VIEW_STAY,
+  viewAfterMove,
+  viewTarget,
+  tallyLine,
+  voteTally,
+  withRating,
+  withWide,
+  isPicturePath,
+  pictureUnseenLine,
+  picturesOf,
+  shrunkSize,
+  PICTURES_PER_QUESTION,
 } from "./chat.js";
 
 test("a title is the first line with text, cut to fit", () => {
@@ -1066,4 +1088,315 @@ test("Uninstall asks first, names where the model goes, and warns of the shared 
   assert.equal(uninstallAsk("Phi-4", null), "Move Phi-4 to the Trash?", "before Rust answers, it says the Trash");
   assert.equal(uninstalledLine("gpt-oss 20B", { trash: "the Recycle Bin" }), "gpt-oss 20B is in the Recycle Bin.");
   assert.equal(uninstalledLine("gpt-oss 20B", undefined), "gpt-oss 20B is in the Trash.");
+});
+
+// Brad, 2026-11-20: "why can't I pick the 2 missing but installed models?  I
+// only have 3/5 when I ask questions". An engine left running from before
+// listed three of the five models on his disk, and the app said nothing.
+
+const HELD = {
+  gptOss: { id: "a/gpt-oss-20b", name: "gpt-oss 20B", maker: "OpenAI" },
+  phi: { id: "a/phi-4", name: "Phi-4", maker: "Microsoft" },
+  nemotron: { id: "a/nemotron", name: "Nemotron 3.5 Lightning", maker: "NVIDIA" },
+  gemma: { id: "a/gemma-4-26b", name: "Gemma 4 26B", maker: "Google" },
+  llama: { id: "a/llama-3.1-8b", name: "Llama 3.1 8B", maker: "Meta" },
+};
+
+const threeOfFive = {
+  name: "MLX",
+  url: "http://127.0.0.1:8080/v1",
+  reachable: true,
+  remote: false,
+  ours: false,
+  models: [HELD.gptOss, HELD.phi, HELD.nemotron],
+  onDisk: Object.values(HELD),
+  unseen: [HELD.gemma, HELD.llama],
+};
+
+test("the two models on the disk that the engine leaves out are named, with what to do", () => {
+  assert.deepEqual(
+    unseenModels(threeOfFive, []).map((entry) => entry.name),
+    ["Gemma 4 26B", "Llama 3.1 8B"],
+  );
+  assert.equal(unseenShort(threeOfFive, []), "2 more are not listed by the engine");
+  assert.equal(
+    unseenLine(threeOfFive, [], "127.0.0.1:8080"),
+    "Gemma 4 26B and Llama 3.1 8B are on this computer, but the engine at 127.0.0.1:8080 does not list them. " +
+      "This window did not start that engine. Quit any other copy of the app, stop any engine you started yourself, " +
+      "then press Check again, and this window starts its own.",
+  );
+});
+
+test("an engine this window started that leaves a model out gets the shorter advice", () => {
+  const ours = { ...threeOfFive, ours: true, unseen: [HELD.llama] };
+  assert.equal(unseenShort(ours, []), "1 more is not listed by the engine");
+  assert.equal(
+    unseenLine(ours, [], "127.0.0.1:8080"),
+    "Llama 3.1 8B is on this computer, but the engine at 127.0.0.1:8080 does not list it. Quit the app and open it again.",
+  );
+});
+
+test("nothing is said when the engine lists every model, when none answers, or for a LAN server", () => {
+  for (const engine of [
+    { ...threeOfFive, unseen: [] },
+    { ...threeOfFive, unseen: undefined },
+    { ...threeOfFive, reachable: false },
+    { ...threeOfFive, remote: true },
+    null,
+    undefined,
+  ]) {
+    assert.deepEqual(unseenModels(engine, []), []);
+    assert.equal(unseenShort(engine, []), "");
+    assert.equal(unseenLine(engine, [], "127.0.0.1:8080"), "");
+  }
+});
+
+test("a model switched off is left out of the notice", () => {
+  assert.equal(unseenShort(threeOfFive, ["a/gemma-4-26b"]), "1 more is not listed by the engine");
+  assert.match(unseenLine(threeOfFive, ["a/gemma-4-26b"], "127.0.0.1:8080"), /^Llama 3\.1 8B is on this computer/);
+  assert.equal(unseenLine(threeOfFive, ["a/gemma-4-26b", "a/llama-3.1-8b"], "127.0.0.1:8080"), "");
+});
+
+test("the footer says when this window did not start the engine on this computer", () => {
+  assert.equal(startedElsewhere(threeOfFive), true);
+  assert.equal(startedElsewhere({ ...threeOfFive, ours: true }), false);
+  assert.equal(startedElsewhere({ ...threeOfFive, remote: true }), false, "a LAN server is never this window's to start");
+  assert.equal(startedElsewhere({ ...threeOfFive, reachable: false }), false);
+  // An older answer with no `ours` claims nothing.
+  assert.equal(startedElsewhere({ reachable: true, remote: false }), false);
+  assert.equal(startedElsewhere(null), false);
+});
+
+test("a model the engine leaves out says so on its row in Settings and on the Installers page", () => {
+  const makers = [
+    { name: "Google", picked: true, models: [{ name: "Gemma 4 26B", license: "Apache 2.0", onDisk: true, ids: ["a/gemma-4-26b"] }] },
+    { name: "Microsoft", picked: true, models: [{ name: "Phi-4", license: "MIT", onDisk: true, ids: ["a/phi-4"] }] },
+  ];
+  const marked = markUnseen(makers, threeOfFive);
+  assert.equal(listedLine(marked[0].models[0]), "Apache 2.0 · on this computer, not listed by the engine");
+  assert.equal(installLine(marked[0], marked[0].models[0]), "Apache 2.0 · on this computer, not listed by the engine");
+  assert.equal(listedLine(marked[1].models[0]), "MIT · on this computer");
+  assert.equal(
+    modelLine(marked[0].models[0], ["a/gemma-4-26b"]),
+    "Apache 2.0 · on this computer, not listed by the engine, switched off",
+    "the row still says so for a model switched off, where the notice does not",
+  );
+  assert.equal(makers[0].models[0].unseen, undefined, "the makers Rust sent are not changed");
+  assert.equal(markUnseen(makers, { ...threeOfFive, unseen: [] }), makers);
+  assert.deepEqual(markUnseen(undefined, threeOfFive), []);
+});
+
+// Brad, 2026-11-22: "when model 2 is thinking, I can't keep my scroll position
+// on question 1, the browser is forced to the bottom following whoever is
+// answering, instead the reader should choose the viewport position."
+test("the reader's scroll decides where the chat's view stays", () => {
+  const pane = (scrollTop, scrollHeight = 3000, clientHeight = 600) => ({ scrollTop, scrollHeight, clientHeight });
+  // Nothing moved: the state holds, whatever it is.
+  assert.equal(viewAfterMove(VIEW_START, 400, pane(400)), VIEW_START);
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2400)), VIEW_END);
+  // Up, even a little, while model 2 thinks: the view stays where the reader put it.
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2390)), VIEW_STAY);
+  assert.equal(viewAfterMove(VIEW_START, 900, pane(100)), VIEW_STAY);
+  // Down but short of the end: still the reader's place.
+  assert.equal(viewAfterMove(VIEW_START, 100, pane(900)), VIEW_STAY);
+  // Down to the end, or within END_SLACK of it: follow the newest line again.
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400 - END_SLACK)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_STAY, 100, pane(2400 - END_SLACK - 1)), VIEW_STAY);
+  // The chat got shorter and the page pulled the view up to its new end:
+  // not the reader's move.
+  assert.equal(viewAfterMove(VIEW_END, 2400, pane(2000, 2600)), VIEW_END);
+  assert.equal(viewAfterMove(VIEW_START, 2400, pane(2000, 2600)), VIEW_START);
+});
+
+test("the view follows the answer only while the reader lets it, and only down", () => {
+  const pane = { scrollTop: 0, scrollHeight: 3000, clientHeight: 600 };
+  // "stay" never moves, whatever comes in.
+  assert.equal(viewTarget(VIEW_STAY, pane, { top: 0, bottom: 3000 }), null);
+  // "end" follows the newest line.
+  assert.equal(viewTarget(VIEW_END, pane, null), 2400);
+  assert.equal(viewTarget(VIEW_END, { ...pane, scrollTop: 2400 }, null), null, "already there");
+  // "start" follows the answer until the question reaches the top, then holds.
+  assert.equal(viewTarget(VIEW_START, pane, { top: 500, bottom: 900 }), 300);
+  assert.equal(viewTarget(VIEW_START, pane, { top: 500, bottom: 2800 }), 500, "the question stays in view");
+  assert.equal(viewTarget(VIEW_START, { ...pane, scrollTop: 500 }, { top: 500, bottom: 2800 }), null);
+  assert.equal(viewTarget(VIEW_START, pane, null), null, "nothing to follow");
+  // Never up: a line the reader has is never taken back.
+  assert.equal(viewTarget(VIEW_START, { ...pane, scrollTop: 800 }, { top: 500, bottom: 2800 }), null);
+  assert.equal(viewTarget(VIEW_END, { scrollTop: 0, scrollHeight: 400, clientHeight: 600 }, null), null, "a short chat has nowhere to go");
+});
+
+// Brad, 2026-11-22: "I should be able to open and close view, like split view
+// to read more of one."
+test("one answer opens wide and closes again, one at most in each round", () => {
+  const first = { model: "a" };
+  const second = { model: "b" };
+  const other = { model: "c" };
+  const round = [first, second];
+  const none = new Set();
+
+  const opened = withWide(none, round, first);
+  assert.deepEqual([...opened], [first]);
+  assert.equal(none.size, 0, "the set it was given is left as it was");
+
+  assert.deepEqual([...withWide(opened, round, second)], [second], "opening another closes the first");
+  assert.equal(withWide(opened, round, first).size, 0, "a second click closes it, back to side by side");
+
+  const elsewhere = withWide(none, [other], other);
+  assert.deepEqual(new Set(withWide(elsewhere, round, first)), new Set([other, first]), "another round keeps its own");
+});
+
+// Brad, 2026-11-20: "I should be able to rate answers, and it keeps track of
+// which answers were asked when it got voted the best one."
+test("a rating toggles, and the same click again takes it back", () => {
+  assert.deepEqual(withRating({}, "up", 5), { rating: "up", votedAt: 5 });
+  assert.deepEqual(withRating({ rating: "up" }, "down", 6), { rating: "down", votedAt: 6 });
+  assert.deepEqual(withRating({ rating: "up" }, "up", 7), { rating: undefined, votedAt: 7 });
+});
+
+test("a best can be picked only once two or more answers are in", () => {
+  const answer = (content, extra = {}) => ({ role: "assistant", content, ...extra });
+  assert.equal(canPickBest({ answers: [answer("One")] }), false, "one answer has nothing to beat");
+  assert.equal(canPickBest({ answers: [answer("One"), answer("Two")] }), true);
+  assert.equal(canPickBest({ answers: [answer("One"), answer("Two", { pending: true })] }), false, "wait for every answer");
+  assert.equal(canPickBest({ answers: [answer("One"), answer("  ")] }), false, "an empty answer does not count");
+});
+
+test("voting one answer best clears the others, and a second click clears it", () => {
+  const first = { role: "assistant", content: "One" };
+  const second = { role: "assistant", content: "Two", best: true };
+  const changes = bestChanges([first, second], first, 9);
+  assert.deepEqual(changes, [
+    [second, { best: undefined }],
+    [first, { best: true, votedAt: 9 }],
+  ]);
+  assert.deepEqual(bestChanges([first, second], second, 10), [[second, { best: undefined }]]);
+});
+
+test("the tally counts each model's wins, ups, and downs, and names the questions it won", () => {
+  const rounds = [
+    {
+      session: "b",
+      title: "Rates",
+      question: "How do rates work?",
+      votedAt: 20,
+      answers: [
+        { model: "phi4", rating: "up", best: true },
+        { model: "gpt-oss", rating: "down", best: false },
+      ],
+    },
+    {
+      session: "a",
+      title: "Letters",
+      question: "Write a cover letter",
+      votedAt: 10,
+      answers: [
+        { model: "phi4", rating: null, best: false },
+        { model: "gpt-oss", rating: "up", best: true },
+        { model: "nemotron", rating: null, best: false },
+      ],
+    },
+    { session: "c", title: "Solo", question: "Hi", votedAt: 5, answers: [{ model: "nemotron", rating: "up", best: false }] },
+  ];
+  const tally = voteTally(rounds);
+  assert.deepEqual(
+    tally.map((row) => [row.model, row.best, row.of, row.up, row.down]),
+    [
+      ["phi4", 1, 2, 1, 0],
+      ["gpt-oss", 1, 2, 1, 1],
+      ["nemotron", 0, 1, 1, 0],
+    ],
+  );
+  assert.deepEqual(tally[0].won, [{ session: "b", title: "Rates", question: "How do rates work?", votedAt: 20, over: ["gpt-oss"] }]);
+  assert.deepEqual(tally[1].won[0].over, ["phi4", "nemotron"]);
+  assert.equal(tallyLine(tally[0]), "Best in 1 of 2 questions; 1 up, 0 down");
+  assert.equal(tallyLine({ best: 0, of: 0, up: 2, down: 0 }), "2 up, 0 down");
+  assert.equal(tallyLine({ best: 1, of: 1, up: 0, down: 0 }), "Best in 1 of 1 question");
+  assert.deepEqual(voteTally([]), []);
+});
+
+test("a saved chat keeps each answer's votes", () => {
+  const saved = savedTurn({ role: "assistant", content: "One", rating: "up", best: true, votedAt: 3, pending: false });
+  assert.equal(saved.rating, "up");
+  assert.equal(saved.best, true);
+  assert.equal(saved.votedAt, 3);
+});
+
+test("votes are never sent to a model", () => {
+  const turns = [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Hello", model: "phi4", rating: "up", best: true, votedAt: 3 },
+    { role: "user", content: "Again" },
+  ];
+  const sent = requestMessages(turns, "phi4");
+  assert.deepEqual(sent, [
+    { role: "user", content: "Hi" },
+    { role: "assistant", content: "Hello" },
+    { role: "user", content: "Again" },
+  ]);
+});
+
+// Brad, 2026-11-22: "allow all 3 models, user can on click to install, start a
+// grouping, maybe tabbed screens, for each "type" collections of models, they
+// can exists in more than one tab where applicable." He took a picture in the
+// chat in 0.8.4, on a Mac first.
+const DOT = "data:image/png;base64,iVBORw0KGgo=";
+
+test("only JPEG, PNG, and WebP files are pictures a model can read", () => {
+  for (const path of ["/a/b.jpg", "C:\\x\\Y.JPEG", "p.png", "q.webp"]) assert.equal(isPicturePath(path), true, path);
+  for (const path of ["/a/b.heic", "c.gif", "notes.txt", "png", "/a.b/c"]) assert.equal(isPicturePath(path), false, path);
+});
+
+test("a turn's pictures are its data URLs of a known kind, nothing else", () => {
+  const turn = {
+    attachments: [{ picture: DOT }, { text: "words" }, { picture: "https://example.com/x.png" }, { picture: "data:image/gif;base64,R0lG" }],
+  };
+  assert.deepEqual(picturesOf(turn), [DOT]);
+  assert.deepEqual(picturesOf({}), []);
+});
+
+test("a picture is shrunk to 1344 pixels on its long side, never made larger", () => {
+  assert.deepEqual(shrunkSize(4032, 3024), { width: 1344, height: 1008 });
+  assert.deepEqual(shrunkSize(3024, 4032), { width: 1008, height: 1344 });
+  assert.deepEqual(shrunkSize(640, 480), { width: 640, height: 480 });
+  assert.deepEqual(shrunkSize(0, 0), { width: 1, height: 1 });
+});
+
+test("a model that reads pictures is sent them with the words", () => {
+  const turns = [{ role: "user", content: "What is this?", attachments: [{ name: "a.png", kind: "Picture", picture: DOT }] }];
+  assert.deepEqual(requestMessages(turns, "", "", true), [{ role: "user", content: "What is this?", images: [DOT] }]);
+});
+
+test("a model that cannot read pictures is never sent one, only told", () => {
+  const turns = [{ role: "user", content: "What is this?", attachments: [{ picture: DOT }, { picture: DOT }] }];
+  const [message] = requestMessages(turns, "", "", false);
+  assert.equal(message.images, undefined);
+  assert.equal(message.content, `What is this?\n\n${pictureUnseenLine(2)}`);
+  assert.match(pictureUnseenLine(1), /a picture, which this model cannot see/);
+});
+
+test("a picture sent alone still makes a question, and only a person's turn carries pictures", () => {
+  const turns = [
+    { role: "user", content: "", attachments: [{ picture: DOT }] },
+    { role: "assistant", content: "A dot.", attachments: [{ picture: DOT }] },
+  ];
+  assert.deepEqual(requestMessages(turns, "", "", true), [
+    { role: "user", content: "The user attached a picture.", images: [DOT] },
+    { role: "assistant", content: "A dot." },
+  ]);
+});
+
+test("joined turns keep at most four pictures", () => {
+  const many = (count) => Array.from({ length: count }, () => ({ picture: DOT }));
+  const turns = [
+    { role: "user", content: "one", attachments: many(3) },
+    { role: "user", content: "two", attachments: many(3) },
+  ];
+  const [message] = requestMessages(turns, "", "", true);
+  assert.equal(message.images.length, PICTURES_PER_QUESTION);
+});
+
+test("a picture's label gives its size", () => {
+  assert.equal(attachmentLine({ picture: DOT, width: 1344, height: 1008 }), "Picture · 1344 × 1008");
+  assert.equal(attachmentLine({ picture: DOT }), "Picture");
 });

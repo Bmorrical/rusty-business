@@ -6,7 +6,7 @@
 | -------- | --- | ---------- |
 | [**Mac**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-mac-arm64.dmg) (`.dmg`) | Apple silicon, macOS 14 or later | [How to open it](#run-the-chat-window-macos) |
 | [**Windows**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-windows-x64-setup.exe) (`.exe`) | 64-bit Windows 10 or 11, with llama.cpp installed | [How to open it](#run-the-chat-window-windows) |
-| **Linux:** [**.deb**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb), [**.rpm**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm), or [**.tar.gz**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz) | 64-bit, on Intel or AMD, with llama.cpp installed | [Which one, and how](#run-the-chat-window-linux) |
+| **Linux:** [**.deb**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.deb), [**.rpm**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.rpm), or [**.tar.gz**](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz) | 64-bit, on Intel or AMD | [Which one, and how](#run-the-chat-window-linux) |
 
 **On this page:** [Screenshots](#screenshots) ·
 [Rusty Business™ or Ollama?](#rusty-business-or-ollama) ·
@@ -18,13 +18,14 @@
 [Build it from source](#build-it-from-source) ·
 [Run it from localhost](#run-it-from-localhost) ·
 [Run the stack](#run-the-stack) · [Tests](#tests) · [Limits](#limits) ·
-[Roadmap](#roadmap) · [Security](#security) · [License](#license)
+[Release notes](#release-notes) · [Roadmap](#roadmap) ·
+[Contributing](#contributing) · [Security](#security) · [License](#license)
 
 **Three ways to install it:**
 
 1. [**Download the built app**](#download-the-built-app). Pick your system
-   in the table above. There is nothing to build. The Mac app carries its
-   model engine, and the Windows and Linux apps start llama.cpp's
+   in the table above. There is nothing to build. The Mac and Linux apps
+   carry their model engine, and the Windows app starts llama.cpp's
    `llama-server` once it is installed.
 2. [**Build it from source**](#build-it-from-source). One line clones it
    and builds the same app. It needs Apple's command line tools on a Mac,
@@ -40,12 +41,14 @@ a private-network llama-server you configure. Turn on the LAN gate to use
 that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
 Gemini with your own keys.
 
-**Status:** version 0.8.1, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.4, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
-has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux); neither
-carries a model engine yet, but each starts llama.cpp's `llama-server` once
-it is installed. What it cannot do yet is under [Limits](#limits).
+has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux). The Mac and
+Linux apps carry their model engine; the Windows installer starts llama.cpp's
+`llama-server` once it is installed. What it cannot do yet is under [Limits](#limits).
+
+**What changed in each version** is under [Release notes](#release-notes).
 
 ## Screenshots
 
@@ -63,11 +66,11 @@ Select a picture to open it full size.
 
 | The first run: pick makers, then a model | The Installers page: any model in one click |
 | ---------------------------------------- | ------------------------------------------- |
-| [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and the outside engines, are on the Installers page](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![The Installers page in the dark theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate, and Outside engines below](docs/screenshots/installers.png)](docs/screenshots/installers.png?raw=true) |
+| [![The first run in the dark theme, with none of the app's models on this computer: Microsoft ticked under Show models from, and OpenAI, NVIDIA, Google, and Meta not, a Turn on the gate button, Microsoft's Phi-4 at 8.3 GB with a Download button that waits for the outbound gate, and a line saying more models, and the outside engines, are on the Installers page](docs/screenshots/first-run.png)](docs/screenshots/first-run.png?raw=true) | [![The Installers page in the dark theme, on its Chat tab, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, Microsoft's Phi-3.5 Vision marked Reads pictures, Google's Gemma 4 26B and Meta's Llama 3.1 8B marked Not added, each with its license, its download size, and an Install button that waits for the outbound gate](docs/screenshots/installers.png)](docs/screenshots/installers.png?raw=true) |
 
-| Settings: switch a model off, or uninstall it |
-| --------------------------------------------- |
-| [![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
+| Models that read pictures | Settings: switch a model off, or uninstall it |
+| ------------------------- | --------------------------------------------- |
+| [![The Installers page in the light theme, on its Pictures tab, beside the Chat, Picture check, and Outside engines tabs: Microsoft's Phi-3.5 Vision at 2.3 GB with an Install button that waits for the outbound gate, and Phi-4-multimodal and Molmo-7B-O listed as coming in a later build, with no button](docs/screenshots/pictures.png)](docs/screenshots/pictures.png?raw=true) | [![Settings, Models, in the light theme, with the five model makers: Microsoft's Phi-4, OpenAI's gpt-oss 20B, and NVIDIA's Nemotron 3.5 Lightning on this computer, each with its switch on and an Uninstall button, Microsoft's Phi-3.5 Vision at 2.3 GB, and Google and Meta not picked, each with an Add button and its model's license and download size](docs/screenshots/settings.png)](docs/screenshots/settings.png?raw=true) |
 
 What each picture shows, and how they are made, is in
 [docs/screenshots](docs/screenshots).
@@ -80,7 +83,8 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 ### Why choose Rusty Business™
 
 - **A short list, on purpose.** It knows five models, one each from Microsoft,
-  OpenAI, NVIDIA, Google, and Meta. It shows the models of the makers you
+  OpenAI, NVIDIA, Google, and Meta, and on a Mac one more from Microsoft
+  that reads pictures. It shows the models of the makers you
   pick: Microsoft to begin with, and any others you tick on a first run, add
   in Settings, or install from the Installers page, each with one click. A model that is not on the list is never
   shown and never accepted, even when the engine holds it. Ollama's library
@@ -104,7 +108,10 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   for Claude, and Google's for Gemini, over https and to
   nowhere else, with that key. When one grades, the question and every
   answer go too, those from this computer included. Each key stays in its
-  file and never reaches the page. There is no account and no sign-in. Ollama keeps your prompts on
+  file and never reaches the page. The fifth is web search, off until you
+  switch it on in Settings: the words a model searches for go to DuckDuckGo,
+  or to Brave Search with your own key, over https and to nowhere else.
+  There is no account and no sign-in. Ollama keeps your prompts on
   your computer too when a model runs there. It also offers models that run
   in its cloud, with a switch that turns them off.
 - **Chats that are plain files.** Each chat is one JSON file in a folder you
@@ -114,11 +121,23 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   the window, and each answers the same question, side by side. The models
   on this computer take turns, since the engine holds one at a time. Grok,
   GPT, Claude, and Gemini, once added, can be among them, or answer alone.
+  Open one answer wide to read more of it, and put it back the same way.
+- **Pictures in the chat, on a Mac.** Attach or paste up to four pictures
+  with a question, and Phi-3.5 Vision, installed in one click from the
+  Installers page, reads them on this computer. A picture never goes to an
+  outside engine, and a model that cannot read one is told only that it was
+  left out. The Installers page groups its models in tabs, Chat, Pictures,
+  Picture check, and Outside engines, and a model can sit on more than one.
 - **Answers graded and summed up.** Once every answer is in, one model grades
   each from A to F and sums them up. It reads the question and the answers,
   numbered and without the models' names. An outside engine grades, Grok
   first, then GPT, then Claude, then Gemini, until you pick another model, or No grading,
   in Settings.
+- **Your own votes.** Rate any answer up or down, and when several models
+  answer one question, vote one of them the best. Settings keeps a tally per
+  model, with the questions each one won. Votes stay with their chats on
+  this computer and are never sent to a model. They start on, and a switch
+  in Settings turns them off.
 - **Every answer shows its numbers.** Each answer shows how many tokens it
   took and how fast they came, and a meter shows how full the model's context
   is.
@@ -127,12 +146,12 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
 
 - **Install and go, anywhere.** Ollama installs on macOS, Windows, and Linux
   with one download or one command. Rusty Business™ has downloads for a Mac
-  with Apple silicon, for Windows, and for Linux, and only the Mac's carries
-  its model engine: on Windows and Linux, you install llama.cpp first. None
+  with Apple silicon, for Windows, and for Linux, and the Mac's and Linux's
+  carry their model engine: on Windows, you install llama.cpp first. None
   is signed yet, so a Mac or a Windows computer warns once before
   it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
-  it. Rusty Business™ downloads only the five on its list: one on a first
+  it. Rusty Business™ downloads only the models on its list: one on a first
   run, and any of the others from the Installers page with one click.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
@@ -141,8 +160,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   than your computer can hold. Rusty Business™ runs only what your computer
   can, and asks four engines outside it, Grok, GPT, Claude, and Gemini, each with
   your own key.
-- **Pictures.** Ollama's app takes images. Rusty Business™ takes words and
-  dropped files, but no images yet.
+- **Pictures.** Ollama's app takes images. Rusty Business™ reads pictures
+  only on a Mac so far, with one model, and its engine, mlx-vlm, you install
+  yourself with `pip install mlx-vlm`.
 
 ### The same either way
 
@@ -162,14 +182,14 @@ run models on your own computer. Here are the three side by side.
 | | Rusty Business™ | Ollama | Colibri |
 | --- | --- | --- | --- |
 | License | MIT | MIT | Apache 2.0 |
-| Runs a model on | A Mac with Apple silicon, or Windows and Linux with llama.cpp installed | macOS, Windows, and Linux | macOS, Windows, and Linux |
+| Runs a model on | A Mac with Apple silicon, or Linux; Windows with llama.cpp installed | macOS, Windows, and Linux | macOS, Windows, and Linux |
 | How you get it | A `.dmg`, an `.exe`, a `.deb`, an `.rpm`, or a `.tar.gz`, none signed yet | A download or one command, or a Docker image | A ZIP and a double-click on Windows; a copy of its repository and one script on macOS and Linux |
 | What does the work | Apple silicon's GPU, through MLX, or llama.cpp on Windows and Linux | The processor, or a graphics card through CUDA, ROCm, Metal, or Vulkan | The processor alone, or a graphics card through Vulkan, CUDA, or Metal |
-| Models | Five, on a fixed list, from the makers you pick; any other is refused. Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and Gemini, by Google, each with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
+| Models | Five, on a fixed list, from the makers you pick, and on a Mac Phi-3.5 Vision for pictures; any other is refused. Grok, by xAI, GPT, by OpenAI, Claude, by Anthropic, and Gemini, by Google, each with your own key | Its own library, and models that run in its cloud | Models from Hugging Face, and GGUF files you bring |
 | A model too big for memory | Not run here; Grok, GPT, Claude, or Gemini, with your own key, answers from its maker's computers | Can run in Ollama's cloud instead | For some, it keeps the core in memory and reads the rest from disk as it goes, so a fast disk matters |
 | Where you chat | A desktop window | Its app or a terminal | A dashboard in the browser, its chat, or a terminal |
 | For other programs | Nothing; it is a window for a person | An API on your computer, with Python and JavaScript libraries | An API on your computer in two common formats, and MCP tools |
-| Pictures and files | Files, no images yet | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
+| Pictures and files | Files, and pictures on a Mac with Phi-3.5 Vision | Images and dropped files, in its app | Images with some models, text and PDF files, and it can make pictures |
 
 What this says of Ollama and Colibri was read from their own pages, and they
 are where to check it. Ollama and Colibri are trademarks of their owners.
@@ -205,7 +225,8 @@ own section: [Mac](#run-the-chat-window-macos),
 [Linux](#run-the-chat-window-linux). None is signed yet, so a Mac or a
 Windows computer warns once before it opens one. Each file's checksum is
 beside it on the
-[newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
+[newest release](https://github.com/Bmorrical/rusty-business/releases/latest),
+and what changed in it is under [Release notes](#release-notes).
 
 ## Run the chat window (macOS)
 
@@ -257,6 +278,12 @@ grade, or No grading. A grade by Grok, GPT, Claude, or Gemini sends its maker th
 question and every answer, so a grade by a model on this computer keeps it all
 here.
 
+In Settings, Web lets a model search the web while it answers, such as for a
+plumber near you. It is off to start, and it works with one model asked at a
+time, while the WAN gate is on. The model writes the search, and only its
+words go: to DuckDuckGo, or to Brave Search when you give the path to a file
+that holds your own Brave key. That key goes only to Brave.
+
 The Installers page, at the foot of the window above Settings, lists every
 model on the app's list, whoever made it. With the WAN gate on, Install
 brings a model from Hugging Face onto this computer. For a configured
@@ -278,7 +305,10 @@ the model too.
 
 When no engine is answering, the app starts the one it carries and stops it
 again when the app quits. An engine that is already running is used as it is
-and left running.
+and left running. The foot of the side says when the engine answering is one
+this window did not start. When that engine does not list a model that is on
+this computer, the app names the model and says what to do, beside the
+models a question goes to and on the model's row in Settings.
 
 When Docker is on the computer and the gate is on, the app also starts the
 stack, opening Docker Desktop first when it is not running. It pulls the API
@@ -308,8 +338,8 @@ The installer carries no model engine yet. The app starts llama.cpp's
 window opens and says so. llama.cpp's
 [install page](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)
 gives the ways to get it, and `RUSTY_ENGINE_PROGRAM` names one kept
-somewhere else, by its full path. (On the roadmap: An engine for Windows and
-Linux.) The `.exe`'s checksum is beside it on the
+somewhere else, by its full path. (On the roadmap: An engine for Windows.)
+The `.exe`'s checksum is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
 To build the same installer yourself, see
 [Build it from source](#on-windows).
@@ -327,19 +357,18 @@ On 64-bit Linux, on an Intel or AMD processor:
 - Anywhere else, download
   [Rusty-Business-linux-x64.tar.gz](https://github.com/Bmorrical/rusty-business/releases/latest/download/Rusty-Business-linux-x64.tar.gz),
   unpack it, and run `Rusty-Business-linux-x64/bin/rusty-business`. It needs
-  WebKitGTK 4.1, OpenSSL 3, and glibc 2.35 or later from the system.
+  WebKitGTK 4.1, OpenSSL 3, the Vulkan loader, the OpenMP runtime, and glibc 2.35 or later from the system.
 
-The window draws with WebKitGTK, and the program uses OpenSSL. The `.deb`
-and the `.rpm` bring both in when the system does not have them.
+The window draws with WebKitGTK, the program uses OpenSSL, and the engine,
+llama.cpp's `llama-server`, uses the Vulkan loader. The `.deb` and the `.rpm`
+bring all three in when the system does not have them.
 
-The three files carry no model engine yet. The app starts llama.cpp's
-`llama-server` when it finds it: in a folder on `PATH`, then in
-`~/.local/bin`, Homebrew's folder, `/usr/local/bin`, and `/usr/bin`. Without
-it, the window opens and says so. llama.cpp's
-[install page](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)
-gives the ways to get it, and `RUSTY_ENGINE_PROGRAM` names one kept
-somewhere else, by its full path. (On the roadmap: An engine for Windows and
-Linux.) Each file's checksum is beside it on the
+The three files carry the engine inside them: llama.cpp's `llama-server`, the
+Vulkan build from llama.cpp's own releases, pinned by checksum. The app
+starts it on its own, and also starts one already on this computer, found in
+a folder on `PATH`, then in `~/.local/bin`, Homebrew's folder,
+`/usr/local/bin`, and `/usr/bin`. `RUSTY_ENGINE_PROGRAM` names one kept
+somewhere else, by its full path. Each file's checksum is beside it on the
 [newest release](https://github.com/Bmorrical/rusty-business/releases/latest).
 To build the same three files yourself, see
 [Build it from source](#on-linux).
@@ -425,8 +454,8 @@ mlx_lm.server --port 8080
 ```
 
 On Windows and Linux, the app looks for llama.cpp's `llama-server` instead,
-and starts it with its own models folder. The downloads do not carry one
-yet.
+and starts it with its own models folder. The Linux downloads carry one; the
+Windows installer does not yet.
 
 ## Run the stack
 
@@ -494,10 +523,10 @@ and nothing is released or deployed unless it is green on `main`. Run
 What Rusty Business™ cannot do yet. The [roadmap](ROADMAP.md) says what comes
 next.
 
-- **Windows and Linux need llama.cpp.** Only the Mac app carries its model
-  engine. On Windows and Linux, the app starts llama.cpp's `llama-server`
-  once you install it, and until then the window says it found none. (On
-  the roadmap: An engine for Windows and Linux.)
+- **Windows needs llama.cpp.** The Mac and Linux apps carry their model
+  engine. On Windows, the app starts llama.cpp's `llama-server` once you
+  install it, and until then the window says it found none. (On the roadmap:
+  An engine for Windows.)
 - **Not signed yet.** macOS stops the downloaded app the first time it
   opens, until you choose Open Anyway in System Settings or run the command
   in [Run the chat window (macOS)](#run-the-chat-window-macos). Windows may stop
@@ -524,17 +553,61 @@ next.
   legacy. (On the roadmap: Grok through xAI's newer API.)
 - **A grade reads one question.** The grader reads the question and its
   answers, not the chat before them.
-- **No pictures yet.** It reads attached PDF, Word, PowerPoint, spreadsheet,
-  and text files, but not images. (On the roadmap: Reading images.)
+- **Pictures on a Mac only.** It reads attached PDF, Word, PowerPoint,
+  spreadsheet, and text files, and on a Mac a picture, with Phi-3.5 Vision.
+  Its engine, mlx-vlm, is not in the download yet: `pip install mlx-vlm`
+  puts it on the Mac. Phi-4-multimodal and Molmo-7B-O are listed as coming,
+  and scanned PDFs are not read. (On the roadmap: Reading images.)
+- **The Workflow view only reads.** A board gets there as a file: imported
+  with the `board` command in a terminal, which also keeps the two in step,
+  or put in the boards folder. The view cannot change a story or a slice
+  yet. (On the roadmap: Slices you can write.)
+- **A board moves as a file.** [BOARD.md](BOARD.md) is the file's ruleset:
+  what it holds, each rule, and why, so anyone can bring in a road of their
+  own and build the other side. No direct API connection to a board's
+  backend, for now. The app holds no address, no token, and no key for one,
+  and a change that adds one is refused. A board moves as a file: exported
+  on one side, and imported on the other. That keeps the app offline first,
+  and at most LAN.
 - **A short list of models.** That is on purpose. A model that is not on the
   list does not show, even when it is on the computer.
 - **The servers do no work yet.** The API and the worker are stubs, and the
   chat window starts them but does not use them.
 
+## Release notes
+
+What changed in each version is in [RELEASES.md](RELEASES.md), newest first,
+back to the first release. Every version gets its note there before it is
+built.
+
+From 0.8.3 on, the same note is at the top of the version's page under
+[Releases](https://github.com/Bmorrical/rusty-business/releases), above the
+steps to install it. In the app, What changed on the notice of a new version
+opens that page.
+
 ## Roadmap
 
 What is planned, and in what order, is in [ROADMAP.md](ROADMAP.md). It
 promises no dates: a thing ships when its tests are green.
+
+## Contributing
+
+Anyone can send a change, and so can an AI model that works for them. Read
+[AGENTS.md](AGENTS.md) first. It sets every rule of the project in one
+place, for people and for models alike: how to behave here, how to send a
+change, what a good slice of work looks like, and what is refused. The
+rules a change meets first:
+
+- **Offline first.** A change never turns a gate on, and never reaches the
+  network around one.
+- **A board moves as a file.** No direct API connection to a board's
+  backend, for now. [BOARD.md](BOARD.md) has the rule and its why.
+- **Nothing private in this repository.** No key, no person's data, and
+  nothing from a private repository. Every sample is made up.
+- **One change per pull request**, with its tests.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the agreement every change follows
+before it merges.
 
 ## Security
 

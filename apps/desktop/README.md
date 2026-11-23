@@ -41,6 +41,16 @@ Select the picture to open it full size. The rest of the set is in
   download size. Install downloads one, with the gate on, then adds its
   maker so it shows at the top of the window. A model already here whose
   maker is not added has a Show button instead.
+- **A Workflow view**, at the foot of the window above Installers, that
+  shows a board: a road of releases, the stories and bugs under each, and
+  the slices each story is cut into. A slice goes through five lanes,
+  Sliced, Written, Checked, Reviewed, and Main, and the view says whose
+  move each slice and each story is. A story shows five marks, one for
+  each lane all of its slices have been through, and all five make a royal
+  flush. The view reads only a copy kept on this computer, so it works
+  with both gates off, and it keeps a note of your own on any story. The
+  sample board is made up, and shows how one reads. [Boards](#boards)
+  says where a board is kept and what is in one.
 - **A switch for each model**, in Settings under Models, for the models on
   this computer and the outside engines' alike. A model switched off is left
   out of questions, grading, and comparisons, and its files stay. Saved
@@ -75,6 +85,13 @@ Select the picture to open it full size. The rest of the set is in
   below them, and a round not graded yet has a button to grade it. Where the
   grader wrote "Answer 2", the page adds the name of the model that wrote it.
   No grading turns it off.
+- **Web search**, off until you switch it on in Settings under Web. A model
+  asked alone can then look something up while it answers: it writes the
+  search, the app runs it, and the model reads at most 8 results as plain
+  text, with every tag taken out. A search goes out only while the gate is
+  on, over https, to DuckDuckGo's results page, or to Brave Search's API
+  when you give the path to a file that holds your own Brave key. That key
+  goes only to Brave and never reaches the page.
 - **The models on this computer**, named when the engine is not answering.
   On a Mac, the app looks in the Hugging Face cache folder, where the engine
   keeps the models it has downloaded. On Windows and Linux, it looks in the
@@ -86,6 +103,15 @@ Select the picture to open it full size. The rest of the set is in
   engine that is already running is used as it is, and asking twice changes
   nothing. When the app quits, it stops the engine it started and no other.
   When it cannot start one, it says why in one sentence.
+- **A model the engine leaves out.** A question goes only to a model the
+  engine lists. An engine started earlier, by another copy of the app or by
+  hand, can list fewer models than this computer holds. The app then names
+  each model that is on this computer and not on the engine's list, beside
+  the models a question goes to, at the foot of the side, and on the
+  model's row in Settings and on the Installers page. It also says whether
+  this window started the engine that answers. It does not stop or restart
+  an engine it did not start: it says how to, and Check again looks once
+  more.
 - **The stack, started by the app.** When the stack's front door is not
   answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a
@@ -178,6 +204,9 @@ page (Vue)  --IPC-->  Rust  --HTTP, loopback-->  on-device engine
   an address fixed in the code, over https, with no proxy and no redirect.
   The page gets the paths and the models, never a key.
 - [src-tauri/src/sessions.rs](src-tauri/src/sessions.rs), the saved chats.
+- [src-tauri/src/board.rs](src-tauri/src/board.rs), the boards the Workflow
+  view shows. It reads and writes only the app's own `boards` folder, takes
+  no path from the page, asks nothing of the network, and deletes nothing.
 - [src-tauri/src/update.rs](src-tauri/src/update.rs), the notice of a new
   version. It asks only GitHub's API, only for this repository's newest
   release, and picks this system's file. The page names only Download or
@@ -192,8 +221,8 @@ Which program serves the contract is the only thing that changes per system:
 | System  | Engine                                             |
 | ------- | -------------------------------------------------- |
 | macOS   | `mlx_lm.server` (MLX, Apple silicon)               |
-| Windows | not chosen yet; any server with the same two calls |
-| Linux   | not chosen yet; any server with the same two calls |
+| Windows | `llama-server`, installed on the computer          |
+| Linux   | `llama-server`, carried in the packages            |
 
 The engine's address defaults to `http://127.0.0.1:8080/v1`. Set
 `RUSTY_ENGINE_URL` to use another port on this computer or an RFC 1918
@@ -251,12 +280,238 @@ If your server supports chat only, you can install a catalog GGUF on the
 server and refresh the app after llama-server lists it. Use this HTTP
 connection on a trusted private network.
 
+## Boards
+
+The Workflow view shows a board: releases, the stories and bugs under each,
+and the slices each story is cut into. A board is one JSON file in a
+`boards` folder, beside the `sessions` folder:
+
+- macOS: `~/Library/Application Support/net.morrical.rusty-business/boards`
+- Windows: `%APPDATA%\net.morrical.rusty-business\boards`
+- Linux: `~/.local/share/net.morrical.rusty-business/boards`
+
+A board gets there when you import its file with the `board` command
+below, when you put its file in that folder, or when you open the sample
+board, which is made up. The app does not reach the network for one. The
+file is named `<id>.json`, and its name is the board's id: up to 64 letters,
+digits, and hyphens. The view lists every board in the folder. A file it
+cannot read is listed with what is wrong, and left as it is.
+
+The file's ruleset is [BOARD.md](../../BOARD.md), at the root of the
+repository: what the file holds, each rule, and why the rule is there. In
+short:
+
+```json
+{
+  "meta": {
+    "format": "board",
+    "version": "2.0",
+    "id": "list-app",
+    "name": "A list app",
+    "rev": "export-12",
+    "history": ["export-11", "export-10"],
+    "statuses": {
+      "stories": [
+        { "id": "building", "name": "Building", "finished": false },
+        { "id": "done", "name": "Done", "finished": true }
+      ]
+    }
+  },
+  "data": {
+    "releases": [
+      {
+        "release": "1.2.0",
+        "title": "Lists that sort",
+        "detail": "",
+        "status": "Building",
+        "stories": [
+          {
+            "number": 412,
+            "kind": "story",
+            "title": "Sortable column headers",
+            "detail": "Click a column's header to sort the list by it.",
+            "status": "Building",
+            "statusId": "building",
+            "notes": ["Numbers sort as numbers, not as text."],
+            "slices": [
+              {
+                "id": "a",
+                "title": "A sort helper for text and numbers",
+                "detail": "Goal: one function that sorts rows by a column.",
+                "lane": "written"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- **`meta`** says what the file is, and **`data`** is the board.
+- **`format`** is `board`, and **`version`** is the ruleset's version the
+  file follows, as a line and a step: `2.0`. Within a line a file only
+  gains, so the app reads every step of lines 1 and 2, keeps a key it does
+  not know, and writes it back. A file on a line above 2 is not read. A
+  board v1 file, the format before this one, is line 1 and is still read.
+- **`statuses`** are the board's own: a list for stories and bugs, and one
+  for releases. Each status has an `id` that never changes, a `name`, and
+  whether it is `finished`. A row's **`statusId`** names one. The app shows
+  that status's name, and the row's `status` as written when the id is not
+  on the list.
+- **`id`**, on the board, says which board a file kept somewhere else is.
+  In the boards folder, the file's name says it.
+- **`rev`** names the state a file holds, and **`history`** lists the
+  states it came from, the newest first, up to 50. Each is up to 64
+  letters, digits, and hyphens. Both are for keeping a board in step with a
+  file, below, and a board that is only read needs neither.
+- **`number`** is a story's number, from 1 up, and no two stories on a
+  board share one. **`kind`** is `story` or `bug`, and a story with no
+  `kind` is a story.
+- **`lane`** is the last lane a slice has been through: `sliced`,
+  `written`, `checked`, `reviewed`, or `main`, in that order. A slice with
+  no `lane` has been through none.
+- **`move`**, on a story or a slice, says whose move it is: `you`, `model`,
+  `check`, or `review`. Leave it out, and the move goes to whoever takes
+  the slice into its next lane: you, a local model, the check, a reviewer,
+  and you again.
+- **`detail`** on a slice is its brief: what to do, in which files, and
+  how to tell it is done. **`notes`** are the board's own notes on a story
+  or a slice.
+- **`id`** on a slice is up to 16 letters, digits, and hyphens, and no two
+  slices of a story share one.
+
+A story holds a lane when it has slices and every one of them has been
+through that lane. All five lanes make a royal flush: every slice is on
+main.
+
+A board is at most 4 MB, with up to 500 releases, 5,000 stories, 100 slices
+a story, and 200 notes on a story or a slice. The view lists up to 100
+boards.
+
+Your own notes are kept apart from the board, in `drafts/<id>.json` in the
+same folder: one note a story, up to 4,000 characters. A new copy of a
+board never changes or removes your notes. A note on a story that has left
+the board stays, and the view lists it under No longer on this board.
+
+### A board in step with a file
+
+A board can have one file kept somewhere else: a folder you share, a
+checkout of a repository, or wherever another program writes its export.
+One command, run in a terminal, keeps that file and this computer's copy in
+step, either way:
+
+```sh
+rusty-business board import <file>       # a first copy here, from a file
+rusty-business board export <id> <file>  # a first file, from the copy here
+rusty-business board sync                # pull, then push
+rusty-business board pull
+rusty-business board push
+rusty-business board list
+```
+
+On a Mac the program is inside the app, at
+`/Applications/Rusty\ Business.app/Contents/MacOS/rusty-business`. From
+this repository, it is `cargo run -- board list` in `apps/desktop/src-tauri`.
+
+- **`import`** reads a board file, keeps a copy of it here, and remembers
+  where the file is. **`export`** writes a board that is here to a new
+  file, and remembers that. After either, `pull`, `push`, and `sync` need no
+  path.
+- **`pull`** brings the file's changes here, and never writes the file.
+  **`push`** writes what is here to the file, and never writes the copy
+  here. **`sync`** pulls, then pushes.
+- With no id, `pull`, `push`, and `sync` do every board that has a file.
+  With one, as in `board sync list-app`, they do that board.
+- It leaves with 0 when it is done, 1 when it refused or failed, and 2 when
+  there are conflicts to settle.
+
+The app keeps each board as it stood at the last sync, and compares both
+sides against that. Changes to different things are both kept. What one
+side added is kept. What one side took away is taken away, unless the
+other side changed it. A release is known by its name, a story by its
+number, and a slice by its id within its story.
+
+A conflict is the same thing changed two ways, such as one story's title.
+The command lists each conflict, with what is here and what the file has,
+and writes nothing. Run it again with `--mine` to keep what is here, or
+`--theirs` to keep what the file has.
+
+A push is refused while the file has changes that are not here yet: pull
+first, or run `sync`. A push makes a new file, or replaces a file of the
+same board, and leaves any other file as it is.
+
+Beside the board and your notes, the boards folder keeps two more files
+for each board in step with a file: `synced/<id>.json`, the board as it
+stood at the last sync, and `sources/<id>.json`, where its file is.
+
+What it does not do yet:
+
+- Your notes stay on this computer. They are never written to the file.
+- The Workflow view cannot change a board yet, so the copy here changes
+  only when a pull brings something in, or when you edit its file.
+- The view does not show a key the app does not know. The key is kept, and
+  written back.
+- When both sides moved stories or slices, the order on the side that is
+  kept stands, and no conflict is listed for it.
+- The command reaches no network. The file is a path on this computer,
+  which can be a folder that something else shares or syncs.
+- The app shows a board the command changed the next time the view loads
+  it.
+- On Windows, the command has not been tried, and the installed app may
+  print nothing in a terminal.
+
+### A backend of your own
+
+The board file is an open format, and the file is the whole of the join.
+Any program that can read and write one can be the other side: a script,
+an export from a tracker, or a server of your own. It needs none of this
+app's code, and this app does not need to know what it is.
+[BOARD.md](../../BOARD.md) is the file's ruleset.
+
+**No direct API connection to a board's backend, for now.** The app holds no
+address, no token, and no key for one, and a change that adds one is
+refused. A board moves as a file: exported on one side, and imported on the
+other. BOARD.md says why.
+
+A backend keeps the `rev` and `history` of the last file it exported or
+imported, and whether its board changed since.
+
+- **To export**, when its board changed since that file, or it has never
+  exported, it gives the board a new `rev`, one it has never used, and
+  writes `history` as the last `rev` followed by the last `history`, at
+  most 50. When nothing changed, it writes the same `rev` and `history`
+  again.
+- **To import**, when its own board changed since that file, it refuses:
+  export first, run `board sync` here, then import. When the file's `rev`
+  is the last one, there is nothing to do. When the last `rev` is in the
+  file's `history`, it takes the file whole, and the file's `rev` and
+  `history` become its last. Otherwise it refuses, because the file does
+  not come from what it holds.
+- A release keeps its name, a story its number, and a slice its id, so
+  each can be found again.
+
+The merging is done here, by `board sync`. A backend that changes its
+board before it imports a file pushed from here has gone its own way: when
+it next exports, nothing here can say what each side changed, so nothing
+is taken away, and every difference is listed as a conflict to settle for
+one side. A backend that also keeps the last file's content can do its own
+merge by the rules above, and avoid that.
+
+BOARD.md has the rest of what a backend may do: apply part of a file and
+list what it did not, leave an over-long text out of an export, and keep
+rows of its own out of a file.
+
+A test in `cli.rs` runs a backend written by hand, this way, through each
+of these cases.
+
 ## What is in this folder
 
 | Path                   | What it is                                              |
 | ---------------------- | ------------------------------------------------------- |
-| [src](src)             | The page: one Vue component and its helpers             |
-| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the models switched off, Uninstall, the stack's start, saved chats |
+| [src](src)             | The page: the window, the Workflow view, and their helpers |
+| [src-tauri](src-tauri) | The Rust shell: the window, the engine adapter, downloads, the makers picked, the models switched off, Uninstall, the stack's start, saved chats, boards |
 | [engine](engine)       | The engine the Mac app carries: the one package asked for, and every package under it, pinned by hash |
 | `index.html`           | The page's single HTML file                             |
 | `vite.config.js`       | Vite's settings; the dev server stays on 127.0.0.1:1420 |

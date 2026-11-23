@@ -64,21 +64,73 @@ function threadFor(turns, modelId) {
  * models refuse a chat whose turns do not alternate. Given a model, each
  * question carries one answer, that model's own when it gave one.
  */
-export function requestMessages(turns, modelId, system = "") {
+export function requestMessages(turns, modelId, system = "", seesPictures = false) {
   const messages = [];
   const instructions = String(system ?? "").trim();
   if (instructions) messages.push({ role: "system", content: instructions });
   for (const turn of modelId ? threadFor(turns, modelId) : (turns ?? [])) {
-    const content = withAttachments(turn);
-    if (!content || !["system", "user", "assistant"].includes(turn.role)) continue;
+    if (!["system", "user", "assistant"].includes(turn.role)) continue;
+    const pictures = turn.role === "user" ? picturesOf(turn) : [];
+    let content = withAttachments(turn);
+    if (pictures.length && !seesPictures) {
+      // A model that cannot read pictures is told one was attached, and is
+      // never sent it.
+      content = [content, pictureUnseenLine(pictures.length)].filter(Boolean).join("\n\n");
+    } else if (pictures.length && !content) {
+      content = pictures.length === 1 ? "The user attached a picture." : "The user attached pictures.";
+    }
+    if (!content) continue;
+    const images = seesPictures ? pictures : [];
     const last = messages[messages.length - 1];
     if (last && last.role === turn.role && turn.role !== "system") {
       last.content = `${last.content}\n\n${content}`;
+      if (images.length) last.images = [...(last.images ?? []), ...images].slice(-PICTURES_PER_QUESTION);
     } else {
-      messages.push({ role: turn.role, content });
+      messages.push(images.length ? { role: turn.role, content, images } : { role: turn.role, content });
     }
   }
   return messages;
+}
+
+/**
+ * Brad, 2026-11-22: "allow all 3 models, user can on click to install, start
+ * a grouping, maybe tabbed screens". A question can carry pictures, which go
+ * only to a model on this computer that reads them.
+ */
+export const PICTURES_PER_QUESTION = 4;
+
+/** The kinds of picture a question can carry, by their file's end. */
+export const PICTURE_ENDS = ["jpg", "jpeg", "png", "webp"];
+
+/** True when the path names a picture a model can read. */
+export function isPicturePath(path) {
+  const end = String(path ?? "").split(/[\\/]/).pop().split(".");
+  return end.length > 1 && PICTURE_ENDS.includes(end.pop().toLowerCase());
+}
+
+/** The pictures a turn carries, as data URLs. */
+export function picturesOf(turn) {
+  return (turn?.attachments ?? [])
+    .map((file) => file?.picture)
+    .filter((url) => typeof url === "string" && /^data:image\/(jpeg|png|webp);base64,/.test(url));
+}
+
+/** Said to a model that cannot read the pictures a question carries. */
+export function pictureUnseenLine(count) {
+  return count === 1
+    ? "(The user attached a picture, which this model cannot see.)"
+    : `(The user attached ${count} pictures, which this model cannot see.)`;
+}
+
+/**
+ * The size a picture is shrunk to before it is sent: its long side at most
+ * `long` pixels, never made larger.
+ */
+export function shrunkSize(width, height, long = 1344) {
+  const w = Math.max(1, Math.round(Number(width) || 1));
+  const h = Math.max(1, Math.round(Number(height) || 1));
+  const scale = Math.min(1, long / Math.max(w, h));
+  return { width: Math.max(1, Math.round(w * scale)), height: Math.max(1, Math.round(h * scale)) };
 }
 
 /**
@@ -280,7 +332,7 @@ export function dayLabel(milliseconds, now = Date.now()) {
 /** A turn as it is saved: no window-only fields, no empty ones. */
 export function savedTurn(turn) {
   const saved = { role: turn.role, content: turn.content ?? "" };
-  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult", "attachments"]) {
+  for (const key of ["thinking", "model", "promptTokens", "completionTokens", "seconds", "stopped", "cutShort", "tool", "toolResult", "attachments", "rating", "best", "votedAt"]) {
     const value = turn[key];
     if (value !== undefined && value !== null && value !== "" && value !== false) saved[key] = value;
   }
@@ -745,6 +797,7 @@ export function attachmentTokens(files) {
 
 /** "PDF · 12K characters": a file's label in the chat. */
 export function attachmentLine(file) {
+  if (file?.picture) return file.width && file.height ? `Picture · ${file.width} × ${file.height}` : "Picture";
   const size = Number(file?.chars ?? 0);
   const amount = size >= 1000 ? `${Math.round(size / 1000)}K characters` : `${size} characters`;
   return `${file?.kind ?? "File"} · ${amount}${file?.cut ? ", cut short" : ""}`;
@@ -779,6 +832,7 @@ export function canRemove(makers, name) {
 
 /** "MIT · on this computer", "Apache 2.0 · 15.4 GB", or why it cannot download. */
 export function listedLine(model) {
+  if (model.onDisk && model.unseen) return `${model.license} · on this computer, not listed by the engine`;
   if (model.onDisk) return `${model.license} · ${model.remote ? "on the LAN server" : "on this computer"}`;
   if (model.offer) return `${model.license} · ${model.remote ? "about " : ""}${formatSize(model.offer.bytes)}`;
   return `${model.license} · no download for this computer`;
@@ -803,6 +857,64 @@ export function installLine(maker, model) {
 export function switchedOn(models, off) {
   const away = new Set(off ?? []);
   return (models ?? []).filter((entry) => !away.has(entry.id));
+}
+
+// "why can't I pick the 2 missing but installed models?" A question goes
+// only to a model the engine lists. The app uses an engine that is already
+// answering as it is, so one started earlier, by another copy of the app or
+// by hand, can list fewer models than this computer holds. The app says so,
+// and never stops an engine it did not start.
+
+/**
+ * The models on this computer, switched on, that the engine answering does
+ * not list. None for a LAN server, whose models are not on this computer,
+ * and none while no engine answers.
+ */
+export function unseenModels(engine, off) {
+  if (!engine?.reachable || engine.remote) return [];
+  return switchedOn(engine.unseen, off);
+}
+
+/** Beside the models that can be asked: how many more the engine leaves out. */
+export function unseenShort(engine, off) {
+  const count = unseenModels(engine, off).length;
+  if (!count) return "";
+  return count === 1 ? "1 more is not listed by the engine" : `${count} more are not listed by the engine`;
+}
+
+/**
+ * Under the engine's line: which models it leaves out, and what to do. An
+ * engine this window did not start is left running, so the way to a fresh
+ * one is to stop that one first.
+ */
+export function unseenLine(engine, off, address) {
+  const names = unseenModels(engine, off).map((entry) => entry.name);
+  if (!names.length) return "";
+  const one = new Set(names).size === 1;
+  const held = `${namesLine(names)} ${one ? "is" : "are"} on this computer, but the engine at ${address} does not list ${one ? "it" : "them"}.`;
+  if (engine.ours) return `${held} Quit the app and open it again.`;
+  return `${held} This window did not start that engine. Quit any other copy of the app, stop any engine you started yourself, then press Check again, and this window starts its own.`;
+}
+
+/**
+ * True when an engine on this computer answers and this window did not start
+ * it. The footer says so in a quiet line.
+ */
+export function startedElsewhere(engine) {
+  return Boolean(engine?.reachable) && !engine.remote && engine.ours === false;
+}
+
+/**
+ * The makers, with each model the engine leaves out marked `unseen`, so its
+ * row in Settings and on the Installers page says so.
+ */
+export function markUnseen(makers, engine) {
+  const names = new Set(unseenModels(engine, []).map((entry) => entry.name));
+  if (!names.size) return makers ?? [];
+  return (makers ?? []).map((maker) => ({
+    ...maker,
+    models: maker.models.map((entry) => (names.has(entry.name) ? { ...entry, unseen: true } : entry)),
+  }));
 }
 
 /** True when none of a model's ids is switched off. */
@@ -1030,4 +1142,135 @@ export function graderFor(saved, models) {
 /** "Grok 4.7 grades the answers once all are in." */
 export function gradesLine(grader) {
   return `${grader.name} grades the answers once all are in.`;
+}
+
+// Brad, 2026-11-22: "the reader should choose the viewport position."
+//
+// While answers come in, the chat's view is in one of three states:
+// "start" follows the newest line until the question reaches the top, then
+// holds; "end" follows the newest line; "stay" never moves. A question sent
+// begins in "start". The reader changes it by scrolling: up, or anywhere
+// short of the end, is "stay"; down to the end is "end".
+export const VIEW_START = "start";
+export const VIEW_END = "end";
+export const VIEW_STAY = "stay";
+
+// How close to the end, in pixels, still counts as at the end.
+export const END_SLACK = 16;
+
+/**
+ * The view's state once the reader may have scrolled. `was` is where the
+ * view stood when the app last looked, and `pane` the scrolling box now
+ * (`scrollTop`, `scrollHeight`, and `clientHeight`). A view the page pulled
+ * up because the chat got shorter is not the reader's move.
+ */
+export function viewAfterMove(mode, was, pane) {
+  const moved = pane.scrollTop - was;
+  const fromEnd = pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+  if (Math.abs(moved) < 1) return mode;
+  if (moved < 0 && fromEnd <= 1) return mode;
+  if (moved > 0 && fromEnd <= END_SLACK) return VIEW_END;
+  return VIEW_STAY;
+}
+
+/**
+ * Where to move the view, or null to leave it. `box` is the part being
+ * answered, `top` and `bottom` measured from the start of the chat. The view
+ * only ever moves down, so it never takes back a line the reader has.
+ */
+export function viewTarget(mode, pane, box) {
+  const end = Math.max(0, pane.scrollHeight - pane.clientHeight);
+  let target = null;
+  if (mode === VIEW_END) target = end;
+  else if (mode === VIEW_START && box) target = Math.min(end, box.bottom - pane.clientHeight, box.top);
+  return target !== null && target > pane.scrollTop + 0.5 ? target : null;
+}
+
+/**
+ * The answers open wide once the reader clicks one. `wide` holds the answers
+ * open now, and `answers` is the round the clicked one sits in. Opening an
+ * answer closes any other in its round, and a second click closes it, back to
+ * side by side. Nothing else changes, and nothing is saved.
+ */
+export function withWide(wide, answers, turn) {
+  const next = new Set([...wide].filter((open) => !answers.includes(open)));
+  if (!wide.has(turn)) next.add(turn);
+  return next;
+}
+
+/**
+ * An answer's rating after a click on up or down: the same one again takes it
+ * back. Brad, 2026-11-20: "I should be able to rate answers".
+ */
+export function withRating(turn, rating, now = Date.now()) {
+  return { rating: turn.rating === rating ? undefined : rating, votedAt: now };
+}
+
+/**
+ * Whether the best of a question's answers can be picked: every answer is in,
+ * and two or more of them have words.
+ */
+export function canPickBest(round) {
+  const answers = (round?.answers ?? []).filter((turn) => turn.role === "assistant");
+  if (answers.some((turn) => turn.pending || turn.waiting)) return false;
+  return answers.filter((turn) => String(turn.content ?? "").trim()).length > 1;
+}
+
+/**
+ * What changes when an answer is voted best: it becomes the round's one best,
+ * or, when it already was, the round has none. Each change is a pair of the
+ * answer and the fields it gets.
+ */
+export function bestChanges(answers, turn, now = Date.now()) {
+  const pick = turn.best ? null : turn;
+  const changes = (answers ?? []).filter((answer) => answer.best && answer !== pick).map((answer) => [answer, { best: undefined }]);
+  if (pick) changes.push([pick, { best: true, votedAt: now }]);
+  return changes;
+}
+
+/**
+ * The votes by model, from the questions Rust found votes on, newest first:
+ * how often each model was voted best and out of how many questions where a
+ * best was picked among its answers, its ups and downs, and the questions it
+ * won. Brad, 2026-11-20: "it keeps track of which answers were asked when it
+ * got voted the best one."
+ */
+export function voteTally(rounds) {
+  const rows = new Map();
+  const row = (model) => {
+    if (!rows.has(model)) rows.set(model, { model, best: 0, of: 0, up: 0, down: 0, won: [] });
+    return rows.get(model);
+  };
+  for (const round of rounds ?? []) {
+    const answers = round.answers ?? [];
+    const picked = answers.some((answer) => answer.best);
+    for (const answer of answers) {
+      const entry = row(answer.model);
+      if (answer.rating === "up") entry.up += 1;
+      if (answer.rating === "down") entry.down += 1;
+      if (!picked) continue;
+      entry.of += 1;
+      if (!answer.best) continue;
+      entry.best += 1;
+      entry.won.push({
+        session: round.session,
+        title: round.title,
+        question: round.question,
+        votedAt: round.votedAt,
+        over: answers.filter((other) => other !== answer).map((other) => other.model),
+      });
+    }
+  }
+  return [...rows.values()]
+    .filter((entry) => entry.of || entry.up || entry.down)
+    .sort((a, b) => b.best - a.best || b.up - b.down - (a.up - a.down) || a.model.localeCompare(b.model));
+}
+
+/** "Best in 3 of 5 questions; 4 up, 1 down": one model's votes in a line. */
+export function tallyLine(entry) {
+  const parts = [];
+  if (entry.of) parts.push(`best in ${entry.best} of ${entry.of} ${entry.of === 1 ? "question" : "questions"}`);
+  if (entry.up || entry.down) parts.push(`${entry.up} up, ${entry.down} down`);
+  const line = parts.join("; ");
+  return line ? line[0].toUpperCase() + line.slice(1) : "";
 }

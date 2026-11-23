@@ -91,7 +91,7 @@ test('LAN and WAN switches independently control model discovery, providers, and
   const localModel = { id: 'phi-4' };
   const provider = { id: 'outside:grok/test' };
   const refs = Object.fromEntries(
-    ['gate', 'gateBusy', 'gateNote', 'lanGate', 'lanGateBusy', 'lanGateNote', 'engine', 'outside', 'picked', 'updateChecked']
+    ['gate', 'gateBusy', 'gateNote', 'lanGate', 'lanGateBusy', 'lanGateNote', 'engine', 'vision', 'outside', 'picked', 'updateChecked']
       .map((name) => [name, { value: false }]),
   );
   refs.engine.value = { remote: true, reachable: true, models: [lanModel] };
@@ -116,7 +116,7 @@ test('LAN and WAN switches independently control model discovery, providers, and
     checkStack() { calls.push('stack'); },
     checkUpdate() { calls.push('update'); },
   });
-  const values = ['outsideListed', 'outsideModels', 'lanEngine', 'engineModels', 'onHand', 'installGateOpen', 'canDownload'];
+  const values = ['outsideListed', 'outsideModels', 'lanEngine', 'engineModels', 'visionModels', 'onHand', 'installGateOpen', 'canDownload'];
   const formulas = values.map((name) => app.match(new RegExp(`^const ${name} = .+;`, 'm'))?.[0]);
   assert.ok(formulas.every(Boolean));
   vm.runInContext([

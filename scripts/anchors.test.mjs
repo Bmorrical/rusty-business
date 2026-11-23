@@ -122,9 +122,11 @@ test('right under the picture, a table gives every download, one click each, wit
     'each row does not end with a link to its own steps',
   );
   // Brad, 2026-11-19: "add an engine to linux and windows distro's." The
-  // Windows and Linux apps start llama.cpp once it is installed, so their rows
-  // say what to install.
-  for (const row of rows.slice(1)) assert.ok(row.includes('with llama.cpp installed'), `a row does not say it needs llama.cpp: ${row}`);
+  // Windows app starts llama.cpp once it is installed, so its row says what to
+  // install; the Linux packages carry the engine.
+  const [windows, linux] = rows.slice(1);
+  assert.ok(windows.includes('with llama.cpp installed'), `the Windows row does not say it needs llama.cpp: ${windows}`);
+  assert.ok(!linux.includes('with llama.cpp installed'), `the Linux row still says it needs llama.cpp: ${linux}`);
 });
 
 test('under the downloads, the index links every section, in the order of the page', () => {
@@ -219,18 +221,21 @@ test('at the top, three ways to install it, each a link to the section that desc
 const LLAMA_INSTALL = 'https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md';
 const STALE = [', no model engine yet', 'has no model engine', 'have none yet', 'with no engine yet', 'Chats need a Mac'];
 
-test('the Windows and Linux sections say the app starts an installed llama.cpp, and how to get one', () => {
-  for (const address of ['run-the-chat-window-windows', 'run-the-chat-window-linux']) {
-    const body = sectionOf(address).replace(/\s+/g, ' ');
-    assert.ok(body.includes("The app starts llama.cpp's"), `${address} does not say the app starts llama.cpp`);
-    assert.ok(body.includes(`](${LLAMA_INSTALL})`), `${address} does not link llama.cpp's install page`);
-    assert.ok(body.includes('`RUSTY_ENGINE_PROGRAM` names one kept somewhere else, by its full path'), `${address} does not say how to name one kept elsewhere`);
-    assert.ok(body.includes('Without it, the window opens and says so') || body.includes('otherwise the window opens and says so'), `${address} does not say what happens without it`);
-    assert.ok(body.includes('(On the roadmap: An engine for Windows and Linux.)'), `${address} does not point at the roadmap`);
-  }
+test('the Windows section says the app starts an installed llama.cpp, and how to get one', () => {
+  const body = sectionOf('run-the-chat-window-windows').replace(/\s+/g, ' ');
+  assert.ok(body.includes("The app starts llama.cpp's"), 'the Windows section does not say the app starts llama.cpp');
+  assert.ok(body.includes(`](${LLAMA_INSTALL})`), "the Windows section does not link llama.cpp's install page");
+  assert.ok(body.includes('`RUSTY_ENGINE_PROGRAM` names one kept somewhere else, by its full path'), 'the Windows section does not say how to name one kept elsewhere');
+  assert.ok(body.includes('Without it, the window opens and says so') || body.includes('otherwise the window opens and says so'), 'the Windows section does not say what happens without it');
+  assert.ok(body.includes('(On the roadmap: An engine for Windows.)'), 'the Windows section does not point at the roadmap');
   assert.ok(sectionOf('run-the-chat-window-windows').includes('`llama-server.exe` when it finds it in a folder on `PATH`'), 'the Windows section does not say it looks on PATH');
-  const linux = sectionOf('run-the-chat-window-linux').replace(/\s+/g, ' ');
-  assert.ok(linux.includes('`~/.local/bin`, Homebrew\'s folder, `/usr/local/bin`, and `/usr/bin`'), 'the Linux section does not give the folders the app looks in');
+});
+
+test('the Linux section says the app carries the engine, and still names one found on the computer', () => {
+  const body = sectionOf('run-the-chat-window-linux').replace(/\s+/g, ' ');
+  assert.ok(body.includes('The three files carry the engine inside them'), 'the Linux section does not say it carries the engine');
+  assert.ok(body.includes('`RUSTY_ENGINE_PROGRAM` names one kept somewhere else, by its full path'), 'the Linux section does not say how to name one kept elsewhere');
+  assert.ok(body.includes('`~/.local/bin`, Homebrew\'s folder, `/usr/local/bin`, and `/usr/bin`'), 'the Linux section does not give the folders the app looks in');
   const flat = readme.replace(/\s+/g, ' ');
   for (const words of STALE) assert.ok(!flat.includes(words), `the README still says "${words}"`);
 });

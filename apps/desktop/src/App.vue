@@ -1,18 +1,22 @@
 <script setup>
 import { renderMarkdown } from "./markdown.js";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
+import Workflow from "./Workflow.vue";
 import {
   answersLine,
   arrangeSessions,
+  bestChanges,
+  canPickBest,
   canGrade,
   canRemove,
   chatModels,
   checkedLine,
   chipDetail,
+  dayLabel,
   downloaded,
   downloadLine,
   firstRunOffers,
@@ -48,6 +52,7 @@ import {
   keptPicks,
   listedLine,
   looksLikePath,
+  markUnseen,
   memoryRequest,
   meterLine,
   modelLine,
@@ -65,6 +70,7 @@ import {
   showsStartHint,
   showsUpdate,
   stackLine,
+  startedElsewhere,
   startLine,
   switchedOn,
   systemPrompt,
@@ -72,6 +78,8 @@ import {
   tokensPerSecond,
   uninstallAsk,
   uninstalledLine,
+  unseenLine,
+  unseenShort,
   UPDATE_EVERY,
   updateDetail,
   updateLine,
@@ -79,7 +87,32 @@ import {
   withPick,
   webPrompt,
   WEB_TOOL,
+  VIEW_END,
+  VIEW_START,
+  VIEW_STAY,
+  viewAfterMove,
+  viewTarget,
+  tallyLine,
+  voteTally,
+  withRating,
+  withWide,
+  isPicturePath,
+  shrunkSize,
+  PICTURES_PER_QUESTION,
 } from "./chat.js";
+import {
+  addPictures,
+  isHeic,
+  passedLine,
+  pictureLine,
+  pictureSummary,
+  QUALITY,
+  QUALITY_HIGH,
+  QUALITY_LOW,
+  scoreLine,
+  smallDownloadLine,
+  splitDrop,
+} from "./utilities.js";
 
 // The page only works inside the app's own window, where Rust answers.
 const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -102,6 +135,13 @@ const ICONS = {
   back: "m15 18-6-6 6-6",
   copy: "M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
   check: "M20 6 9 17l-5-5",
+  wide: "M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7",
+  narrow: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z",
+  thumbsUp:
+    "M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z",
+  thumbsDown:
+    "M17 14V2M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z",
 };
 
 const SUGGESTIONS = [
@@ -190,6 +230,11 @@ const learnOn = ref(stored("learn", "on") !== "off");
 // Off to start: learning from an outside engine sends your message and memory to its maker once more.
 const learnOutside = ref(stored("learnOutside", "off") === "on");
 const autoApply = ref(stored("autoApply", "off") === "on");
+// Votes on answers, on to start. Brad, 2026-11-22: "voting is optional and
+// it's on by default and user can turn it off in settings".
+const votesOn = ref(stored("votes", "on") !== "off");
+const tally = ref([]);
+const votesNote = ref("");
 const learnedNote = ref("");
 const theme = ref(stored("theme", "system"));
 const sideOpen = ref(stored("side", "open") !== "closed");
@@ -199,6 +244,9 @@ const found = ref([]);
 const searchBox = ref(null);
 const menuFor = ref("");
 const settingsTab = ref("memory");
+// "start a grouping, maybe tabbed screens, for each "type" collections of
+// models, they can exists in more than one tab where applicable."
+const installersTab = ref("chat");
 const projectDialog = ref(null);
 const editing = ref(null);
 let editingFrom = {};
@@ -217,7 +265,10 @@ const TOOL_STATUS = { running: "Running", asked: "Waiting for you", done: "Done"
 /** Settles the change waiting for Apply or Skip. */
 let approve = null;
 let checkAgain = false;
-let stickToBottom = true;
+// Where the chat's view goes while answers come in (see viewAfterMove in
+// chat.js), and where the app last left it.
+let view = VIEW_START;
+let viewTop = 0;
 
 function blankSession(project = null) {
   return { id: "", title: "", model: "", createdAt: 0, updatedAt: 0, messages: [], project, pinned: false };
@@ -229,8 +280,13 @@ const outsideListed = computed(() => outside.value.filter((entry) => entry.added
 const outsideModels = computed(() => (gate.value ? outsideListed.value : []));
 const lanEngine = computed(() => engine.value?.remote === true);
 const engineModels = computed(() => (lanEngine.value && !lanGate.value ? [] : engine.value?.models ?? []));
+// The picture engine: models that read pictures, on a Mac, on this computer.
+const vision = ref(null);
+const visionNote = ref("");
+let visionStarting = false;
+const visionModels = computed(() => (vision.value?.reachable ? (vision.value.models ?? []) : []).map((entry) => ({ ...entry, pictures: true })));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...engineModels.value, ...outsideModels.value]);
+const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -262,9 +318,45 @@ const attached = ref([]);
 const attaching = ref(0);
 const dropping = ref(false);
 let stopDropping = null;
+
+// The Utilities page. HEIC to JPEG runs on a Mac only, for now; where the
+// picture was taken is left out unless the person keeps it, and that choice
+// is not saved, so each visit starts with it left out.
+const heicReady = ref(false);
+const heicList = ref([]);
+const heicQuality = ref(QUALITY);
+const heicKeepPlace = ref(false);
+const heicNote = ref("");
+const heicBusy = ref(false);
+// The picture check: its model is installed only when the person asks, from
+// the Installers page. A score lives here, on the page, and nowhere else; it
+// is cleared each time the page opens.
+const PICTURE_CHECK = "picture-check";
+// "allow all 3 models" with "Phi-3.5 now, rest later": listed, not offered.
+const PICTURE_MODELS_COMING = [
+  { name: "Phi-4-multimodal", maker: "Microsoft", license: "MIT" },
+  { name: "Molmo-7B-O", maker: "Ai2", license: "Apache-2.0" },
+];
+const pictureCheck = ref(null);
+const pictureScore = ref(null);
+const pictureNote = ref("");
+const pictureBusy = ref("");
+const pictureReady = computed(() => pictureCheck.value?.installed === true);
+// What a drop does, on the page it lands on.
+const dropWords = computed(() =>
+  page.value === "utilities"
+    ? pictureReady.value
+      ? ["Drop a picture", "HEIC to convert, or JPEG, PNG, or WebP to check"]
+      : ["Drop to convert", "HEIC pictures, or a folder of them"]
+    : ["Drop to attach", "PDF, Word, PowerPoint, spreadsheets, CSV, text or code files, and JPEG, PNG, or WebP pictures"],
+);
 const canSend = computed(
   () => Boolean(draft.value.trim() || attached.value.length) && !busy.value && chosen.value.length > 0 && !attaching.value,
 );
+/** Pictures waiting to go with the next message. */
+const attachedPictures = computed(() => attached.value.filter((file) => file.picture));
+/** The models picked that cannot read the pictures waiting. */
+const blindPicked = computed(() => (attachedPictures.value.length ? chosen.value.filter((entry) => entry.pictures !== true) : []));
 /** The model picked with the smallest window, which files must fit. */
 const tightest = computed(() =>
   chosen.value.filter((entry) => entry.context).reduce((least, entry) => (!least || entry.context < least.context ? entry : least), null),
@@ -287,8 +379,10 @@ const installGateOpen = computed(() => (lanEngine.value ? lanGate.value : gate.v
 const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : gateBusy.value));
 const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
 const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
+const unseenNote = computed(() => unseenLine(engine.value, off.value, engineAddress.value));
+const unseenChip = computed(() => unseenShort(engine.value, off.value));
 const displayMakers = computed(() => {
-  if (!lanEngine.value) return makers.value;
+  if (!lanEngine.value) return markUnseen(makers.value, engine.value);
   const installed = lanGate.value ? [...engine.value.models, ...(engine.value.setAside ?? [])] : [];
   return makers.value.map((maker) => ({
     ...maker,
@@ -298,6 +392,11 @@ const displayMakers = computed(() => {
     }),
   }));
 });
+// The models that read pictures, with their maker, for the Pictures tab. They
+// show under Chat too, since they answer words as well.
+const pictureEntries = computed(() =>
+  displayMakers.value.flatMap((maker) => maker.models.filter((entry) => entry.pictures).map((entry) => ({ maker, entry }))),
+);
 const side = computed(() => arrangeSessions(sessions.value, projects.value, now.value));
 const searching = computed(() => Boolean(query.value.trim()));
 const currentProject = computed(() => projects.value.find((project) => project.id === current.value.project) ?? null);
@@ -385,6 +484,7 @@ watch(learnOutside, (on) => store("learnOutside", on ? "on" : "off"));
 watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
 watch(webOn, (on) => store("web", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
+watch(votesOn, (on) => store("votes", on ? "on" : "off"));
 
 /**
  * "the next step is user can run the same question in 1-nth models and checks
@@ -419,6 +519,7 @@ async function checkEngine() {
       startNote.value = "";
     }
     pickModels(picked.value, chatModels(current.value));
+    checkVision();
   } catch (error) {
     problem.value = String(error);
   } finally {
@@ -428,6 +529,32 @@ async function checkEngine() {
       checkAgain = false;
       checkEngine();
     }
+  }
+}
+
+/**
+ * Reads the picture engine, and starts it when a model that reads pictures
+ * is on the disk and no engine answers. It never holds up the chat engine.
+ */
+async function checkVision() {
+  if (!inApp) return;
+  try {
+    vision.value = await invoke("picture_engine_status");
+    if (vision.value?.supported && !vision.value.reachable && vision.value.onDisk?.length && !visionStarting) {
+      visionStarting = true;
+      try {
+        const start = await invoke("start_picture_engine");
+        visionNote.value = start.answering ? "" : (start.reason ?? "");
+        if (start.answering) vision.value = await invoke("picture_engine_status");
+      } finally {
+        visionStarting = false;
+      }
+    } else if (vision.value?.reachable) {
+      visionNote.value = "";
+    }
+    pickModels(picked.value, chatModels(current.value));
+  } catch {
+    vision.value = null;
   }
 }
 
@@ -693,13 +820,20 @@ async function setMaker(name, on, box) {
 }
 
 /**
- * Opens Installers or Settings in place of the chat. Both show the makers, and
- * Installers shows the outside engines, as Rust keeps them, so each asks Rust
- * afresh.
+ * Opens Workflow, Installers, or Settings in place of the chat. Installers and
+ * Settings show the makers, and Installers shows the outside engines, as Rust
+ * keeps them, so each asks Rust afresh. Workflow reads only its board, and
+ * asks for that itself.
  */
 async function openPage(name) {
   page.value = name;
   menuFor.value = "";
+  if (name === "workflow") return;
+  if (name === "utilities") {
+    nextTick(() => pageTitle.value?.focus());
+    await readUtilities();
+    return;
+  }
   if (name === "settings") {
     memoryDraft.value = memory.value;
     memorySaved.value = "";
@@ -708,6 +842,7 @@ async function openPage(name) {
   await readMakers();
   await readOutside();
   await readOff();
+  if (name === "installers") await readPictureCheck();
 }
 
 /** Back to the chat. */
@@ -931,9 +1066,37 @@ async function persist() {
   }
 }
 
+/** Rates an answer up or down; the same click again takes the rating back. */
+function rate(turn, rating) {
+  Object.assign(turn, withRating(turn, rating));
+  persist();
+}
+
+/** Votes an answer the best of its question, or takes that vote back. */
+function pickBest(round, turn) {
+  for (const [answer, change] of bestChanges(round.answers, turn)) Object.assign(answer, change);
+  persist();
+}
+
+/** The tally on the Votes tab, read fresh from every saved chat. */
+async function loadVotes() {
+  if (!inApp) return;
+  try {
+    tally.value = voteTally(await invoke("list_votes"));
+    votesNote.value = "";
+  } catch (error) {
+    votesNote.value = String(error);
+  }
+}
+
+watch([page, settingsTab], ([where, tab]) => {
+  if (where === "settings" && tab === "votes") loadVotes();
+});
+
 function newChat(project = null) {
   if (busy.value) return;
   current.value = blankSession(project);
+  wide.value = new Set();
   page.value = "chat";
   problem.value = "";
   askTrash.value = "";
@@ -951,13 +1114,13 @@ async function openSession(id) {
   askTrash.value = "";
   try {
     current.value = await invoke("load_session", { id });
+    wide.value = new Set();
     // A step left waiting or running when the app closed never ran.
     for (const turn of current.value.messages) {
       if (turn.tool && ["asked", "running"].includes(turn.tool.status)) turn.tool.status = "skipped";
     }
     pickModels(chatModels(current.value), picked.value);
-    stickToBottom = true;
-    scrollDown();
+    jumpToEnd();
     focusComposer();
   } catch (error) {
     problem.value = String(error);
@@ -1154,9 +1317,9 @@ async function send() {
   attached.value = [];
   busy.value = true;
   stopAll = false;
-  stickToBottom = true;
+  view = VIEW_START;
   resizeComposer();
-  scrollDown();
+  followAnswer();
   // Saved before the models answer, so the question survives a crash.
   await persist();
   // The engine answers one at a time, so a look for memories still under way
@@ -1194,7 +1357,7 @@ async function send() {
     if (stopAll) break;
     const reply = replies[index];
     reply.waiting = false;
-    const error = await ask(reply, entry, requestMessages(history, entry.id));
+    const error = await ask(reply, entry, requestMessages(history, entry.id, "", entry.pictures === true));
     // One model failing does not keep the next from answering.
     if (error) failed.push(`${entry.name}: ${error}`);
   }
@@ -1224,7 +1387,7 @@ async function send() {
     checkEngine();
   }
   await persist();
-  scrollDown();
+  followAnswer();
   focusComposer();
   // An outside engine looks for memories only when Settings allows it.
   if (answered && text && (learnOutside.value || !isOutside(asked[0].id))) learning = learn(text, asked[0].id, project);
@@ -1269,7 +1432,7 @@ async function work(session, entry, project, system, first) {
       await persist();
       return false;
     }
-    const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id);
+    const messages = requestMessages(withSystem(session.messages.slice(), system), entry.id, "", entry.pictures === true);
     session.messages.push({ role: "assistant", content: "", thinking: "", model: entry.id, pending: true });
     reply = session.messages.at(-1);
     await persist();
@@ -1277,7 +1440,7 @@ async function work(session, entry, project, system, first) {
       session.messages = session.messages.filter((turn) => turn !== reply);
       return false;
     }
-    scrollDown();
+    followAnswer();
     const error = await ask(reply, entry, messages);
     if (error || (!reply.content && !reply.thinking)) {
       session.messages = session.messages.filter((turn) => turn !== reply);
@@ -1288,11 +1451,73 @@ async function work(session, entry, project, system, first) {
   }
 }
 
-/** Reads files into text, to go with the next message. */
+/**
+ * Shrinks a picture in the page before it is sent: its long side at most
+ * 1344 pixels, as a JPEG on white. The shrunk copy is what the chat keeps.
+ */
+function shrinkPicture(url, name) {
+  return new Promise((resolve, reject) => {
+    const picture = new Image();
+    picture.onload = () => {
+      const size = shrunkSize(picture.naturalWidth, picture.naturalHeight);
+      const canvas = document.createElement("canvas");
+      canvas.width = size.width;
+      canvas.height = size.height;
+      const pen = canvas.getContext("2d");
+      pen.fillStyle = "#fff";
+      pen.fillRect(0, 0, size.width, size.height);
+      pen.drawImage(picture, 0, 0, size.width, size.height);
+      resolve({ name, kind: "Picture", picture: canvas.toDataURL("image/jpeg", 0.85), width: size.width, height: size.height });
+    };
+    picture.onerror = () => reject(`${name} could not be read as a picture.`);
+    picture.src = url;
+  });
+}
+
+/** Adds a picture to the next message, up to four. */
+async function attachPicture(read) {
+  if (attachedPictures.value.length >= PICTURES_PER_QUESTION) {
+    problem.value = `A question can carry at most ${PICTURES_PER_QUESTION} pictures.`;
+    return;
+  }
+  const file = await shrinkPicture(read.url, read.name);
+  if (!attached.value.some((known) => known.picture === file.picture)) attached.value = [...attached.value, file];
+}
+
+/** A picture pasted into the message box goes with the next message. */
+async function onPaste(event) {
+  const items = [...(event.clipboardData?.items ?? [])].filter((item) => item.kind === "file" && /^image\/(jpeg|png|webp)$/.test(item.type));
+  if (!items.length) return;
+  event.preventDefault();
+  for (const item of items) {
+    const blob = item.getAsFile();
+    if (!blob) continue;
+    attaching.value += 1;
+    try {
+      const url = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject("The pasted picture could not be read.");
+        reader.readAsDataURL(blob);
+      });
+      await attachPicture({ url, name: blob.name || "Pasted picture" });
+    } catch (error) {
+      problem.value = String(error);
+    } finally {
+      attaching.value -= 1;
+    }
+  }
+}
+
+/** Reads files into text, and pictures as pictures, to go with the next message. */
 async function attachPaths(paths) {
   for (const path of paths ?? []) {
     attaching.value += 1;
     try {
+      if (isPicturePath(path)) {
+        await attachPicture(await invoke("read_picture", { path }));
+        continue;
+      }
       const file = await invoke("read_attachment", { path });
       if (!attached.value.some((known) => known.name === file.name && known.text === file.text)) {
         attached.value = [...attached.value, file];
@@ -1318,16 +1543,200 @@ function detach(index) {
   attached.value = attached.value.filter((_, at) => at !== index);
 }
 
-/** Files dropped on the window are attached, while a chat is open. */
+/**
+ * Files dropped on the window are attached while a chat is open, and go on
+ * the HEIC list while Utilities is open.
+ */
 function onDrop(event) {
   const kind = event.payload?.type;
   const chatting = page.value === "chat";
-  if (kind === "enter" || kind === "over") dropping.value = chatting;
+  const utilities = page.value === "utilities" && (heicReady.value || pictureReady.value);
+  if (kind === "enter" || kind === "over") dropping.value = chatting || utilities;
   else if (kind === "leave") dropping.value = false;
   else if (kind === "drop") {
     dropping.value = false;
     if (chatting) attachPaths(event.payload.paths);
+    else if (utilities) dropOnUtilities(event.payload.paths);
   }
+}
+
+/**
+ * Whether this computer can convert HEIC and whether the picture check is
+ * installed, asked once the page opens. A score from an earlier visit is
+ * cleared.
+ */
+async function readUtilities() {
+  pictureScore.value = null;
+  pictureNote.value = "";
+  try {
+    heicReady.value = (await invoke("utilities_status")).heic;
+  } catch {
+    heicReady.value = false;
+  }
+  await readPictureCheck();
+}
+
+/**
+ * A drop on Utilities: a JPEG, PNG, or WebP picture goes to the picture
+ * check when it is installed, and everything else to HEIC to JPEG.
+ */
+function dropOnUtilities(paths) {
+  const { check, rest } = pictureReady.value ? splitDrop(paths) : { check: [], rest: paths ?? [] };
+  if (check.length) scorePicture(check[0], check.length > 1);
+  if (rest.length && heicReady.value) addHeic(rest);
+}
+
+async function readPictureCheck() {
+  try {
+    pictureCheck.value = await invoke("picture_check_status");
+  } catch {
+    pictureCheck.value = null;
+  }
+}
+
+/**
+ * Brad, 2026-11-22: "one click install on marqo should the user choose, and
+ * uninstall too". Install downloads the model through the WAN gate; Cancel
+ * is the same Cancel as a model's.
+ */
+async function installPictureCheck() {
+  if (downloading.value || !gate.value) return;
+  downloading.value = PICTURE_CHECK;
+  progress.value = { done: 0, total: pictureCheck.value?.bytes ?? 0 };
+  pictureNote.value = "";
+  const channel = new Channel();
+  channel.onmessage = (update) => {
+    progress.value = update;
+  };
+  try {
+    const report = await invoke("install_picture_check", { onProgress: channel });
+    if (report.stopped) pictureNote.value = "The download of the picture check stopped, and none of it was kept.";
+  } catch (error) {
+    pictureNote.value = String(error);
+  } finally {
+    downloading.value = "";
+    progress.value = null;
+    stopping.value = false;
+    await readPictureCheck();
+  }
+}
+
+/** Uninstall moves the model's folder to the Trash. Nothing is deleted. */
+async function uninstallPictureCheck() {
+  askUninstall.value = "";
+  if (downloading.value || pictureBusy.value) return;
+  pictureNote.value = "";
+  try {
+    await invoke("uninstall_picture_check");
+    pictureScore.value = null;
+    pictureNote.value = uninstalledLine("The picture check", uninstallPlace.value);
+  } catch (error) {
+    pictureNote.value = String(error);
+  } finally {
+    await readPictureCheck();
+  }
+}
+
+/** The system's own picker, for one picture to check. */
+async function pickPicture() {
+  pictureNote.value = "";
+  try {
+    const picked = await invoke("pick_picture");
+    if (picked) await scorePicture(picked, false);
+  } catch (error) {
+    pictureNote.value = String(error);
+  }
+}
+
+/**
+ * Scores one picture on this computer. Rust reads it into memory and gives
+ * back two numbers; the page shows them with the caution and keeps them
+ * nowhere else.
+ */
+async function scorePicture(path, more) {
+  if (pictureBusy.value) return;
+  const name = String(path).split(/[\\/]/).pop();
+  pictureBusy.value = name;
+  pictureScore.value = null;
+  pictureNote.value = more ? "The check scores one picture at a time, so only the first was checked." : "";
+  try {
+    const score = await invoke("score_picture", { path });
+    pictureScore.value = { name, nsfw: score.nsfw, sfw: score.sfw };
+  } catch (error) {
+    pictureNote.value = isHeic(path)
+      ? "Make a JPEG copy with HEIC to JPEG first, then check the copy."
+      : String(error);
+  } finally {
+    pictureBusy.value = "";
+  }
+}
+
+/** The system's own picker, for pictures or a folder of them. */
+async function pickHeic(folder) {
+  heicNote.value = "";
+  try {
+    await addHeic(await invoke("pick_heic", { folder }));
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+}
+
+/** Puts the HEIC pictures among `paths` on the list, then converts them. */
+async function addHeic(paths) {
+  if (!paths?.length) return;
+  heicNote.value = "";
+  try {
+    const found = await invoke("heic_pictures", { paths });
+    heicList.value = addPictures(heicList.value, found.pictures);
+    heicNote.value = found.pictures.length ? passedLine(found.passed) : "No HEIC pictures were found there.";
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+  convertWaiting();
+}
+
+/**
+ * Converts the waiting pictures one at a time, each with the quality and the
+ * choice about where it was taken as they stand when its turn comes.
+ */
+async function convertWaiting() {
+  if (heicBusy.value) return;
+  heicBusy.value = true;
+  try {
+    for (;;) {
+      const item = heicList.value.find((one) => one.status === "waiting");
+      if (!item) break;
+      item.status = "working";
+      try {
+        const made = await invoke("heic_to_jpeg", {
+          path: item.path,
+          quality: Number(heicQuality.value),
+          keepLocation: heicKeepPlace.value,
+        });
+        Object.assign(item, { status: "done", out: made.path, outName: made.name, outBytes: made.bytes });
+      } catch (error) {
+        Object.assign(item, { status: "failed", error: String(error) });
+      }
+    }
+  } finally {
+    heicBusy.value = false;
+  }
+}
+
+/** Shows a JPEG made here in the Finder. */
+async function showJpeg(item) {
+  try {
+    await invoke("show_jpeg", { path: item.out });
+  } catch (error) {
+    heicNote.value = String(error);
+  }
+}
+
+/** Clears the list once nothing on it is converting. */
+function clearHeic() {
+  if (heicBusy.value) return;
+  heicList.value = [];
+  heicNote.value = "";
 }
 
 /** Streams one model's reply into `reply`. Gives back why it failed, or nothing. */
@@ -1342,7 +1751,7 @@ async function ask(reply, entry, messages) {
       reply.thinking = event.thinking;
       reply.content = event.answer;
     }
-    scrollDown();
+    followAnswer();
   };
   chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   try {
@@ -1383,7 +1792,7 @@ async function grade(session, round, judge) {
   const at = session.messages.indexOf(round.answers.at(-1)) + 1;
   session.messages.splice(at, 0, { role: GRADE_ROLE, content: "", thinking: "", model: judge.id, pending: true });
   const reply = session.messages[at];
-  scrollDown();
+  followAnswer();
   const error = await ask(reply, judge, messages);
   if (error || reply.stopped || !reply.content.trim()) {
     session.messages = session.messages.filter((turn) => turn !== reply);
@@ -1438,7 +1847,7 @@ async function useTool(project, call, reply) {
   }
   if (WRITE_TOOLS.includes(call.tool) && !autoApply.value) {
     reply.tool.status = "asked";
-    scrollDown();
+    followAnswer(".tool.asked");
     const yes = await new Promise((resolve) => (approve = resolve));
     approve = null;
     if (stopAll) {
@@ -1467,6 +1876,9 @@ function replyText(turn) {
 }
 
 const copied = ref(null);
+// The answers opened wide, one at most in each round. Brad, 2026-11-22: "I
+// should be able to open and close view, like split view to read more of one."
+const wide = shallowRef(new Set());
 let copiedTimer;
 
 /** Puts a message's text on the clipboard, and marks its button for a moment. */
@@ -1548,16 +1960,58 @@ function focusComposer() {
   nextTick(() => composer.value?.focus());
 }
 
-function onScroll() {
-  const pane = thread.value;
-  if (pane) stickToBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 60;
+// Brad, 2026-11-22: "the reader should choose the viewport position."
+// Scrolling up stops the view at once, before the scroll lands.
+function onWheel(event) {
+  if (event.deltaY < 0) view = VIEW_STAY;
 }
 
-function scrollDown() {
-  if (!stickToBottom) return;
+function onScroll() {
+  const pane = thread.value;
+  if (!pane) return;
+  view = viewAfterMove(view, viewTop, pane);
+  viewTop = pane.scrollTop;
+}
+
+/**
+ * Moves the view down to the newest line while the reader lets it: the last
+ * question's round, or the part named by `selector` that waits on the reader.
+ * The only place the app moves the chat's view while answers come in.
+ */
+function followAnswer(selector = ".round:last-of-type") {
   nextTick(() => {
     const pane = thread.value;
-    if (pane) pane.scrollTop = pane.scrollHeight;
+    if (!pane) return;
+    // A scroll the page has not reported yet still counts.
+    view = viewAfterMove(view, viewTop, pane);
+    viewTop = pane.scrollTop;
+    if (view === VIEW_STAY) return;
+    const target = viewTarget(view, pane, boxOf(pane, pane.querySelector(selector)));
+    if (target === null) return;
+    pane.scrollTop = target;
+    viewTop = pane.scrollTop;
+  });
+}
+
+/** Where `element` sits in the chat, with the chat's own padding around it. */
+function boxOf(pane, element) {
+  if (!element) return null;
+  const style = getComputedStyle(pane);
+  const top = element.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+  return {
+    top: top - parseFloat(style.paddingTop),
+    bottom: top + element.offsetHeight + parseFloat(style.paddingBottom),
+  };
+}
+
+/** A saved chat opens at its end. */
+function jumpToEnd() {
+  view = VIEW_END;
+  nextTick(() => {
+    const pane = thread.value;
+    if (!pane) return;
+    pane.scrollTop = pane.scrollHeight;
+    viewTop = pane.scrollTop;
   });
 }
 
@@ -1811,6 +2265,13 @@ onBeforeUnmount(() => {
         <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
           <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
+          <template v-if="unseenNote">
+            <p id="engine-unseen" class="small">{{ unseenNote }}</p>
+            <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
+              {{ checking ? "Checking..." : "Check again" }}
+            </button>
+          </template>
+          <p v-else-if="startedElsewhere(engine)" class="quiet small">This window did not start this engine.</p>
           <p v-if="engine.hidden" class="quiet small">
             {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
             {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
@@ -1843,10 +2304,26 @@ onBeforeUnmount(() => {
         <button
           class="wide"
           type="button"
+          :aria-current="page === 'workflow' ? 'page' : undefined"
+          @click="togglePage('workflow')"
+        >
+          Workflow
+        </button>
+        <button
+          class="wide"
+          type="button"
           :aria-current="page === 'installers' ? 'page' : undefined"
           @click="togglePage('installers')"
         >
           Installers
+        </button>
+        <button
+          class="wide"
+          type="button"
+          :aria-current="page === 'utilities' ? 'page' : undefined"
+          @click="togglePage('utilities')"
+        >
+          Utilities
         </button>
         <button
           class="wide"
@@ -1897,8 +2374,8 @@ onBeforeUnmount(() => {
 
     <main class="main">
       <div v-if="dropping" class="drop" aria-hidden="true">
-        <p class="display">Drop to attach</p>
-        <p class="quiet small">PDF, Word, PowerPoint, spreadsheets, CSV, and text or code files</p>
+        <p class="display">{{ dropWords[0] }}</p>
+        <p class="quiet small">{{ dropWords[1] }}</p>
       </div>
       <section v-if="showsUpdate(update, updateLater)" class="update" role="status" aria-label="New version">
         <div class="update-words">
@@ -1923,6 +2400,15 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <Workflow
+        v-if="page === 'workflow'"
+        :wan="gate"
+        :lan="lanGate"
+        :side-open="sideOpen"
+        @close="closePage"
+        @side="sideOpen = true"
+      />
+
       <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
         <header class="bar">
           <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
@@ -1932,6 +2418,13 @@ onBeforeUnmount(() => {
           <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
+          <nav class="settings-tabs" aria-label="Installers">
+            <button type="button" :class="{ here: installersTab === 'chat' }" @click="installersTab = 'chat'">Chat</button>
+            <button type="button" :class="{ here: installersTab === 'pictures' }" @click="installersTab = 'pictures'">Pictures</button>
+            <button type="button" :class="{ here: installersTab === 'check' }" @click="installersTab = 'check'">Picture check</button>
+            <button type="button" :class="{ here: installersTab === 'outside' }" @click="installersTab = 'outside'">Outside engines</button>
+          </nav>
+          <div v-if="installersTab === 'chat'" class="settings-pane">
           <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
           <p v-if="lanEngine" class="quiet">
             Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
@@ -1953,7 +2446,10 @@ onBeforeUnmount(() => {
               <ul class="maker-models">
                 <li v-for="entry in maker.models" :key="entry.name" class="offer">
                   <span class="offer-text">
-                    <span class="offer-name">{{ entry.name }}</span>
+                    <span class="offer-name">
+                      {{ entry.name }}
+                      <span v-if="entry.pictures" class="tag small">Reads pictures</span>
+                    </span>
                     <span class="quiet small">{{ installLine(maker, entry) }}</span>
                   </span>
                   <template v-if="entry.offer && downloading === entry.offer.id">
@@ -1991,8 +2487,153 @@ onBeforeUnmount(() => {
           </ul>
           <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
           <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
+          </div>
 
-          <h3 class="gap-above">Outside engines</h3>
+          <div v-else-if="installersTab === 'pictures'" class="settings-pane">
+          <h3>Models that read pictures</h3>
+          <p class="quiet">
+            Attach or paste a JPEG, PNG, or WebP in the chat, and a model here reads it with your words. Each runs on this
+            computer, through mlx-vlm, and a picture never goes to an outside engine. Nothing downloads until you press
+            Install.
+          </p>
+          <p v-if="vision && !vision.supported" class="gate-ask">
+            <span>Models that read pictures need a Mac for now.</span>
+          </p>
+          <template v-else>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to install a model.</span>
+              <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
+            </p>
+            <ul class="offers" aria-label="Models that read pictures">
+              <li v-for="{ maker, entry } in pictureEntries" :key="entry.name" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ entry.name }} <span class="quiet small">by {{ maker.name }}</span></span>
+                  <span class="quiet small">{{ installLine(maker, entry) }}</span>
+                </span>
+                <template v-if="entry.offer && downloading === entry.offer.id">
+                  <span class="offer-progress">
+                    <progress
+                      :value="progress?.total ? downloaded(progress) : undefined"
+                      max="1"
+                      :aria-label="`How much of ${entry.name} has downloaded`"
+                    ></progress>
+                    <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
+                  </span>
+                  <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+                </template>
+                <template v-else-if="entry.ids?.length && askUninstall === entry.name">
+                  <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
+                  <button
+                    class="link"
+                    type="button"
+                    :aria-label="`Yes, move ${entry.name}`"
+                    :disabled="busy || Boolean(downloading)"
+                    @click="uninstall(entry)"
+                  >
+                    Yes
+                  </button>
+                  <button class="link" type="button" @click="askUninstall = ''">No</button>
+                </template>
+                <button
+                  v-else-if="entry.onDisk && entry.ids?.length"
+                  type="button"
+                  :aria-label="`Uninstall ${entry.name}`"
+                  :disabled="busy || Boolean(downloading) || Boolean(uninstalling)"
+                  @click="askUninstall = entry.name"
+                >
+                  {{ uninstalling === entry.name ? "Moving..." : "Uninstall" }}
+                </button>
+                <button
+                  v-else-if="entry.offer && !entry.onDisk"
+                  type="button"
+                  :aria-label="`Install ${entry.name}`"
+                  :disabled="makersLocked || !canDownload"
+                  @click="install(maker.name, entry.offer)"
+                >
+                  Install
+                </button>
+              </li>
+              <li v-for="coming in PICTURE_MODELS_COMING" :key="coming.name" class="offer coming">
+                <span class="offer-text">
+                  <span class="offer-name">{{ coming.name }} <span class="quiet small">by {{ coming.maker }}</span></span>
+                  <span class="quiet small">{{ coming.license }}, coming in a later build</span>
+                </span>
+              </li>
+            </ul>
+            <p v-if="modelNote" class="small" role="alert">{{ modelNote }}</p>
+            <p v-if="vision?.reachable" class="quiet small">The picture engine is answering at {{ vision.url }}.</p>
+            <p v-else-if="vision?.onDisk?.length" class="quiet small">
+              {{ visionNote || "The picture engine is not answering yet." }} It starts with
+              <code>mlx_vlm.server</code>; to install it, run <code>{{ vision.startHint }}</code>.
+            </p>
+          </template>
+          </div>
+
+          <div v-else-if="installersTab === 'check'" class="settings-pane">
+          <h3>Picture check</h3>
+          <p class="quiet">
+            A small model, 22 MB, that scores a picture on this computer, from the Utilities page. It is off until you
+            install it, nothing downloads until you press Install, and Uninstall moves it to the Trash.
+          </p>
+          <p v-if="!gate && !pictureCheck?.installed" class="gate-ask">
+            <span>Turn on the WAN gate to install the picture check.</span>
+            <button type="button" :disabled="gateBusy" @click="setGate(true)">Turn on the WAN gate</button>
+          </p>
+          <ul class="offers" aria-label="Picture check">
+            <li class="offer">
+              <span class="offer-text">
+                <span class="offer-name">nsfw-image-detection-384 by Marqo</span>
+                <span class="quiet small">{{ pictureCheck?.installed ? "Installed" : "22.4 MB, not installed" }}</span>
+              </span>
+              <template v-if="downloading === PICTURE_CHECK">
+                <span class="offer-progress">
+                  <progress
+                    :value="progress?.total ? downloaded(progress) : undefined"
+                    max="1"
+                    aria-label="How much of the picture check has downloaded"
+                  ></progress>
+                  <span class="quiet small">{{ stopping ? "Stopping..." : smallDownloadLine(progress) }}</span>
+                </span>
+                <button type="button" :disabled="stopping" @click="cancelDownload">Cancel</button>
+              </template>
+              <template v-else-if="pictureCheck?.installed && askUninstall === PICTURE_CHECK">
+                <span class="ask-uninstall small">{{ uninstallAsk("the picture check", { trash: uninstallPlace?.trash }) }}</span>
+                <button
+                  class="link"
+                  type="button"
+                  aria-label="Yes, move the picture check"
+                  :disabled="Boolean(downloading) || Boolean(pictureBusy)"
+                  @click="uninstallPictureCheck"
+                >
+                  Yes
+                </button>
+                <button class="link" type="button" @click="askUninstall = ''">No</button>
+              </template>
+              <button
+                v-else-if="pictureCheck?.installed"
+                type="button"
+                aria-label="Uninstall the picture check"
+                :disabled="Boolean(downloading) || Boolean(pictureBusy)"
+                @click="askUninstall = PICTURE_CHECK"
+              >
+                Uninstall
+              </button>
+              <button
+                v-else
+                type="button"
+                aria-label="Install the picture check"
+                :disabled="!gate || Boolean(downloading) || !pictureCheck"
+                @click="installPictureCheck"
+              >
+                Install
+              </button>
+            </li>
+          </ul>
+          <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
+          </div>
+
+          <div v-else class="settings-pane">
+          <h3>Outside engines</h3>
           <p class="quiet">
             Each engine here answers from its maker's computers, not this one. Give the path to a file that holds your
             key from that maker. Rusty Business™ reads the key from that file when it asks the engine and sends it only
@@ -2058,6 +2699,103 @@ onBeforeUnmount(() => {
             <p v-if="outsideNotes[entry.id]" class="small" role="alert">{{ outsideNotes[entry.id] }}</p>
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
+          </div>
+        </div>
+      </section>
+      <section v-if="page === 'utilities'" class="settings" aria-labelledby="utilities-title" @keydown.esc="closePage">
+        <header class="bar">
+          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
+          </button>
+          <h2 id="utilities-title" ref="pageTitle" tabindex="-1">Utilities</h2>
+          <button type="button" @click="closePage">Back to the chat</button>
+        </header>
+        <div class="settings-body">
+          <p class="quiet">Small tools that run on this computer alone, so they work with both gates off.</p>
+          <article class="utility" aria-labelledby="heic-title">
+            <h3 id="heic-title">HEIC to JPEG</h3>
+            <p class="quiet">
+              Makes a JPEG copy of each picture, saved beside it. The picture itself is never changed, and a file
+              already there is never replaced: the copy takes the next free name.
+            </p>
+            <p v-if="!heicReady" class="gate-ask">
+              <span>HEIC to JPEG needs a Mac for now.</span>
+            </p>
+            <template v-else>
+              <label class="check">
+                <input v-model="heicKeepPlace" type="checkbox" />
+                <span>
+                  Keep where each picture was taken
+                  <span class="quiet small block">Off, the copies leave out the location saved in each picture.</span>
+                </span>
+              </label>
+              <label class="utility-quality">
+                <span>Quality <strong>{{ heicQuality }}</strong></span>
+                <input v-model.number="heicQuality" type="range" :min="QUALITY_LOW" :max="QUALITY_HIGH" step="1" />
+              </label>
+              <div class="utility-drop">
+                <p class="quiet">Drop HEIC pictures or a folder here, or choose them.</p>
+                <span class="settings-actions">
+                  <button type="button" class="primary" @click="pickHeic(false)">Choose pictures</button>
+                  <button type="button" @click="pickHeic(true)">Choose a folder</button>
+                </span>
+              </div>
+              <p v-if="heicNote" class="small" role="alert">{{ heicNote }}</p>
+              <template v-if="heicList.length">
+                <p class="utility-summary">
+                  <span class="small" role="status">{{ pictureSummary(heicList) }}</span>
+                  <button type="button" :disabled="heicBusy" @click="clearHeic">Clear the list</button>
+                </p>
+                <ul class="offers" aria-label="Pictures to convert">
+                  <li v-for="item in heicList" :key="item.path" class="offer">
+                    <span class="offer-text">
+                      <span class="offer-name">{{ item.name }}</span>
+                      <span class="quiet small">{{ pictureLine(item) }}</span>
+                    </span>
+                    <button
+                      v-if="item.status === 'done'"
+                      type="button"
+                      :aria-label="`Show ${item.outName} in the Finder`"
+                      @click="showJpeg(item)"
+                    >
+                      Show
+                    </button>
+                  </li>
+                </ul>
+              </template>
+            </template>
+          </article>
+          <article class="utility" aria-labelledby="picture-title">
+            <h3 id="picture-title">Picture check</h3>
+            <p class="quiet">
+              Scores a picture with a small model on this computer. The picture is read into memory and never copied,
+              and its score shows here and is saved nowhere.
+            </p>
+            <p v-if="!pictureReady" class="gate-ask">
+              <span>The picture check is not installed. It is off until you choose it.</span>
+              <button type="button" @click="openPage('installers')">Open Installers</button>
+            </p>
+            <template v-else>
+              <div class="utility-drop">
+                <p class="quiet">
+                  Drop a JPEG, PNG, or WebP picture here{{ pictureCheck?.picker ? ", or choose one" : "" }}.
+                </p>
+                <span v-if="pictureCheck?.picker" class="settings-actions">
+                  <button type="button" class="primary" :disabled="Boolean(pictureBusy)" @click="pickPicture">
+                    Choose a picture
+                  </button>
+                </span>
+              </div>
+              <p v-if="pictureBusy" class="small" role="status">Checking {{ pictureBusy }}…</p>
+              <div v-if="pictureScore" class="picture-score" role="status">
+                <span class="offer-name">{{ pictureScore.name }}</span>
+                <span>{{ scoreLine(pictureScore) }}</span>
+                <span class="quiet small">{{ pictureCheck.caution }}</span>
+                <button type="button" @click="pictureScore = null">Clear</button>
+              </div>
+            </template>
+            <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
+          </article>
         </div>
       </section>
       <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
@@ -2074,6 +2812,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
             <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
             <button type="button" :class="{ here: settingsTab === 'web' }" @click="settingsTab = 'web'">Web</button>
+            <button type="button" :class="{ here: settingsTab === 'votes' }" @click="settingsTab = 'votes'">Votes</button>
             <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
           </nav>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
@@ -2326,6 +3065,40 @@ onBeforeUnmount(() => {
               from this computer too, go to {{ grader.maker }} each time it grades. That happens only while the gate is on.
             </p>
           </div>
+          <div v-else-if="settingsTab === 'votes'" class="settings-pane">
+            <h3>Votes</h3>
+            <p class="quiet">
+              Rate any answer up or down. When several models answer one question, you can also vote one of them the best. Votes
+              stay with their chats on this computer and are never sent to a model.
+            </p>
+            <label class="check">
+              <input v-model="votesOn" type="checkbox" />
+              <span>
+                Vote on answers
+                <span class="quiet small block">On to start. Off hides the vote buttons in the chat; votes already given stay with their chats and in the tally.</span>
+              </span>
+            </label>
+            <h3>Tally</h3>
+            <p v-if="votesNote" class="quiet small">{{ votesNote }}</p>
+            <p v-else-if="!tally.length" class="quiet small">No votes yet.</p>
+            <ul v-else class="tally">
+              <li v-for="row in tally" :key="row.model">
+                <strong>{{ modelName(row.model) || row.model }}</strong>
+                <span class="quiet small block">{{ tallyLine(row) }}</span>
+                <details v-if="row.won.length" class="won">
+                  <summary class="small">Questions it won</summary>
+                  <ul>
+                    <li v-for="(win, index) in row.won" :key="index">
+                      <button class="link" type="button" @click="openSession(win.session)">{{ win.question || "A question with no words" }}</button>
+                      <span class="quiet small block">
+                        <template v-if="win.title && !win.question.startsWith(win.title)">{{ win.title }} · </template>{{ dayLabel(win.votedAt) }}<template v-if="win.over.length">, over {{ namesLine(win.over.map((id) => modelName(id) || id)) }}</template>
+                      </span>
+                    </li>
+                  </ul>
+                </details>
+              </li>
+            </ul>
+          </div>
           <div v-else class="settings-pane">
             <h3>Appearance</h3>
             <p class="quiet">Follow the system, or keep one look.</p>
@@ -2369,6 +3142,9 @@ onBeforeUnmount(() => {
             {{ entry.name }}
             <span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>
           </button>
+          <button v-if="unseenChip" class="link small" type="button" :title="unseenNote" @click="sideOpen = true">
+            {{ unseenChip }}
+          </button>
         </div>
         <h2 class="bar-title">
           <span v-if="currentProject" class="crumb">{{ currentProject.name }} /</span>
@@ -2376,7 +3152,7 @@ onBeforeUnmount(() => {
         </h2>
       </header>
 
-      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll">
+      <section v-show="page === 'chat'" ref="thread" class="thread" @scroll="onScroll" @wheel.passive="onWheel">
         <div v-if="!current.messages.length" class="empty">
           <div v-if="offers.length" class="first-run">
             <p class="display lead">Pick a model to start.</p>
@@ -2465,8 +3241,9 @@ onBeforeUnmount(() => {
         <article v-for="round in rounds" :key="round.key" class="round">
           <div v-if="round.question && !round.question.toolResult" class="turn user">
             <ul v-if="round.question.attachments?.length" class="files sent" aria-label="Attached files">
-              <li v-for="(file, at) in round.question.attachments" :key="at" class="file" :title="file.name">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+              <li v-for="(file, at) in round.question.attachments" :key="at" class="file" :class="{ picture: file.picture }" :title="file.name">
+                <img v-if="file.picture" class="file-thumb" :src="file.picture" :alt="file.name" />
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
                 <span class="file-text">
                   <span class="file-name">{{ file.name }}</span>
                   <span class="file-line">{{ attachmentLine(file) }}</span>
@@ -2481,8 +3258,19 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
-            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant">
+            <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn), best: votesOn && turn.best }">
               <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <button
+                v-if="round.answers.length > 1"
+                class="copy widen"
+                type="button"
+                :aria-pressed="wide.has(turn)"
+                :aria-label="wide.has(turn) ? 'Back to side by side' : 'Open wide'"
+                :title="wide.has(turn) ? 'Back to side by side' : 'Open wide'"
+                @click="wide = withWide(wide, round.answers, turn)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="wide.has(turn) ? ICONS.narrow : ICONS.wide" /></svg>
+              </button>
               <p v-if="gradeOf(round, index)" class="grade small">
                 <span class="grade-letter"><span class="sr-only">Grade </span>{{ gradeOf(round, index).letter }}</span>
                 <span>{{ gradeOf(round, index).why }}</span>
@@ -2526,6 +3314,42 @@ onBeforeUnmount(() => {
                 <button v-if="replyText(turn)" class="copy" type="button" :aria-label="copied === turn ? 'Copied' : 'Copy'" :title="copied === turn ? 'Copied' : 'Copy'" @click="copyText(turn, replyText(turn))">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="copied === turn ? ICONS.check : ICONS.copy" /></svg>
                 </button>
+                <span v-if="votesOn && replyText(turn)" class="votes">
+                  <button
+                    v-if="canPickBest(round)"
+                    class="copy vote"
+                    :class="{ on: turn.best }"
+                    type="button"
+                    :aria-pressed="Boolean(turn.best)"
+                    :aria-label="turn.best ? 'Voted best' : 'Best answer'"
+                    :title="turn.best ? 'Voted best' : 'Best answer'"
+                    @click="pickBest(round, turn)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.star" /></svg>
+                  </button>
+                  <button
+                    class="copy vote"
+                    :class="{ on: turn.rating === 'up' }"
+                    type="button"
+                    :aria-pressed="turn.rating === 'up'"
+                    aria-label="Good answer"
+                    title="Good answer"
+                    @click="rate(turn, 'up')"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.thumbsUp" /></svg>
+                  </button>
+                  <button
+                    class="copy vote"
+                    :class="{ on: turn.rating === 'down' }"
+                    type="button"
+                    :aria-pressed="turn.rating === 'down'"
+                    aria-label="Poor answer"
+                    title="Poor answer"
+                    @click="rate(turn, 'down')"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.thumbsDown" /></svg>
+                  </button>
+                </span>
                 <p class="quiet small note">{{ replyNote(turn, round.answers.length === 1) }}</p>
               </div>
             </section>
@@ -2557,7 +3381,8 @@ onBeforeUnmount(() => {
         <div class="box">
           <ul v-if="attached.length || attaching" class="files" aria-label="Files to send">
             <li v-for="(file, at) in attached" :key="at" class="file" :title="file.name">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
+              <img v-if="file.picture" class="file-thumb" :src="file.picture" alt="" />
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.file" /></svg>
               <span class="file-text">
                 <span class="file-name">{{ file.name }}</span>
                 <span class="file-line">{{ attachmentLine(file) }}</span>
@@ -2568,6 +3393,9 @@ onBeforeUnmount(() => {
             </li>
             <li v-if="attaching" class="file reading quiet small">Reading...</li>
           </ul>
+          <p v-if="blindPicked.length" class="too-big small blind-note">
+            {{ namesLine(blindPicked.map((entry) => entry.name)) }} {{ blindPicked.length === 1 ? "does" : "do" }} not read pictures, so {{ blindPicked.length === 1 ? "it is" : "they are" }} only told one is there. Phi-3.5 Vision reads them, on a Mac.
+          </p>
           <p v-if="tooBig" class="too-big small">These files may not fit in {{ tightest.name }}'s window. Try fewer, or a model with a bigger one.</p>
           <textarea
             ref="composer"
@@ -2578,6 +3406,7 @@ onBeforeUnmount(() => {
             :disabled="!chosen.length"
             @input="resizeComposer"
             @keydown="onKeydown"
+            @paste="onPaste"
           ></textarea>
           <div class="box-row">
             <button class="icon attach" type="button" aria-label="Attach files" title="Attach files" :disabled="busy" @click="pickFiles">
@@ -3512,6 +4341,20 @@ button.switch {
   gap: 0.55rem;
 }
 
+.tag {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--quiet);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.offer.coming {
+  opacity: 0.75;
+}
+
 .offer {
   display: flex;
   align-items: center;
@@ -3761,10 +4604,63 @@ button.switch.model-switch {
 }
 
 .answers.many > .turn {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.7rem 0.85rem;
   background: var(--page);
+}
+
+/* One answer opened wide moves to the top of its question and takes the
+   round's whole width, so it stays in view; the others wait below it, still
+   side by side. */
+.answers.many > .turn.opened {
+  grid-column: 1 / -1;
+  order: -1;
+}
+
+/* The answer voted best in its question wears the accent. */
+.answers.many > .turn.best {
+  border-color: var(--accent);
+}
+
+.vote.on {
+  color: var(--accent-text);
+}
+
+.vote.on svg {
+  fill: currentColor;
+}
+
+.votes {
+  display: inline-flex;
+  gap: 0.15rem;
+}
+
+.tally {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tally .won ul {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0 0 0 0.75rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.answers.many > .turn > .card-head {
+  padding-right: 2rem;
+}
+
+.widen {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
 }
 
 .card-head {
@@ -4106,6 +5002,52 @@ textarea.memory:focus,
   display: flex;
   align-items: center;
   gap: 0.8rem;
+}
+
+/* The Utilities page: each utility a card. */
+.utility {
+  margin-top: 1rem;
+  padding: 1rem 1.2rem 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--raised);
+}
+
+.utility-quality {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  max-width: 22rem;
+}
+
+.utility-quality input {
+  accent-color: var(--accent);
+}
+
+.utility-drop {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 2px dashed var(--line);
+  border-radius: 14px;
+}
+
+.utility-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+/* A score, with its caution under it. It reads the same high or low. */
+.picture-score {
+  display: grid;
+  justify-items: start;
+  gap: 0.3rem;
+  margin-top: 1rem;
 }
 
 .check {
@@ -4492,6 +5434,21 @@ textarea.memory:focus,
 
 .file > svg {
   color: var(--accent);
+}
+
+.file-thumb {
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--raised);
+}
+
+.files.sent .file.picture .file-thumb {
+  width: 7rem;
+  height: 7rem;
 }
 
 .file.reading {

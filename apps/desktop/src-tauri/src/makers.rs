@@ -107,9 +107,15 @@ impl Makers {
                 picked: picked.iter().any(|name| name == maker),
                 models: engine::models_by(maker)
                     .into_iter()
+                    // A model that reads pictures is listed on a Mac only, for
+                    // now: the picture engine runs nowhere else.
+                    .filter(|(name, _)| {
+                        cfg!(target_os = "macos") || !engine::reads_pictures_by_name(name)
+                    })
                     .map(|(name, license)| Listed {
                         name: name.to_string(),
                         license: license.to_string(),
+                        pictures: engine::reads_pictures_by_name(name),
                         on_disk: on_disk.iter().any(|model| model.name == name),
                         ids: on_disk
                             .iter()
@@ -141,6 +147,8 @@ pub struct Maker {
 pub struct Listed {
     pub name: String,
     pub license: String,
+    /// True for a model that reads pictures as well as words.
+    pub pictures: bool,
     pub on_disk: bool,
     pub ids: Vec<String>,
     pub offer: Option<Offer>,
@@ -166,7 +174,14 @@ fn inventory(makers: &Makers) -> Vec<Maker> {
     if engine::base_url().is_ok_and(|base| engine::is_remote(&base)) {
         makers.status(&[], &crate::downloads::remote_offers())
     } else {
-        makers.status(&crate::models::on_disk(), &crate::downloads::offers())
+        makers.status(
+            &crate::models::on_disk(),
+            &[
+                crate::downloads::offers(),
+                crate::downloads::picture_offers(),
+            ]
+            .concat(),
+        )
     }
 }
 
@@ -371,7 +386,7 @@ mod tests {
         assert!(google.ids.is_empty());
         assert_eq!(
             serde_json::to_value(&status[4]).unwrap(),
-            serde_json::json!({ "name": "Meta", "picked": false, "models": [{ "name": "Llama 3.1 8B", "license": "Llama 3.1 Community License", "onDisk": false, "ids": [], "offer": null }] })
+            serde_json::json!({ "name": "Meta", "picked": false, "models": [{ "name": "Llama 3.1 8B", "license": "Llama 3.1 Community License", "onDisk": false, "ids": [], "offer": null, "pictures": false }] })
         );
         fs::remove_dir_all(&place).unwrap();
     }

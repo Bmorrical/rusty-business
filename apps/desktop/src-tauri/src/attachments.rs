@@ -204,7 +204,7 @@ pub fn read_bytes(name: &str, bytes: Vec<u8>) -> Result<Attachment, String> {
         .to_lowercase();
     if IMAGES.contains(&extension.as_str()) {
         return Err(format!(
-            "{name} is an image. Reading images needs a model that can see, which the app does not have yet."
+            "{name} is an image. Only JPEG, PNG, and WebP pictures can be sent, and only to a model that reads them, such as Phi-3.5 Vision on a Mac."
         ));
     }
     let text = match extension.as_str() {

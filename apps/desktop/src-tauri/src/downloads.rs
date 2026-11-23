@@ -181,6 +181,17 @@ pub fn offers() -> Vec<Offer> {
     offers_from(pins_here())
 }
 
+/// The models that read pictures the app can download. They run only on a
+/// Mac for now, and are never offered as a first model, since the chat
+/// engine does not serve them.
+pub fn picture_offers() -> Vec<Offer> {
+    if cfg!(target_os = "macos") {
+        offers_of(pins_here(), true)
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn remote_offers() -> Vec<Offer> {
     offers_from(&GGUF_PINNED)
 }
@@ -194,10 +205,16 @@ pub(crate) fn remote_model(id: &str) -> Option<String> {
     Some(format!("{id}:{}", tag.to_ascii_uppercase()))
 }
 
+/// The chat models these pins offer, without the models that read pictures.
 fn offers_from(pins: &[Pinned]) -> Vec<Offer> {
+    offers_of(pins, false)
+}
+
+fn offers_of(pins: &[Pinned], pictures: bool) -> Vec<Offer> {
     let ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
     engine::allowed_models(&ids)
         .into_iter()
+        .filter(|model| engine::reads_pictures(&model.id) == pictures)
         .filter_map(|model| {
             let bytes = pinned(pins, &model.id)?.bytes();
             let license = engine::license_of(&model.name)?.to_string();
@@ -434,7 +451,7 @@ const GATE_TURNED_OFF: &str = "The WAN gate was turned off, so the download stop
 /// The one client downloads use, through the outbound gate. It sends no
 /// account, token, or cookie: no such thing is ever added to a request here,
 /// and it keeps no cookies.
-fn client(gate: &Gate) -> Result<reqwest::Client, String> {
+pub(crate) fn client(gate: &Gate) -> Result<reqwest::Client, String> {
     gate.client(GATE_OFF, |builder| {
         builder
             .no_proxy()
@@ -452,14 +469,14 @@ fn file_url(pin: &Pinned, file: &PinnedFile) -> String {
 }
 
 /// A file as it arrives.
-type Chunks = Pin<Box<dyn Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub(crate) type Chunks = Pin<Box<dyn Stream<Item = Result<Vec<u8>, String>> + Send>>;
 
 /// A file being asked for. The tests ask a stand-in instead of Hugging Face.
-type Opening = Pin<Box<dyn Future<Output = Result<Chunks, String>> + Send>>;
+pub(crate) type Opening = Pin<Box<dyn Future<Output = Result<Chunks, String>> + Send>>;
 
 const SENT_ELSEWHERE: &str = "Hugging Face sent the download somewhere else, so the app stopped.";
 
-fn open_url(client: reqwest::Client, url: String) -> Opening {
+pub(crate) fn open_url(client: reqwest::Client, url: String) -> Opening {
     Box::pin(async move {
         let response = client.get(&url).send().await.map_err(|error| {
             if error.is_redirect() {
@@ -515,7 +532,7 @@ pub(crate) async fn cancelled(cancel: &mut watch::Receiver<bool>) {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -604,6 +621,30 @@ async fn fetch_model(
     if layout == models::Layout::Hub {
         fs::create_dir_all(staged.join("refs")).map_err(cannot)?;
     }
+    if fetch_files(pin, &snapshot, open, cancel, report).await? == Fetched::Stopped {
+        return Ok(Fetched::Stopped);
+    }
+    if layout == models::Layout::Hub {
+        // No line ending: the engine reads the revision exactly as written.
+        fs::write(staged.join("refs").join("main"), &pin.revision).map_err(cannot)?;
+    }
+    if !layout.whole(staged) {
+        return Err(
+            "The download finished without a whole model, so it was thrown away.".to_string(),
+        );
+    }
+    Ok(Fetched::Whole)
+}
+
+/// Writes every file of a pin into `snapshot`, one after another, each
+/// checked as it arrives.
+async fn fetch_files(
+    pin: &Pinned,
+    snapshot: &Path,
+    open: &mut impl FnMut(String) -> Opening,
+    cancel: &mut watch::Receiver<bool>,
+    report: &mut impl FnMut(Progress),
+) -> Result<Fetched, String> {
     let total = pin.bytes();
     let mut done = 0;
     let mut told = Instant::now();
@@ -621,19 +662,10 @@ async fn fetch_model(
                 report(Progress { done, total });
             }
         };
-        if fetch_file(chunks, file, &snapshot, cancel, &mut moved).await? == Fetched::Stopped {
+        if fetch_file(chunks, file, snapshot, cancel, &mut moved).await? == Fetched::Stopped {
             return Ok(Fetched::Stopped);
         }
         report(Progress { done, total });
-    }
-    if layout == models::Layout::Hub {
-        // No line ending: the engine reads the revision exactly as written.
-        fs::write(staged.join("refs").join("main"), &pin.revision).map_err(cannot)?;
-    }
-    if !layout.whole(staged) {
-        return Err(
-            "The download finished without a whole model, so it was thrown away.".to_string(),
-        );
     }
     Ok(Fetched::Whole)
 }
@@ -853,6 +885,115 @@ impl Downloads {
         self.clear();
         result
     }
+
+    /// Downloads files the app uses itself, not a chat model: every file of
+    /// `pin` into `home`, as the folder `folder`, by the same rules as a
+    /// model. They are put together in the app's own download folder and
+    /// move in whole, only where nothing is there yet. Nothing is asked for
+    /// while the outbound gate is off.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "what to fetch and where it goes, plus the gate it waits on"
+    )]
+    pub(crate) async fn download_own(
+        &self,
+        gate: &Gate,
+        pin: &Pinned,
+        name: &str,
+        home: &Path,
+        folder: &str,
+        mut open: impl FnMut(String) -> Opening,
+        mut report: impl FnMut(Progress),
+    ) -> Result<DownloadReport, String> {
+        if !gate.is_open() {
+            return Err(GATE_OFF.to_string());
+        }
+        if !usable(pin) || !models::plain_name(folder) {
+            return Err(sentence(Why::NotListed, name, 0));
+        }
+        let mut cancel = {
+            let mut slot = self.slot();
+            let there = what_is_there_own(pin, &home.join(folder));
+            let facts = Facts {
+                listed: true,
+                hub: true,
+                there,
+                busy: slot.is_some(),
+                same_disk: same_disk(home, &self.staging),
+                free: free_bytes(&self.staging),
+                needed: pin.bytes().saturating_add(ROOM),
+            };
+            match plan(&facts) {
+                Step::Nothing => {
+                    return Ok(DownloadReport {
+                        whole: true,
+                        stopped: false,
+                    });
+                }
+                Step::Cannot(Why::PartThere) => {
+                    return Err(format!(
+                        "The app's folder already holds part of {name}, and the app does not change what is there."
+                    ));
+                }
+                Step::Cannot(why) => return Err(sentence(why, name, facts.needed)),
+                Step::Fetch => {}
+            }
+            let (sender, receiver) = watch::channel(false);
+            *slot = Some(ActiveDownload {
+                cancel: sender,
+                remote: false,
+            });
+            receiver
+        };
+        let _running = Running(self);
+        let watching = gate.clone();
+        let mut gated = move |url: String| -> Opening {
+            if watching.is_open() {
+                open(url)
+            } else {
+                Box::pin(async { Err(GATE_TURNED_OFF.to_string()) })
+            }
+        };
+        // Staged under the cache's kind of name, so `clear` knows it.
+        let staged = self.staging.join(models::folder_name(&pin.id));
+        self.clear();
+        let fetched = match fs::create_dir_all(&staged) {
+            Ok(()) => fetch_files(pin, &staged, &mut gated, &mut cancel, &mut report).await,
+            Err(error) => Err(format!("The app could not write the download: {error}.")),
+        };
+        let result = match fetched {
+            Ok(Fetched::Whole) => move_in(&staged, home, folder, name).map(|()| DownloadReport {
+                whole: true,
+                stopped: false,
+            }),
+            Ok(Fetched::Stopped) if !gate.is_open() => Err(GATE_TURNED_OFF.to_string()),
+            Ok(Fetched::Stopped) => Ok(DownloadReport {
+                whole: false,
+                stopped: true,
+            }),
+            Err(error) => Err(error),
+        };
+        self.clear();
+        result
+    }
+}
+
+/// What is where files the app uses itself would go: whole only when every
+/// file of `pin` is there at its size.
+fn what_is_there_own(pin: &Pinned, folder: &Path) -> There {
+    match fs::symlink_metadata(folder) {
+        Err(error) if error.kind() == ErrorKind::NotFound => There::Nothing,
+        _ if whole_own(pin, folder) => There::Whole,
+        _ => There::Part,
+    }
+}
+
+/// True when every file of `pin` is in `folder`, as a plain file at its size.
+pub(crate) fn whole_own(pin: &Pinned, folder: &Path) -> bool {
+    pin.files.iter().all(|file| {
+        fs::symlink_metadata(folder.join(&file.name))
+            .is_ok_and(|meta| meta.is_file() && meta.len() == file.bytes)
+    })
 }
 
 /// A download while the outbound gate stays on. Each file is asked for only
@@ -991,6 +1132,7 @@ mod tests {
     }
 
     const PHI: &str = "mlx-community/phi-4-4bit";
+    const PHI_VISION: &str = "mlx-community/Phi-3.5-vision-instruct-4bit";
     const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 
     type Files = Vec<(String, Vec<u8>)>;
@@ -1215,6 +1357,7 @@ mod tests {
             sizes,
             [
                 (PHI, 8_256_384_748),
+                (PHI_VISION, 2_336_262_939),
                 ("mlx-community/gpt-oss-20b-MXFP4-Q8", 12_104_215_835),
                 (
                     "mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit",
@@ -1449,6 +1592,36 @@ mod tests {
             names_of(&offers_from(pins_for(Layout::Hub))),
             names_of(&offers_from(pins_for(Layout::Gguf)))
         );
+    }
+
+    // Brad, 2026-11-22: "allow all 3 models, user can on click to install".
+    // Phi-3.5 Vision is pinned for a Mac and offered only on its own row,
+    // never as a first model.
+    #[test]
+    fn the_picture_model_is_pinned_for_a_mac_and_offered_apart() {
+        assert!(PINNED.iter().any(|pin| pin.id == PHI_VISION));
+        assert!(
+            GGUF_PINNED
+                .iter()
+                .all(|pin| !engine::reads_pictures(&pin.id))
+        );
+        assert!(
+            names_of(&offers_from(&PINNED))
+                .iter()
+                .all(|name| *name != "Phi-3.5 Vision")
+        );
+        let pictures = offers_of(&PINNED, true);
+        assert_eq!(names_of(&pictures), ["Phi-3.5 Vision"]);
+        assert_eq!(pictures[0].license, "MIT");
+        assert_eq!(pictures[0].maker, "Microsoft");
+        if cfg!(target_os = "macos") {
+            assert_eq!(picture_offers(), pictures);
+        } else {
+            assert!(picture_offers().is_empty());
+        }
+        let pin = PINNED.iter().find(|pin| pin.id == PHI_VISION).unwrap();
+        // No file of the model's own code is downloaded.
+        assert!(pin.files.iter().all(|file| !file.name.ends_with(".py")));
     }
 
     #[test]

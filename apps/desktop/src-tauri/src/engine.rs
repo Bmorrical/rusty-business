@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use crate::gate::{Gate, LanGate};
 use crate::makers::Makers;
 use crate::outside::{self, Outside};
+use crate::vision;
 
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 pub(crate) const DEFAULT_MAX_TOKENS: u32 = 4096;
@@ -129,6 +130,9 @@ struct CatalogEntry {
     maker: &'static str,
     license: &'static str,
     context: u32,
+    /// True for a model that reads pictures as well as words. It runs on the
+    /// picture engine (`vision.rs`), never on the chat engine.
+    pictures: bool,
 }
 
 /// The allow-list. A model the engine holds that is not here is never shown
@@ -141,6 +145,15 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Microsoft",
         license: "MIT",
         context: 16_384,
+        pictures: false,
+    },
+    CatalogEntry {
+        needle: "phi-3.5-vision",
+        name: "Phi-3.5 Vision",
+        maker: "Microsoft",
+        license: "MIT",
+        context: 131_072,
+        pictures: true,
     },
     CatalogEntry {
         needle: "gpt-oss-20b",
@@ -148,6 +161,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "OpenAI",
         license: "Apache 2.0",
         context: 131_072,
+        pictures: false,
     },
     CatalogEntry {
         needle: "nemotron-3.5-lightning",
@@ -155,6 +169,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "NVIDIA",
         license: "OpenMDW 1.1",
         context: 262_144,
+        pictures: false,
     },
     CatalogEntry {
         needle: "gemma-4-26b-a4b",
@@ -162,6 +177,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Google",
         license: "Apache 2.0",
         context: 262_144,
+        pictures: false,
     },
     CatalogEntry {
         needle: "llama-3.1-8b-instruct",
@@ -169,6 +185,7 @@ const CATALOG: &[CatalogEntry] = &[
         maker: "Meta",
         license: "Llama 3.1 Community License",
         context: 131_072,
+        pictures: false,
     },
 ];
 
@@ -207,6 +224,18 @@ pub struct ModelInfo {
     pub name: String,
     pub maker: String,
     pub context: u32,
+}
+
+/// True when the model, by its id, reads pictures.
+pub fn reads_pictures(id: &str) -> bool {
+    catalog_entry(id).is_some_and(|entry| entry.pictures)
+}
+
+/// True when the model, by its name on the list, reads pictures.
+pub fn reads_pictures_by_name(name: &str) -> bool {
+    CATALOG
+        .iter()
+        .any(|entry| entry.name == name && entry.pictures)
 }
 
 fn catalog_entry(id: &str) -> Option<&'static CatalogEntry> {
@@ -250,6 +279,12 @@ pub struct EngineStatus {
     /// Models on the list that are on this computer's disk, whether or not
     /// the engine is answering.
     pub on_disk: Vec<ModelInfo>,
+    /// Models on the list that are on this computer's disk and that the
+    /// engine answering does not list, so no question can be put to them.
+    pub unseen: Vec<ModelInfo>,
+    /// True when this window started the engine that answers. An engine
+    /// that was already running is used as it is, and never stopped.
+    pub ours: bool,
     /// Models the app can download, with their sizes. The page shows them
     /// only while none of the app's models is on the disk.
     pub offers: Vec<crate::downloads::Offer>,
@@ -340,6 +375,8 @@ fn first_status() -> EngineStatus {
         set_aside: Vec::new(),
         hidden: 0,
         on_disk: crate::models::on_disk(),
+        unseen: Vec::new(),
+        ours: false,
         offers: crate::downloads::offers(),
         error: None,
         start_hint: start_hint_on(std::env::consts::OS).to_string(),
@@ -357,16 +394,38 @@ fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
         .filter(|model| !status.models.contains(model))
         .collect();
     makers.keep_picked(&mut status.on_disk, |model| &model.maker);
+    makers.keep_picked(&mut status.unseen, |model| &model.maker);
     makers.keep_picked(&mut status.offers, |offer| &offer.maker);
     status
+}
+
+/// The models on the disk that the engine answering does not list. They are
+/// matched by the list's name, because an engine may give a model another id
+/// than its folder has.
+pub fn unseen(on_disk: &[ModelInfo], served: &[ModelInfo]) -> Vec<ModelInfo> {
+    on_disk
+        .iter()
+        .filter(|model| !served.iter().any(|other| other.name == model.name))
+        .cloned()
+        .collect()
+}
+
+/// True when the engine that answers is one this window started: it is on
+/// this computer, it answers, and the engine this window started is still
+/// running. One port has one listener, so that engine is the one answering.
+pub fn started_here(status: &EngineStatus, running: bool) -> bool {
+    status.reachable && !status.remote && running
 }
 
 #[tauri::command]
 pub async fn engine_status(
     makers: tauri::State<'_, Makers>,
     lan: tauri::State<'_, LanGate>,
+    starter: tauri::State<'_, crate::starter::Starter>,
 ) -> Result<EngineStatus, String> {
-    Ok(for_makers(status_at(base_url(), &lan).await, &makers))
+    let mut status = for_makers(status_at(base_url(), &lan).await, &makers);
+    status.ours = started_here(&status, starter.running());
+    Ok(status)
 }
 
 async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus {
@@ -397,14 +456,25 @@ async fn status_at(base: Result<String, String>, lan: &LanGate) -> EngineStatus 
         fetch_model_ids(&base).await
     };
     match result {
-        Ok(ids) => {
-            status.reachable = true;
-            status.models = allowed_models(&ids);
-            status.hidden = ids.len().saturating_sub(status.models.len());
-        }
+        Ok(ids) => answered(&mut status, &ids),
         Err(error) => status.error = Some(error),
     }
     status
+}
+
+/// Fills in the report once the engine has given its list of ids: the
+/// models on the app's list, how many others it serves, and the models on
+/// the disk that it leaves out.
+fn answered(status: &mut EngineStatus, ids: &[String]) {
+    status.reachable = true;
+    // A model that reads pictures runs on the picture engine, so the chat
+    // engine never lists it, even when it finds it in the same folder.
+    status.models = allowed_models(ids)
+        .into_iter()
+        .filter(|model| !reads_pictures(&model.id))
+        .collect();
+    status.hidden = ids.len().saturating_sub(status.models.len());
+    status.unseen = unseen(&status.on_disk, &status.models);
 }
 
 // ---------------------------------------------------------------------------
@@ -645,6 +715,10 @@ struct Usage {
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Pictures with the message, each a `data:` URL. Only a model on this
+    /// computer that reads pictures is ever sent one (`vision.rs`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -695,7 +769,8 @@ fn checked_request(request: &ChatRequest) -> Result<(), String> {
     if catalog_entry(&request.model).is_none() {
         return Err("That model is not on this app's list.".to_string());
     }
-    checked_messages(&request.messages)
+    checked_messages(&request.messages)?;
+    vision::checked_pictures(&request.model, &request.messages)
 }
 
 /// The messages any engine is sent: at least one, each in a role an engine
@@ -721,7 +796,7 @@ async fn run_chat(
     checked_request(request)?;
     let body = serde_json::json!({
         "model": request.model,
-        "messages": request.messages,
+        "messages": vision::body_messages(&request.messages),
         "stream": true,
         "stream_options": { "include_usage": true },
         "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
@@ -899,14 +974,24 @@ pub async fn chat_stream(
         .lock()
         .map_err(|_| "Could not start the chat.".to_string())?
         .insert(chat_id.clone(), stop);
-    let result = if outside::is_outside(&request.model) {
+    let result = if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {
+        // A picture never leaves this computer.
+        Err(vision::STAYS_HERE.to_string())
+    } else if outside::is_outside(&request.model) {
         // An engine outside this computer waits for no turn here.
         outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
             let _ = on_event.send(event);
         })
         .await
     } else {
-        match base_url() {
+        // A model that reads pictures answers on the picture engine, on this
+        // computer, and takes its turn with the chat engine's models.
+        let base = if reads_pictures(&request.model) {
+            Ok(vision::PICTURE_BASE_URL.to_string())
+        } else {
+            base_url()
+        };
+        match base {
             Ok(base) => {
                 chat_on_engine(&base, &lan, &chats, &request, &mut stopped, |event| {
                     let _ = on_event.send(event);
@@ -956,6 +1041,7 @@ mod tests {
                 messages: vec![ChatMessage {
                     role: "user".to_string(),
                     content: "Hello".to_string(),
+                    images: Vec::new(),
                 }],
                 max_tokens: Some(8),
             };
@@ -1126,7 +1212,10 @@ mod tests {
             makers(),
             ["Microsoft", "OpenAI", "NVIDIA", "Google", "Meta"]
         );
-        assert_eq!(models_by("Microsoft"), [("Phi-4", "MIT")]);
+        assert_eq!(
+            models_by("Microsoft"),
+            [("Phi-4", "MIT"), ("Phi-3.5 Vision", "MIT")]
+        );
         assert_eq!(models_by("OpenAI"), [("gpt-oss 20B", "Apache 2.0")]);
         assert_eq!(
             models_by("NVIDIA"),
@@ -1149,6 +1238,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "hi".to_string(),
+                images: Vec::new(),
             }],
             max_tokens: None,
         };
@@ -1269,6 +1359,122 @@ mod tests {
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
+    fn listed(name: &str, maker: &str, id: &str) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            maker: maker.to_string(),
+            context: 8,
+        }
+    }
+
+    #[test]
+    fn a_model_on_the_disk_that_the_engine_does_not_list_is_named() {
+        // Brad, 2026-11-20: "why can't I pick the 2 missing but installed
+        // models?  I only have 3/5 when I ask questions". An engine left
+        // running from before listed three of the five on his disk.
+        let on_disk = [
+            listed("gpt-oss 20B", "OpenAI", "a/gpt-oss-20b"),
+            listed("Phi-4", "Microsoft", "a/phi-4"),
+            listed("Nemotron 3.5 Lightning", "NVIDIA", "a/nemotron"),
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b"),
+            listed("Llama 3.1 8B", "Meta", "a/llama-3.1-8b"),
+        ];
+        let served = &on_disk[..3];
+        let names: Vec<String> = unseen(&on_disk, served)
+            .into_iter()
+            .map(|model| model.name)
+            .collect();
+        assert_eq!(names, ["Gemma 4 26B", "Llama 3.1 8B"]);
+        assert!(unseen(&on_disk, &on_disk).is_empty());
+        assert!(unseen(&[], served).is_empty());
+        assert_eq!(unseen(&on_disk, &[]).len(), 5);
+    }
+
+    #[test]
+    fn a_model_the_engine_lists_under_another_id_is_not_left_out() {
+        // The engine may give a model the path of its folder, so the match
+        // is the list's name, never the id.
+        let on_disk = [listed("Phi-4", "Microsoft", "mlx-community/phi-4-4bit")];
+        let served = [listed("Phi-4", "Microsoft", "/models/phi-4-4bit")];
+        assert!(unseen(&on_disk, &served).is_empty());
+    }
+
+    #[test]
+    fn only_a_picked_makers_model_is_reported_as_left_out() {
+        let folder =
+            std::env::temp_dir().join(format!("rusty-engine-unseen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let makers = Makers::new(folder.join("makers"), &[]);
+        makers.set(&["Google".to_string()]).unwrap();
+        let mut status = first_status();
+        status.models = Vec::new();
+        status.on_disk = Vec::new();
+        status.unseen = vec![
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b"),
+            listed("Llama 3.1 8B", "Meta", "a/llama-3.1-8b"),
+        ];
+        let shown = for_makers(status, &makers);
+        let names: Vec<&str> = shown
+            .unseen
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect();
+        assert_eq!(names, ["Gemma 4 26B"]);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn an_engine_is_this_windows_only_when_this_window_started_the_one_answering() {
+        let mut status = first_status();
+        status.reachable = true;
+        status.remote = false;
+        assert!(started_here(&status, true));
+        assert!(
+            !started_here(&status, false),
+            "an engine that was already answering is not this window's"
+        );
+        status.remote = true;
+        assert!(
+            !started_here(&status, true),
+            "a LAN server is never this window's"
+        );
+        status.remote = false;
+        status.reachable = false;
+        assert!(
+            !started_here(&status, true),
+            "nothing answers yet, so nothing is claimed"
+        );
+    }
+
+    #[test]
+    fn the_engines_answer_is_set_against_the_disk() {
+        // The engine's list is read first, then the disk's models it does
+        // not hold are worked out from it, in the one report the page gets.
+        let mut status = first_status();
+        status.on_disk = vec![
+            listed("Phi-4", "Microsoft", "a/phi-4"),
+            listed("Gemma 4 26B", "Google", "a/gemma-4-26b-a4b"),
+        ];
+        let ids = ["b/phi-4-4bit".to_string(), "b/another-model".to_string()];
+        answered(&mut status, &ids);
+        assert!(status.reachable);
+        assert_eq!(status.models.len(), 1);
+        assert_eq!(status.hidden, 1);
+        let names: Vec<&str> = status.unseen.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["Gemma 4 26B"]);
+    }
+
+    #[test]
+    fn the_page_is_told_which_models_are_left_out_and_whose_engine_it_is() {
+        let mut status = first_status();
+        status.unseen = vec![listed("Phi-4", "Microsoft", "a/phi-4")];
+        status.ours = true;
+        let told = serde_json::to_value(&status).unwrap();
+        assert_eq!(told["unseen"][0]["name"], "Phi-4");
+        assert_eq!(told["ours"], true);
+    }
+
     #[test]
     fn the_engine_address_stays_on_the_private_network() {
         for good in [
@@ -1387,6 +1593,7 @@ mod tests {
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: "What is 2+2? One short sentence.".to_string(),
+                images: Vec::new(),
             }],
             max_tokens: Some(200),
         };
