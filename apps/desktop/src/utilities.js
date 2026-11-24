@@ -27,7 +27,7 @@ export function addPictures(list, found) {
   for (const picture of found ?? []) {
     if (known.has(picture.path)) continue;
     known.add(picture.path);
-    added.push({ ...picture, status: "waiting", out: "", outName: "", outBytes: 0, error: "" });
+    added.push({ ...picture, status: "waiting", out: "", outName: "", outBytes: 0, outFolder: "", keptPlace: false, error: "" });
   }
   return [...list, ...added];
 }
@@ -35,7 +35,7 @@ export function addPictures(list, found) {
 /** What one picture on the list is doing, or what it became. */
 export function pictureLine(item) {
   if (item.status === "working") return `${pictureSize(item.bytes)}, converting…`;
-  if (item.status === "done") return `${pictureSize(item.bytes)} to ${pictureSize(item.outBytes)}, saved as ${item.outName}`;
+  if (item.status === "done") return `${pictureSize(item.bytes)} to ${pictureSize(item.outBytes)}, saved as ${item.outName}, found in the folder`;
   if (item.status === "failed") return item.error || "Could not be converted.";
   return `${pictureSize(item.bytes)}, waiting`;
 }
@@ -47,6 +47,62 @@ export function pictureSummary(list) {
   const failed = list.filter((item) => item.status === "failed").length;
   const words = `${done} of ${list.length} converted`;
   return failed ? `${words}, ${failed} failed.` : `${words}.`;
+}
+
+/** "Trip", for "/Users/me/Pictures/Trip": the last part of a folder's path. */
+export function folderName(folder) {
+  const parts = String(folder ?? "").split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : String(folder ?? "");
+}
+
+/** "1 JPEG", "3 JPEGs". */
+function jpegs(count) {
+  return count === 1 ? "1 JPEG" : `${count} JPEGs`;
+}
+
+/**
+ * What the run saved, and where, once nothing on the list is waiting or
+ * converting. Brad, 2026-11-24: "heic worked great, but I need a confirmation
+ * I looked in folder and saw they converted." A picture is done only after
+ * its JPEG was read back from its folder, so each one counted here was found
+ * there. Null while the run goes on, and while nothing has been tried.
+ */
+export function heicConfirmation(list) {
+  const items = list ?? [];
+  if (items.some((item) => item.status === "waiting" || item.status === "working")) return null;
+  const done = items.filter((item) => item.status === "done");
+  const failed = items.filter((item) => item.status === "failed");
+  if (!done.length && !failed.length) return null;
+
+  const folders = [];
+  for (const item of done) {
+    const known = folders.find((one) => one.folder === item.outFolder);
+    if (known) known.count += 1;
+    else folders.push({ folder: item.outFolder, name: folderName(item.outFolder), count: 1, first: item });
+  }
+  for (const one of folders) one.line = `${jpegs(one.count)} in ${one.name}`;
+
+  let saved = "No JPEGs were saved.";
+  if (done.length === 1) saved = "1 JPEG saved and found in its folder.";
+  else if (done.length) saved = `${done.length} JPEGs saved, each one found in its folder.`;
+  const lost = failed.length === 1 ? "1 picture could not be converted." : `${failed.length} pictures could not be converted.`;
+  let headline = `Done. ${saved}`;
+  if (failed.length) headline = done.length ? `${saved} ${lost}` : lost;
+
+  const kept = done.filter((item) => item.keptPlace).length;
+  const left = done.length - kept;
+  const which = done.length === 1 ? "the picture" : "each picture";
+  let location = "";
+  if (done.length && !kept) location = `Where ${which} was taken was left out.`;
+  else if (done.length && !left) location = `Where ${which} was taken was kept.`;
+  else if (done.length) location = `Where each picture was taken was kept in ${jpegs(kept)} and left out of ${jpegs(left)}.`;
+
+  return {
+    headline,
+    folders,
+    location,
+    failed: failed.map((item) => ({ name: item.name, error: item.error || "Could not be converted." })),
+  };
 }
 
 /** Said when a drop or a pick held files that are not HEIC pictures. */

@@ -102,6 +102,7 @@ import {
 } from "./chat.js";
 import {
   addPictures,
+  heicConfirmation,
   isHeic,
   passedLine,
   pictureLine,
@@ -328,6 +329,9 @@ const heicQuality = ref(QUALITY);
 const heicKeepPlace = ref(false);
 const heicNote = ref("");
 const heicBusy = ref(false);
+// What a finished run saved, and where. Brad, 2026-11-24: "I need a
+// confirmation I looked in folder and saw they converted."
+const heicSaved = computed(() => heicConfirmation(heicList.value));
 // The picture check: its model is installed only when the person asks, from
 // the Installers page. A score lives here, on the page, and nowhere else; it
 // is cleared each time the page opens.
@@ -1713,7 +1717,15 @@ async function convertWaiting() {
           quality: Number(heicQuality.value),
           keepLocation: heicKeepPlace.value,
         });
-        Object.assign(item, { status: "done", out: made.path, outName: made.name, outBytes: made.bytes });
+        // Done only once Rust found the JPEG in its folder, read back.
+        Object.assign(item, {
+          status: "done",
+          out: made.path,
+          outName: made.name,
+          outBytes: made.bytes,
+          outFolder: made.folder,
+          keptPlace: made.kept_location,
+        });
       } catch (error) {
         Object.assign(item, { status: "failed", error: String(error) });
       }
@@ -2746,6 +2758,26 @@ onBeforeUnmount(() => {
                   <span class="small" role="status">{{ pictureSummary(heicList) }}</span>
                   <button type="button" :disabled="heicBusy" @click="clearHeic">Clear the list</button>
                 </p>
+                <div v-if="heicSaved" class="utility-confirm" role="status" aria-label="What was saved">
+                  <p class="utility-confirm-head">{{ heicSaved.headline }}</p>
+                  <ul v-if="heicSaved.folders.length" class="utility-folders">
+                    <li v-for="one in heicSaved.folders" :key="one.folder">
+                      <span class="offer-text">
+                        <span class="offer-name">{{ one.line }}</span>
+                        <span class="quiet small">{{ one.folder }}</span>
+                      </span>
+                      <button type="button" :aria-label="`Show the ${one.name} folder in the Finder`" @click="showJpeg(one.first)">
+                        Show in the Finder
+                      </button>
+                    </li>
+                  </ul>
+                  <p v-if="heicSaved.location" class="quiet small">{{ heicSaved.location }}</p>
+                  <ul v-if="heicSaved.failed.length" class="utility-failed">
+                    <li v-for="(one, index) in heicSaved.failed" :key="`${index}-${one.name}`" class="small">
+                      <strong>{{ one.name }}</strong>: {{ one.error }}
+                    </li>
+                  </ul>
+                </div>
                 <ul class="offers" aria-label="Pictures to convert">
                   <li v-for="item in heicList" :key="item.path" class="offer">
                     <span class="offer-text">
@@ -5040,6 +5072,45 @@ textarea.memory:focus,
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* What a finished run saved, and in which folder. */
+.utility-confirm {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+}
+
+.utility-confirm p {
+  margin: 0;
+}
+
+.utility-confirm-head {
+  font-weight: 600;
+}
+
+.utility-folders,
+.utility-failed {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.utility-folders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.utility-folders .offer-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* A score, with its caution under it. It reads the same high or low. */

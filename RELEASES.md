@@ -14,7 +14,15 @@ alone. A release that is out is never changed, so their notes are here.
 
 No version went out as 0.1.0, 0.4.0, or 0.8.2.
 
+## 0.8.5
+
+**New**
+
+- **HEIC to JPEG says what it saved, and where.** Each copy is read back from its folder before the list calls it saved. Once nothing is left to convert, a box says how many JPEGs were saved and found, in which folder, and whether where each picture was taken was kept or left out. Each folder has its own Show in the Finder button, and a picture that failed is named, with why.
+
 ## 0.8.4
+
+Released 2026-11-22.
 
 **Fixed**
 

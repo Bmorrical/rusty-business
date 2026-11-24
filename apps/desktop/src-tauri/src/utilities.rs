@@ -12,6 +12,10 @@
 //! takes the next free name. Where the picture was taken is left out of the
 //! copy unless the person keeps it. Windows and Linux are told it needs a Mac
 //! for now.
+//!
+//! Brad, 2026-11-24: "heic worked great, but I need a confirmation I looked in
+//! folder and saw they converted." So each copy is read back from its folder
+//! before the page is told it was saved, and the answer says which folder.
 
 use std::collections::HashSet;
 use std::fs;
@@ -51,12 +55,16 @@ pub struct Pictures {
     pub passed: usize,
 }
 
-/// The JPEG one picture became.
+/// The JPEG one picture became, found in its folder after it was saved.
 #[derive(Serialize, Debug)]
 pub struct Converted {
     pub path: String,
     pub name: String,
     pub bytes: u64,
+    /// The folder it was found in, the same one as the picture.
+    pub folder: String,
+    /// Whether where the picture was taken was kept in the copy.
+    pub kept_location: bool,
 }
 
 /// The JPEGs this window made. Show opens only these, so the page cannot ask
@@ -82,7 +90,7 @@ pub async fn heic_pictures(paths: Vec<String>) -> Result<Pictures, String> {
 }
 
 /// Makes a JPEG copy of one HEIC picture, beside it, and answers with the
-/// copy. `quality` runs from 10 to 100.
+/// copy once it is found in the folder. `quality` runs from 10 to 100.
 #[tauri::command]
 pub async fn heic_to_jpeg(
     path: String,
@@ -97,6 +105,10 @@ pub async fn heic_to_jpeg(
             .map_err(|_| "The picture could not be converted.".to_string())??;
     let bytes = fs::metadata(&out).map(|meta| meta.len()).unwrap_or(0);
     let name = file_name(&out);
+    let folder = out
+        .parent()
+        .map(|folder| folder.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if let Ok(mut list) = made.0.lock() {
         list.insert(out.clone());
     }
@@ -104,6 +116,8 @@ pub async fn heic_to_jpeg(
         path: out.to_string_lossy().into_owned(),
         name,
         bytes,
+        folder,
+        kept_location: keep_location,
     })
 }
 
@@ -294,7 +308,29 @@ fn convert(source: &Path, quality: u8, keep_location: bool) -> Result<PathBuf, S
     let bytes =
         fs::read(source).map_err(|_| format!("{} could not be read.", file_name(source)))?;
     let jpeg = to_jpeg(&bytes, f64::from(quality) / 100.0, keep_location)?;
-    write_beside(source, &jpeg)
+    let out = write_beside(source, &jpeg)?;
+    found_in_folder(&out, &jpeg)?;
+    Ok(out)
+}
+
+/// Reads a copy back from its folder, so it is called saved only once it is
+/// there: a file of its own, not a link, holding the very JPEG that was made.
+/// A copy that reads back wrong is left where it is, and the person is told.
+fn found_in_folder(out: &Path, made: &[u8]) -> Result<(), String> {
+    let name = file_name(out);
+    let on_disk = match fs::symlink_metadata(out) {
+        Ok(meta) if meta.is_file() => fs::read(out).ok(),
+        _ => None,
+    };
+    let Some(on_disk) = on_disk else {
+        return Err(format!("{name} was saved but is not in the folder."));
+    };
+    if on_disk != made || !on_disk.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Err(format!(
+            "{name} is in the folder but does not read back as the JPEG that was made."
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -643,6 +679,55 @@ mod tests {
             "a name that is not a full path"
         );
         assert!(picture_at(&scratch.0.join("real.png").to_string_lossy()).is_err());
+    }
+
+    // Brad, 2026-11-24: "heic worked great, but I need a confirmation I looked
+    // in folder and saw they converted."
+    #[test]
+    fn a_copy_is_called_saved_only_once_it_is_found_in_its_folder() {
+        let scratch = Scratch::new();
+        let made = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+        let copy = scratch.0.join("IMG_1.jpg");
+        fs::write(&copy, made).unwrap();
+        assert!(found_in_folder(&copy, &made).is_ok(), "the copy is there");
+
+        let other = [0xFF, 0xD8, 0xFF, 0xE0, 9, 9, 9];
+        assert_eq!(
+            found_in_folder(&copy, &other).unwrap_err(),
+            "IMG_1.jpg is in the folder but does not read back as the JPEG that was made.",
+            "other bytes than the ones made"
+        );
+        assert_eq!(
+            found_in_folder(&scratch.0.join("IMG_2.jpg"), &made).unwrap_err(),
+            "IMG_2.jpg was saved but is not in the folder.",
+            "a copy that is gone"
+        );
+        let folder = scratch.0.join("IMG_3.jpg");
+        fs::create_dir(&folder).unwrap();
+        assert!(
+            found_in_folder(&folder, &made).is_err(),
+            "a folder, not a file"
+        );
+        let words = scratch.0.join("IMG_4.jpg");
+        fs::write(&words, b"not a jpeg").unwrap();
+        assert!(
+            found_in_folder(&words, b"not a jpeg").is_err(),
+            "the same bytes, but not a JPEG"
+        );
+        #[cfg(unix)]
+        {
+            let link = scratch.0.join("IMG_5.jpg");
+            std::os::unix::fs::symlink(&copy, &link).unwrap();
+            assert!(
+                found_in_folder(&link, &made).is_err(),
+                "a link is not the copy"
+            );
+        }
+        assert_eq!(
+            fs::read(&copy).unwrap(),
+            made,
+            "reading back changes nothing"
+        );
     }
 
     #[test]
