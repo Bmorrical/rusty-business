@@ -60,7 +60,7 @@ test('Installers groups models by type in tabs', () => {
     ['check', 'Picture check'],
     ['outside', 'Outside engines'],
   ]) {
-    assert.ok(app.includes(`@click="installersTab = '${tab}'">${label}</button>`), `no ${label} tab`);
+    assert.ok(app.includes(`@click="openTab('installers', '${tab}')">${label}</button>`), `no ${label} tab`);
   }
   assert.match(app, /const installersTab = ref\("chat"\);/, 'Installers must open on Chat');
 });

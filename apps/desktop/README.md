@@ -36,7 +36,7 @@ Select the picture to open it full size. The rest of the set is in
   Settings, which adds or removes one with one click. One maker always stays
   picked. Removing a maker hides its models and deletes nothing, and saved
   chats still name them.
-- **An Installers page**, under the gear at the foot of the side, that
+- **An Installers page**, a group of tabs on the Settings page, that
   lists every model on the list, from every maker, with its license and
   download size. Install downloads one, with the gate on, then adds its
   maker so it shows at the top of the window. A model already here whose

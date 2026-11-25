@@ -301,7 +301,7 @@ test('each scene is a picture the script can make', () => {
       assert.ok(holder, `${scene.file} opens a tab, and only Settings and Installers have tabs`);
       assert.match(
         read('apps/desktop/src/App.vue'),
-        new RegExp(`@click="${holder} = '[a-z]+'">${scene.tab}</button>`),
+        new RegExp(`@click="openTab\\('${scene.page}', '[a-z]+'\\)">${scene.tab}</button>`),
         `${scene.file} opens a tab its page has`,
       );
     }

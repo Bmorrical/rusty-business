@@ -217,6 +217,9 @@ const webNote = ref("");
 const graderPick = ref(rememberedGrader());
 // What the main pane shows: "chat", "installers", or "settings".
 const page = ref("chat");
+// Settings, Installers, and Utilities share one page, with one row of tabs.
+const SETTINGS_PAGES = ["settings", "installers", "utilities"];
+const settingsPage = computed(() => SETTINGS_PAGES.includes(page.value));
 // The open page's title, which takes the focus when the page opens.
 const pageTitle = ref(null);
 let updateTimer = 0;
@@ -822,25 +825,29 @@ async function setMaker(name, on, box) {
 }
 
 /**
- * Opens Workflow, Installers, or Settings in place of the chat. Installers and
- * Settings show the makers, and Installers shows the outside engines, as Rust
- * keeps them, so each asks Rust afresh. Workflow reads only its board, and
- * asks for that itself.
+ * Opens Workflow, Installers, Utilities, or Settings in place of the chat. The
+ * last three share the Settings page, so moving between them keeps the focus
+ * on the tabs and a memory being written. Installers and Settings show the
+ * makers, and Installers shows the outside engines, as Rust keeps them, so
+ * each asks Rust afresh. Workflow reads only its board, and asks for that
+ * itself.
  */
 async function openPage(name) {
+  const arriving = !(SETTINGS_PAGES.includes(name) && settingsPage.value);
   page.value = name;
   menuFor.value = "";
+  gearOpen.value = false;
   if (name === "workflow") return;
   if (name === "utilities") {
-    nextTick(() => pageTitle.value?.focus());
+    if (arriving) nextTick(() => pageTitle.value?.focus());
     await readUtilities();
     return;
   }
-  if (name === "settings") {
+  if (name === "settings" && arriving) {
     memoryDraft.value = memory.value;
     memorySaved.value = "";
   }
-  nextTick(() => pageTitle.value?.focus());
+  if (arriving) nextTick(() => pageTitle.value?.focus());
   await readMakers();
   await readOutside();
   await readOff();
@@ -855,7 +862,15 @@ function closePage() {
 
 /** A button in the side bar opens its page, or closes it when it is open. */
 function togglePage(name) {
-  return page.value === name ? closePage() : openPage(name);
+  const open = name === "settings" ? settingsPage.value : page.value === name;
+  return open ? closePage() : openPage(name);
+}
+
+/** A tab on the Settings page: one of Settings' own, an installer, or Utilities. */
+async function openTab(where, tab) {
+  if (where === "settings") settingsTab.value = tab;
+  if (where === "installers") installersTab.value = tab;
+  if (page.value !== where) await openPage(where);
 }
 
 /**
@@ -2374,23 +2389,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               role="menuitem"
-              :aria-current="page === 'installers' ? 'page' : undefined"
-              @click="togglePage('installers')"
-            >
-              Installers
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              :aria-current="page === 'utilities' ? 'page' : undefined"
-              @click="togglePage('utilities')"
-            >
-              Utilities
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              :aria-current="page === 'settings' ? 'page' : undefined"
+              :aria-current="settingsPage ? 'page' : undefined"
               @click="togglePage('settings')"
             >
               Settings
@@ -2440,21 +2439,32 @@ onBeforeUnmount(() => {
         @side="sideOpen = true"
       />
 
-      <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
+      <section v-if="settingsPage" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
         <header class="bar">
           <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
           </button>
-          <h2 id="installers-title" ref="pageTitle" tabindex="-1">Installers</h2>
+          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
           <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
-          <nav class="settings-tabs" aria-label="Installers">
-            <button type="button" :class="{ here: installersTab === 'chat' }" @click="installersTab = 'chat'">Chat</button>
-            <button type="button" :class="{ here: installersTab === 'pictures' }" @click="installersTab = 'pictures'">Pictures</button>
-            <button type="button" :class="{ here: installersTab === 'check' }" @click="installersTab = 'check'">Picture check</button>
-            <button type="button" :class="{ here: installersTab === 'outside' }" @click="installersTab = 'outside'">Outside engines</button>
+          <nav class="settings-tabs" aria-label="Settings">
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'memory' }" @click="openTab('settings', 'memory')">Memory</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'models' }" @click="openTab('settings', 'models')">Models</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'folders' }" @click="openTab('settings', 'folders')">Folders</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'web' }" @click="openTab('settings', 'web')">Web</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
+            <span class="tabs-label" aria-hidden="true">Installers</span>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'chat' }" @click="openTab('installers', 'chat')">Chat</button>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'check' }" @click="openTab('installers', 'check')">Picture check</button>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'outside' }" @click="openTab('installers', 'outside')">Outside engines</button>
+            <span class="tabs-label" aria-hidden="true">Tools</span>
+            <button type="button" :class="{ here: page === 'utilities' }" @click="openTab('utilities')">Utilities</button>
           </nav>
+          <!-- Installers -->
+          <template v-if="page === 'installers'">
           <div v-if="installersTab === 'chat'" class="settings-pane">
           <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
           <p v-if="lanEngine" class="quiet">
@@ -2731,17 +2741,10 @@ onBeforeUnmount(() => {
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
           </div>
-        </div>
-      </section>
-      <section v-if="page === 'utilities'" class="settings" aria-labelledby="utilities-title" @keydown.esc="closePage">
-        <header class="bar">
-          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
-          </button>
-          <h2 id="utilities-title" ref="pageTitle" tabindex="-1">Utilities</h2>
-          <button type="button" @click="closePage">Back to the chat</button>
-        </header>
-        <div class="settings-body">
+          </template>
+          <!-- Utilities -->
+          <div v-else-if="page === 'utilities'" class="settings-pane">
+            <h3>Utilities</h3>
           <p class="quiet">Small tools that run on this computer alone, so they work with both gates off.</p>
           <article class="utility" aria-labelledby="heic-title">
             <h3 id="heic-title">HEIC to JPEG</h3>
@@ -2827,25 +2830,9 @@ onBeforeUnmount(() => {
             </template>
             <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
           </article>
-        </div>
-      </section>
-      <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
-        <header class="bar">
-          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
-          </button>
-          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
-          <button type="button" @click="closePage">Back to the chat</button>
-        </header>
-        <div class="settings-body">
-          <nav class="settings-tabs" aria-label="Settings">
-            <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
-            <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
-            <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
-            <button type="button" :class="{ here: settingsTab === 'web' }" @click="settingsTab = 'web'">Web</button>
-            <button type="button" :class="{ here: settingsTab === 'votes' }" @click="settingsTab = 'votes'">Votes</button>
-            <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
-          </nav>
+          </div>
+          <!-- Settings' own tabs -->
+          <template v-else>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
             <h3>Memory</h3>
             <p class="quiet">
@@ -3147,6 +3134,8 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          </template>
+          <!-- End of Settings -->
         </div>
       </section>
 
@@ -4530,6 +4519,16 @@ button.switch {
 }
 
 /* Settings: its tabs down the side, and the open one beside them. */
+.tabs-label {
+  margin: 0.9rem 0 0.2rem;
+  padding: 0 0.9rem;
+  color: var(--quiet);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .settings-body:has(> .settings-tabs) {
   width: min(60rem, 100%);
   grid-template-columns: 12rem minmax(0, 1fr);

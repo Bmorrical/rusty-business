@@ -52,13 +52,14 @@ export const SCENES = [
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
-  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers' },
+  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers', tab: 'Chat' },
   { file: 'pictures.png', scheme: 'light', engine: 'on', page: 'installers', tab: 'Pictures' },
   { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings', tab: 'Models' },
 ];
 
 /** The button in the side bar that opens each page a picture shows. */
-export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
+// Installers is a group of tabs on the Settings page, so both open Settings.
+export const PAGE_BUTTONS = { installers: 'Settings', settings: 'Settings' };
 
 /**
  * The models that read pictures, as makers_status offers them on a Mac. The

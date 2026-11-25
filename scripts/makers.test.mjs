@@ -115,9 +115,9 @@ test('Settings adds or removes a maker in one click, and is reached from the foo
   // Brad, 2026-11-17: "in settings they can one click more of them if they
   // want."
   const app = read(APP);
-  const start = app.indexOf('<section v-if="page === \'settings\'" class="settings"');
+  const start = app.indexOf("<!-- Settings' own tabs -->");
   assert.ok(start >= 0, 'the window has lost its Settings page');
-  const settings = app.slice(start, app.indexOf('</section>', start));
+  const settings = app.slice(start, app.indexOf('<!-- End of Settings -->', start));
   for (const part of [
     '<h3>Model makers</h3>',
     ':aria-label="`Remove ${maker.name}`"',

@@ -106,7 +106,8 @@ test('the gates stay in sight, each says what it means in a tip, and the rest si
   for (const part of ['aria-haspopup="menu"', ':aria-expanded="gearOpen"', '@click="gearOpen = !gearOpen"', 'aria-label="Settings and tools"']) {
     assert.ok(gear.includes(part), `the gear has lost ${part}`);
   }
-  const order = ["togglePage('workflow')", "togglePage('installers')", "togglePage('utilities')", "togglePage('settings')", '@click="checkNow"'].map((part) => gear.indexOf(part));
+  // Installers and Utilities are tabs of Settings, so the gear holds three.
+  const order = ["togglePage('workflow')", "togglePage('settings')", '@click="checkNow"'].map((part) => gear.indexOf(part));
   assert.ok(order.every((at) => at > 0), 'the gear no longer holds every page and Check for updates');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'the gear lists its items out of order');
   assert.ok(!foot.slice(0, foot.indexOf('<div class="gear-wrap">')).includes('togglePage('), 'a page button sits outside the gear again');

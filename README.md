@@ -284,7 +284,7 @@ time, while the WAN gate is on. The model writes the search, and only its
 words go: to DuckDuckGo, or to Brave Search when you give the path to a file
 that holds your own Brave key. That key goes only to Brave.
 
-The Installers page, at the foot of the window above Settings, lists every
+The Installers page, a group of tabs on the Settings page, lists every
 model on the app's list, whoever made it. With the WAN gate on, Install
 brings a model from Hugging Face onto this computer. For a configured
 private-network engine, Install uses the LAN gate and asks the server to

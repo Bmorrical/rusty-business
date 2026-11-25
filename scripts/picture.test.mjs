@@ -59,8 +59,10 @@ function pageFn(source, name) {
 }
 
 /** One page's template, from its section to the next. */
+const MARKERS = { installers: '<!-- Installers -->', utilities: '<!-- Utilities -->', settings: "<!-- Settings' own tabs -->" };
+/** One part of the Settings page, from its marker to the next part's. */
 function page(app, name, next) {
-  return app.slice(app.indexOf(`<section v-if="page === '${name}'"`), app.indexOf(`<section v-if="page === '${next}'"`));
+  return app.slice(app.indexOf(MARKERS[name]), app.indexOf(MARKERS[next]));
 }
 
 /** The page's script, without its template. */

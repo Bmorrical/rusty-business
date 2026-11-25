@@ -219,7 +219,7 @@ test('the side has a Workflow button, and it opens the view in place of the chat
 
   const button = app.indexOf(`@click="togglePage('workflow')"`);
   assert.ok(button >= 0, 'the side has no Workflow button');
-  assert.ok(button < app.indexOf(`@click="togglePage('installers')"`), 'the Workflow button is not above Installers');
+  assert.ok(button < app.indexOf(`@click="togglePage('settings')"`), 'the Workflow button is not above Settings');
   assert.match(app.slice(button, button + 120), />\s+Workflow\s+<\/button>/, 'the button does not say Workflow');
 
   const start = app.indexOf('<Workflow');
