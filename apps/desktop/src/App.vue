@@ -2337,17 +2337,17 @@ onBeforeUnmount(() => {
               <span aria-hidden="true">i</span>
               <span id="stack-line" class="tip" role="tooltip">{{ stackLine(stack, stackStarting) }}</span>
             </span>
-            <button
-              v-if="!stackStarting && stack && !stack.running && gate"
-              class="icon small-icon"
-              type="button"
-              aria-label="Try the stack again"
-              title="Try the stack again"
-              @click="checkStack"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.retry" /></svg>
-            </button>
           </span>
+          <button
+            v-if="!stackStarting && stack && !stack.running && gate"
+            class="icon small-icon retry"
+            type="button"
+            aria-label="Try the stack again"
+            title="Try the stack again"
+            @click="checkStack"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.retry" /></svg>
+          </button>
         </div>
         <div class="gates">
           <div class="gate">
@@ -4184,9 +4184,11 @@ kbd {
   margin-right: 0.1rem;
 }
 
-.status .small-icon {
+/* Try the stack again, at the right of the row. */
+.status-row .retry {
   width: 1.4rem;
   height: 1.4rem;
+  margin-left: auto;
 }
 
 .tip {
