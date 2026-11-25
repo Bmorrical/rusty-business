@@ -158,9 +158,35 @@ test('the engine for Windows is next, inside the installer, and is llama.cpp', (
 // LAN gate: a pie for each card, a slider for each model's share, a share
 // that can span cards, run rich or lean, each model in its own container,
 // and each answering without waiting.
-test('many models at once, on your own network, is first in Next, with a pie and a slider for the compute', () => {
+// Brad, 2026-11-25: "the next thing that gets built in 8.5. It starts a
+// rulesheet that I write and ammend", "It's the orchestrator. It's first
+// listening to me, it never merges to main or has the capability to. in fact
+// it doesn't merge anything", "the story may go to local, lan, or wan", and
+// Copilot "does not merge into main only I do that". Then: "roadmap it all,
+// descript is more general as this will grow".
+test('the orchestrator, run by your rulesheet, is first in Next, and merges nothing', () => {
   const [first] = itemsOf(section('Next').body);
-  assert.equal(first.title, 'Many models at once, on your own network.', 'many models at once is not first in Next');
+  assert.equal(first.title, 'The orchestrator, run by your rulesheet.', 'the orchestrator is not first in Next');
+  const text = first.text.replace(/\s+/g, ' ');
+  assert.match(text, /a rulesheet you write and amend/);
+  assert.match(text, /It listens to you first/);
+  assert.match(text, /from the Workflow view/);
+  assert.match(text, /on this computer, on your private network, or at an outside service/);
+  assert.match(text, /Copilot takes over on GitHub/);
+  assert.match(text, /until it is green/);
+  assert.match(text, /only then does the pull request get its merge labels/);
+  assert.match(text, /a label workflow that says who holds the ball/);
+  assert.match(text, /hands the ball to the next one/);
+  assert.match(text, /Watching those labels and moving them is the orchestrator's job/);
+  assert.match(text, /The orchestrator merges nothing, and only you merge into main/);
+  const done = itemsOf(section('Done').body).map((item) => item.title);
+  assert.ok(!done.includes('The orchestrator, run by your rulesheet.'), 'it is called done before it is built');
+});
+
+test('many models at once, on your own network, is next after the orchestrator, with a pie and a slider for the compute', () => {
+  const next = itemsOf(section('Next').body);
+  const first = next[1];
+  assert.equal(first?.title, 'Many models at once, on your own network.', 'many models at once is not next after the orchestrator');
   const text = first.text.replace(/\s+/g, ' ');
   assert.match(text, /your private network/);
   assert.match(text, /from one hardware slice of a card to four whole cards/);

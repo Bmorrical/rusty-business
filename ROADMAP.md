@@ -17,6 +17,24 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
+- **The orchestrator, run by your rulesheet.** Rusty Business™ becomes the
+  orchestrator for the work on your boards, and a rulesheet you write and
+  amend says how it works. It listens to you first. It reads the work
+  from the Workflow view and hands each story to a model on this
+  computer, on your private network, or at an outside service, as the
+  rulesheet says. Each step has a label on a label workflow that says
+  who holds the ball, and when that party is done, the orchestrator
+  moves the label and hands the ball to the next one. Watching those
+  labels and moving them is the orchestrator's job. When the work comes back as a pull request,
+  Copilot
+  takes over on GitHub: it keeps the stacks of pull requests in order and
+  reviews a stack once it is ready. The orchestrator sends each review
+  point back to whoever did the work, the fix comes back up, the points
+  are answered and resolved, and Copilot reviews again, until it is
+  green. Then the backend and end-to-end tests pass on this computer, and
+  only then does the pull request get its merge labels. The orchestrator
+  merges nothing, and only you merge into main. The rulesheet grows as
+  you amend it.
 - **Many models at once, on your own network.** A computer on your private
   network runs models on its GPUs, from one hardware slice of a card to
   four whole cards. You split that compute the way you would partition a
