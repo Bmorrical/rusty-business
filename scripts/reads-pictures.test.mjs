@@ -55,21 +55,22 @@ function rustFunction(text, name) {
 test('Installers groups models by type in tabs', () => {
   const app = read(APP);
   for (const [tab, label] of [
-    ['chat', 'Chat'],
     ['pictures', 'Pictures'],
     ['check', 'Picture check'],
     ['outside', 'Outside engines'],
   ]) {
     assert.ok(app.includes(`@click="openTab('installers', '${tab}')">${label}</button>`), `no ${label} tab`);
   }
-  assert.match(app, /const installersTab = ref\("chat"\);/, 'Installers must open on Chat');
+  // Chat models are installed under Settings, Models, so Installers opens on Pictures.
+  assert.match(app, /const installersTab = ref\("pictures"\);/, 'Installers must open on Pictures');
 });
 
 test('a model that reads pictures shows in more than one tab, with one-click Install and Uninstall', () => {
   const app = read(APP);
-  const chat = installersPane(app, 'chat');
-  assert.match(chat, /v-for="entry in maker\.models"/, 'the Chat tab must list every model, pictures too');
-  assert.match(chat, /Reads pictures/, 'the Chat tab must mark a model that reads pictures');
+  const start = app.indexOf(`settingsTab === 'models'" class="settings-pane"`);
+  const chat = app.slice(start, app.indexOf('class="settings-pane"', start + 40));
+  assert.match(chat, /v-for="entry in maker\.models"/, 'Settings, Models must list every model, pictures too');
+  assert.match(chat, /Reads pictures/, 'Settings, Models must mark a model that reads pictures');
   assert.match(app, /maker\.models\.filter\(\(entry\) => entry\.pictures\)/, 'the Pictures tab must take models that read pictures');
   const pictures = installersPane(app, 'pictures');
   assert.match(pictures, /v-for="\{ maker, entry \} in pictureEntries"/);

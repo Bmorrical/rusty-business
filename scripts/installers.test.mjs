@@ -63,7 +63,7 @@ test('Installers is one click from the Settings page, which the gear opens', () 
   }
 
   const nav = app.slice(app.indexOf('<nav class="settings-tabs" aria-label="Settings">'), app.indexOf('</nav>', app.indexOf('aria-label="Settings">')));
-  const order = ["openTab('settings', 'appearance')", "openTab('installers', 'chat')", "openTab('installers', 'outside')", "openTab('utilities')"].map((part) => nav.indexOf(part));
+  const order = ["openTab('settings', 'appearance')", "openTab('installers', 'pictures')", "openTab('installers', 'outside')", "openTab('utilities')"].map((part) => nav.indexOf(part));
   assert.ok(order.every((at) => at > 0), "the Settings tabs have lost an installer or Utilities");
   assert.deepEqual([...order].sort((a, b) => a - b), order, "Settings' own tabs, the installers, and Utilities are out of order");
   assert.match(app, /<section v-if="settingsPage" class="settings" aria-labelledby="settings-title"/, 'Settings, Installers, and Utilities no longer share one page');
@@ -79,24 +79,24 @@ test('Installers is one click from the Settings page, which the gear opens', () 
   assert.match(functionOf(app, 'closePage'), /page\.value = "chat";\s+focusComposer\(\);/, 'going back no longer returns to the chat');
 });
 
-test('the Installers page lists every maker, and installs any model in one click', () => {
+test('Settings, Models lists every maker, and installs any model in one click', () => {
   // Brad, 2026-11-17: "and claude and codex/gpt and gemmini and meta/google
   // models locally can be installed, one click from an installers page would
-  // be good".
+  // be good". Todd, 2026-11-24: Installers' Chat tab and Settings, Models
+  // were the same list, so the list is one, under Models.
   const app = read(APP);
-  const page = pageOf(app, 'installers');
+  const page = pageOf(app, 'settings');
   // Escape and Back to the chat are the shared page's, above every tab.
   const head = app.slice(app.indexOf('<section v-if="settingsPage"'), app.indexOf('<!-- Installers -->'));
   assert.ok(head.includes('@keydown.esc="closePage"'), 'Escape no longer goes back to the chat');
   assert.ok(head.includes('<button type="button" @click="closePage">Back to the chat</button>'), 'the page has lost Back to the chat');
   for (const part of [
-    '<h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>',
+    '<h3>Model makers</h3>',
     'Nothing downloads until you press Install.',
     '<span>Turn on the {{ installGateName }} to install a model.</span>',
     '<li v-for="maker in displayMakers" :key="maker.name" class="maker">',
-    '<span v-if="!maker.picked" class="quiet small">Not added</span>',
     '<li v-for="entry in maker.models" :key="entry.name" class="offer">',
-    '{{ installLine(maker, entry) }}',
+    '{{ entry.ids?.length ? modelLine(entry, off) : installLine(maker, entry) }}',
     '<button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>',
     '<p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>',
     '<p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>',
@@ -104,7 +104,8 @@ test('the Installers page lists every maker, and installs any model in one click
     assert.ok(page.includes(part), `the Installers page has lost ${part}`);
   }
   // Every maker's models are offered, not only the makers already added.
-  assert.ok(!/v-for="maker in makers\.filter|v-if="maker\.picked"/.test(page), 'the page lists only the makers already added');
+  assert.ok(!/v-for="maker in makers\.filter/.test(page), 'the page lists only the makers already added');
+  assert.ok(!app.includes("installersTab === 'chat'"), 'Installers has its own list of models again, apart from Settings, Models');
   // Brad, 2026-11-17: "off by default, everything stops". Install is off
   // while the gate is, and while a download or a change of makers runs.
   assert.match(
@@ -158,20 +159,17 @@ test('the outside engines are added on the Installers page, and nowhere else', (
   assert.ok(page.includes(':aria-label="`Remove ${entry.name}`"'), 'Remove no longer says which engine it removes');
 });
 
-test('Settings changes the makers and points to the Installers page, but downloads nothing', () => {
+test('Settings, Models points to the outside engines, and adds none itself', () => {
   const app = read(APP);
   const settings = pageOf(app, 'settings');
-  for (const part of ['download(', 'install(', '<progress', 'cancelDownload', 'stoppedNote', 'key-path']) {
-    // Uninstall, in Settings under Models, moves a model to the Trash; it is not an install.
-    assert.ok(!settings.replaceAll('uninstall(', '').includes(part), `Settings has ${part} again; it belongs on the Installers page`);
-  }
-  assert.match(settings, /To install a model or add an outside engine, go to the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'Settings no longer points to the Installers page');
+  assert.ok(!settings.includes('key-path'), 'Settings, Models adds an outside engine again; that belongs under Outside engines');
+  assert.match(settings, /No outside engine is added\. Add one under\s+<button class="link in-text" type="button" @click="openTab\('installers', 'outside'\)">Outside engines<\/button>\./, 'Settings, Models no longer points to Outside engines');
   assert.ok(app.includes('id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>'), 'the Settings title no longer takes the focus');
 
   // The first run points there too, for the models it does not offer and for
   // the outside engines.
   const first = app.slice(app.indexOf('<div v-if="offers.length" class="first-run">'), app.indexOf('<template v-else>', app.indexOf('class="first-run"')));
-  assert.match(first, /More models, and the outside engines, are on the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'the first run no longer points to the Installers page');
+  assert.match(first, /More models are in\s+<button class="link in-text" type="button" @click="openTab\('settings', 'models'\)">Settings, Models<\/button>, and the\s+outside engines under\s+<button class="link in-text" type="button" @click="openTab\('installers', 'outside'\)">Outside engines<\/button>\./, 'the first run no longer points to more models and the outside engines');
 });
 
 test('one page shows at a time, and a chat takes the window back', () => {

@@ -504,7 +504,7 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   // Brad, 2026-11-17: "off by default, everything stops". Download is off too
   // while the outbound gate is, and the picker offers to turn the gate on.
   assert.match(row, /:disabled="Boolean\(downloading\) \|\| !canDownload"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
-  const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16}<\/li>/)?.[0] ?? '';
+  const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16,18}<\/li>/)?.[0] ?? '';
   assert.match(
     listed,
     /v-else-if="entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="makersLocked \|\| !canDownload"\s*\n\s*@click="install\(maker\.name, entry\.offer\)"/,

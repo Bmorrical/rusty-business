@@ -52,7 +52,7 @@ export const SCENES = [
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
-  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers', tab: 'Chat' },
+  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'settings', tab: 'Models' },
   { file: 'pictures.png', scheme: 'light', engine: 'on', page: 'installers', tab: 'Pictures' },
   { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings', tab: 'Models' },
 ];

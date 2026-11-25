@@ -251,7 +251,7 @@ const gearOpen = ref(false);
 const settingsTab = ref("memory");
 // "start a grouping, maybe tabbed screens, for each "type" collections of
 // models, they can exists in more than one tab where applicable."
-const installersTab = ref("chat");
+const installersTab = ref("pictures");
 const projectDialog = ref(null);
 const editing = ref(null);
 let editingFrom = {};
@@ -2456,7 +2456,6 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
-            <button type="button" :class="{ here: page === 'installers' && installersTab === 'chat' }" @click="openTab('installers', 'chat')">Chat</button>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'check' }" @click="openTab('installers', 'check')">Picture check</button>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'outside' }" @click="openTab('installers', 'outside')">Outside engines</button>
@@ -2465,72 +2464,7 @@ onBeforeUnmount(() => {
           </nav>
           <!-- Installers -->
           <template v-if="page === 'installers'">
-          <div v-if="installersTab === 'chat'" class="settings-pane">
-          <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
-          <p v-if="lanEngine" class="quiet">
-            Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
-          </p>
-          <p v-else class="quiet">
-            Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
-            top of the window. Nothing downloads until you press Install.
-          </p>
-          <p v-if="!installGateOpen" class="gate-ask">
-            <span>Turn on the {{ installGateName }} to install a model.</span>
-            <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
-          </p>
-          <ul class="makers" aria-label="Models to install">
-            <li v-for="maker in displayMakers" :key="maker.name" class="maker">
-              <div class="maker-head">
-                <span class="maker-name">{{ maker.name }}</span>
-                <span v-if="!maker.picked" class="quiet small">Not added</span>
-              </div>
-              <ul class="maker-models">
-                <li v-for="entry in maker.models" :key="entry.name" class="offer">
-                  <span class="offer-text">
-                    <span class="offer-name">
-                      {{ entry.name }}
-                      <span v-if="entry.pictures" class="tag small">Reads pictures</span>
-                    </span>
-                    <span class="quiet small">{{ installLine(maker, entry) }}</span>
-                  </span>
-                  <template v-if="entry.offer && downloading === entry.offer.id">
-                    <span class="offer-progress">
-                      <progress
-                        :value="progress?.total ? downloaded(progress) : undefined"
-                        max="1"
-                        :aria-label="`How much of ${entry.name} has downloaded`"
-                      ></progress>
-                      <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
-                    </span>
-                    <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
-                  </template>
-                  <button
-                    v-else-if="entry.onDisk && !maker.picked"
-                    type="button"
-                    :aria-label="`Show ${entry.name}`"
-                    :disabled="makersLocked"
-                    @click="setMaker(maker.name, true)"
-                  >
-                    Show
-                  </button>
-                  <button
-                    v-else-if="entry.offer && !entry.onDisk"
-                    type="button"
-                    :aria-label="`Install ${entry.name}`"
-                    :disabled="makersLocked || !canDownload"
-                    @click="install(maker.name, entry.offer)"
-                  >
-                    Install
-                  </button>
-                </li>
-              </ul>
-            </li>
-          </ul>
-          <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
-          <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
-          </div>
-
-          <div v-else-if="installersTab === 'pictures'" class="settings-pane">
+          <div v-if="installersTab === 'pictures'" class="settings-pane">
           <h3>Models that read pictures</h3>
           <p class="quiet">
             Attach or paste a JPEG, PNG, or WebP in the chat, and a model here reads it with your words. Each runs on this
@@ -2807,7 +2741,7 @@ onBeforeUnmount(() => {
             </p>
             <p v-if="!pictureReady" class="gate-ask">
               <span>The picture check is not installed. It is off until you choose it.</span>
-              <button type="button" @click="openPage('installers')">Open Installers</button>
+              <button type="button" @click="openTab('installers', 'check')">Install the picture check</button>
             </p>
             <template v-else>
               <div class="utility-drop">
@@ -2929,9 +2863,16 @@ onBeforeUnmount(() => {
                 Uninstall moves a model's files to {{ uninstallPlace?.trash || "the Trash" }}, where you can take them back.
               </template>
             </p>
-            <p class="quiet small">
-              To install a model or add an outside engine, go to the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            <p v-if="lanEngine" class="quiet">
+              Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
+            </p>
+            <p v-else class="quiet">
+              Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
+              top of the window. Nothing downloads until you press Install.
+            </p>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to install a model.</span>
+              <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
             </p>
             <ul class="makers" aria-label="Model makers">
               <li v-for="maker in displayMakers" :key="maker.name" class="maker">
@@ -2960,10 +2901,24 @@ onBeforeUnmount(() => {
                 <ul class="maker-models">
                   <li v-for="entry in maker.models" :key="entry.name" class="offer">
                     <span class="offer-text">
-                      <span class="offer-name">{{ entry.name }}</span>
-                      <span class="quiet small">{{ modelLine(entry, off) }}</span>
+                      <span class="offer-name">
+                        {{ entry.name }}
+                        <span v-if="entry.pictures" class="tag small">Reads pictures</span>
+                      </span>
+                      <span class="quiet small">{{ entry.ids?.length ? modelLine(entry, off) : installLine(maker, entry) }}</span>
                     </span>
-                    <template v-if="!entry.remote && entry.ids?.length && askUninstall === entry.name">
+                    <template v-if="entry.offer && downloading === entry.offer.id">
+                      <span class="offer-progress">
+                        <progress
+                          :value="progress?.total ? downloaded(progress) : undefined"
+                          max="1"
+                          :aria-label="`How much of ${entry.name} has downloaded`"
+                        ></progress>
+                        <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
+                      </span>
+                      <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
+                    </template>
+                    <template v-else-if="!entry.remote && entry.ids?.length && askUninstall === entry.name">
                       <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
                       <button
                         class="link"
@@ -2999,6 +2954,24 @@ onBeforeUnmount(() => {
                         {{ uninstalling === entry.name ? "Moving..." : "Uninstall" }}
                       </button>
                     </span>
+                    <button
+                      v-else-if="entry.onDisk && !maker.picked"
+                      type="button"
+                      :aria-label="`Show ${entry.name}`"
+                      :disabled="makersLocked"
+                      @click="setMaker(maker.name, true)"
+                    >
+                      Show
+                    </button>
+                    <button
+                      v-else-if="entry.offer && !entry.onDisk"
+                      type="button"
+                      :aria-label="`Install ${entry.name}`"
+                      :disabled="makersLocked || !canDownload"
+                      @click="install(maker.name, entry.offer)"
+                    >
+                      Install
+                    </button>
                   </li>
                 </ul>
               </li>
@@ -3006,6 +2979,7 @@ onBeforeUnmount(() => {
             <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
             <p v-if="modelNote" class="small" role="alert">{{ modelNote }}</p>
+            <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
 
             <h3 class="gap-above">Outside models</h3>
             <p class="quiet">A model switched off stays with its maker, and is left out here the same way.</p>
@@ -3032,8 +3006,8 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-else class="quiet small">
-              No outside engine is added. Add one on the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+              No outside engine is added. Add one under
+              <button class="link in-text" type="button" @click="openTab('installers', 'outside')">Outside engines</button>.
             </p>
             <p v-if="outsideOffNote" class="small" role="alert">{{ outsideOffNote }}</p>
 
@@ -3231,8 +3205,10 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
             <p class="quiet small">
-              More models, and the outside engines, are on the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+              More models are in
+              <button class="link in-text" type="button" @click="openTab('settings', 'models')">Settings, Models</button>, and the
+              outside engines under
+              <button class="link in-text" type="button" @click="openTab('installers', 'outside')">Outside engines</button>.
             </p>
           </div>
           <template v-else>

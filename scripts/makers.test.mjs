@@ -125,7 +125,7 @@ test('Settings adds or removes a maker in one click, and is reached from the foo
     '@click="setMaker(maker.name, false)"',
     ':aria-label="`Add ${maker.name}`"',
     '@click="setMaker(maker.name, true)"',
-    '{{ modelLine(entry, off) }}',
+    'modelLine(entry, off)',
     'One maker always stays picked.',
     '<p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>',
   ]) {

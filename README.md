@@ -86,7 +86,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   OpenAI, NVIDIA, Google, and Meta, and on a Mac one more from Microsoft
   that reads pictures. It shows the models of the makers you
   pick: Microsoft to begin with, and any others you tick on a first run, add
-  in Settings, or install from the Installers page, each with one click. A model that is not on the list is never
+  or install in Settings under Models, each with one click. A model that is not on the list is never
   shown and never accepted, even when the engine holds it. Ollama's library
   is far larger, and open to models from many makers.
 - **Local first, behind a gate.** Chat uses the engine on your computer by
@@ -126,8 +126,9 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   with a question, and Phi-3.5 Vision, installed in one click from the
   Installers page, reads them on this computer. A picture never goes to an
   outside engine, and a model that cannot read one is told only that it was
-  left out. The Installers page groups its models in tabs, Chat, Pictures,
-  Picture check, and Outside engines, and a model can sit on more than one.
+  left out. Settings, Models lists every model, and the Installers tabs,
+  Pictures, Picture check, and Outside engines, hold the rest. A model can sit
+  in more than one place.
 - **Answers graded and summed up.** Once every answer is in, one model grades
   each from A to F and sums them up. It reads the question and the answers,
   numbered and without the models' names. An outside engine grades, Grok
@@ -152,7 +153,7 @@ computer, and it is ahead of this project in most ways. Here is how to choose.
   it opens one.
 - **Any model, one command away.** Ollama downloads a model when you ask for
   it. Rusty Business™ downloads only the models on its list: one on a first
-  run, and any of the others from the Installers page with one click.
+  run, and any of the others from Settings, Models with one click.
 - **An API for other programs.** Ollama serves one on your computer. Rusty
   Business™ is a window for a person, and gives other programs no way to reach
   a model.
@@ -284,7 +285,7 @@ time, while the WAN gate is on. The model writes the search, and only its
 words go: to DuckDuckGo, or to Brave Search when you give the path to a file
 that holds your own Brave key. That key goes only to Brave.
 
-The Installers page, a group of tabs on the Settings page, lists every
+Settings, Models lists every
 model on the app's list, whoever made it. With the WAN gate on, Install
 brings a model from Hugging Face onto this computer. For a configured
 private-network engine, Install uses the LAN gate and asks the server to
