@@ -14,7 +14,21 @@ alone. A release that is out is never changed, so their notes are here.
 
 No version went out as 0.1.0, 0.4.0, or 0.8.2.
 
+## 0.8.5
+
+**Fixed**
+
+- **No false warning about a picture model.** With Phi-3.5 Vision installed, the app no longer says the engine does not list it. Picture models run on the picture engine, so the chat engine leaves them out on purpose.
+
+**Changed**
+
+- **A tidier side bar.** The WAN and LAN gate switches stay at the foot of the side, and each gate's line moves into an ⓘ tip. Workflow, Settings, and Check for updates sit under one gear.
+- **One Settings page.** Installers and Utilities are now tabs of Settings. Settings, Models installs, shows, turns on or off, and uninstalls each chat model, so the Installers' Chat tab is gone and Installers opens on Pictures.
+- **Status dots.** The engine and the stack each show a green or red dot, with their line in a tip. A button tries the stack again. The engine's footer shows only what you can act on.
+
 ## 0.8.4
+
+Released 2026-11-22.
 
 **Fixed**
 
