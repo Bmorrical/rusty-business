@@ -298,3 +298,24 @@ test('newer models, and where each maker is from, is third in Next, with a filte
   const done = itemsOf(section('Done').body).map((each) => each.title);
   assert.ok(!done.includes('Newer models, and where each maker is from.'), 'it is called done before it is built');
 });
+
+// Brad, 2026-11-25: "one [Rusty Business™] can talk to another [Rusty Business™]
+// on the same LAN, it has it's own connection handshake", "I am driving one, and
+// it's telling the other over the LAN wire", "anything bubbled back ... goes to
+// rb to rb back to me", and "keep out the 'external connector' it doesn't fit
+// the shape of the project".
+test('one Rusty Business™ to another is fourth in Next, with its own handshake, behind the LAN gate', () => {
+  const item = itemsOf(section('Next').body)[3];
+  assert.equal(item?.title, 'One Rusty Business™ to another, on your own network.', 'one Rusty Business™ to another is not fourth in Next');
+  const text = item.text.replace(/\s+/g, ' ');
+  assert.match(text, /Two installs of Rusty Business™ on your private network talk to each other/);
+  assert.match(text, /a handshake of their own/);
+  assert.match(text, /You drive one, and it passes what you ask over the wire to the other/);
+  assert.match(text, /bubbles back the same way: to the first install, and then to you/);
+  assert.match(text, /nothing but Rusty Business™ at each end/);
+  assert.match(text, /only with the LAN gate on/);
+  assert.match(text, /nothing passes past your private network/);
+  assert.doesNotMatch(text, /connector/i, 'an external connector does not fit the shape of the project');
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('One Rusty Business™ to another, on your own network.'), 'it is called done before it is built');
+});

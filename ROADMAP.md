@@ -58,6 +58,15 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   it. Each maker shows its country of origin, and you can filter the list
   by country, so you can see at a glance which models are made in the
   United States and which are not.
+- **One Rusty Business™ to another, on your own network.** Two installs of
+  Rusty Business™ on your private network talk to each other, once each
+  has said yes to the other in a handshake of their own. You drive one,
+  and it passes what you ask over the wire to the other, which does the
+  work there. Everything that comes of it bubbles back the same way: to
+  the first install, and then to you. The second install works with its
+  own models, so the whole path runs with nothing but Rusty Business™ at
+  each end. Each install reaches the other only with the LAN gate on, and
+  nothing passes past your private network.
 - **Kits.** A kit is a small file, kept outside the app, that names what a
   board needs before work on it can start, such as a folder on this
   computer or a repository to fetch. The app reads a kit and says what is
