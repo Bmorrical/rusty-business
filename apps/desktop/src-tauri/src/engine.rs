@@ -401,10 +401,12 @@ fn for_makers(mut status: EngineStatus, makers: &Makers) -> EngineStatus {
 
 /// The models on the disk that the engine answering does not list. They are
 /// matched by the list's name, because an engine may give a model another id
-/// than its folder has.
+/// than its folder has. A model that reads pictures runs on the picture
+/// engine, so the chat engine leaving it out is not reported.
 pub fn unseen(on_disk: &[ModelInfo], served: &[ModelInfo]) -> Vec<ModelInfo> {
     on_disk
         .iter()
+        .filter(|model| !reads_pictures_by_name(&model.name))
         .filter(|model| !served.iter().any(|other| other.name == model.name))
         .cloned()
         .collect()
@@ -1389,6 +1391,20 @@ mod tests {
         assert!(unseen(&on_disk, &on_disk).is_empty());
         assert!(unseen(&[], served).is_empty());
         assert_eq!(unseen(&on_disk, &[]).len(), 5);
+    }
+
+    #[test]
+    fn a_model_that_reads_pictures_is_not_reported_as_left_out() {
+        // The chat engine never lists a picture model, even when it serves
+        // one from the same folder, so naming it as left out is wrong.
+        let ids = vec![
+            "mlx-community/phi-4-4bit".to_string(),
+            "mlx-community/Phi-3.5-vision-instruct-4bit".to_string(),
+        ];
+        let mut status = first_status();
+        status.on_disk = allowed_models(&ids);
+        answered(&mut status, &ids);
+        assert!(status.unseen.is_empty());
     }
 
     #[test]
