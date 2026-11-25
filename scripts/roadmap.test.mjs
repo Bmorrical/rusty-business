@@ -273,3 +273,28 @@ test('sections, items, and dates are read from the text', () => {
     ['2027', 'Q3', 'March', 'May 5', '12/1', 'next month', 'by the end of'],
   );
 });
+
+// Brad, 2026-11-25: "8.5 brings it, who makes it (country of origin)",
+// "ensure users can 1 click install these too", "users choice what to
+// install", "developers choice what to make available", and "put in the
+// country of origin and it's filterable ... user can easily see what is us
+// and what is not". Then: "they can also install qwen and deepseek, any
+// other missing top models", "they don't ship any models by default from
+// scratch as rules as already exists", and "user must click to get the ones
+// they want".
+test('newer models, and where each maker is from, is third in Next, with a filter by country', () => {
+  const item = itemsOf(section('Next').body)[2];
+  assert.equal(item?.title, 'Newer models, and where each maker is from.', 'newer models is not third in Next');
+  const text = item.text.replace(/\s+/g, ' ');
+  assert.match(text, /install in one click/);
+  assert.match(text, /Inkling 2 Mini/);
+  for (const name of ['Qwen', 'DeepSeek', 'Mistral', 'the other top open models']) assert.ok(text.includes(name), `it lost ${name}`);
+  assert.match(text, /The project picks which models are on the list, and you pick which to install/);
+  assert.match(text, /No model comes with the app/);
+  assert.match(text, /downloaded only when you click to get it/);
+  assert.match(text, /Each maker shows its country of origin/);
+  assert.match(text, /filter the list by country/);
+  assert.match(text, /made in the United States and which are not/);
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('Newer models, and where each maker is from.'), 'it is called done before it is built');
+});

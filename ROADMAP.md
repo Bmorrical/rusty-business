@@ -49,6 +49,15 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   here holds one at a time. The app sets the shares, and the computer that
   runs the models carries them out: it starts, places, and stops the
   containers.
+- **Newer models, and where each maker is from.** More models install in
+  one click: Inkling 2 Mini from Thinking Machines Lab, Gemma 4 31B,
+  Nemotron 3.5 Super VL, Qwen, DeepSeek, Mistral, Kimi, GLM, and the other
+  top open models, each added once it is checked. The project picks which
+  models are on the list, and you pick which to install. No model comes
+  with the app, as now: each one is downloaded only when you click to get
+  it. Each maker shows its country of origin, and you can filter the list
+  by country, so you can see at a glance which models are made in the
+  United States and which are not.
 - **Kits.** A kit is a small file, kept outside the app, that names what a
   board needs before work on it can start, such as a folder on this
   computer or a repository to fetch. The app reads a kit and says what is
