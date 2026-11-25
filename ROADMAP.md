@@ -72,9 +72,9 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   the first install, and then to you. The second install works with its
   own models, so the whole path runs with nothing but Rusty Business™ at
   each end. Each install also opens an API on your private network, so you
-  can bring your own courier app to carry work to it and back. The API
-  starts with what the first courier app needs, and grows with the apps
-  that use it. The link and the API have a circuit breaker of their own:
+  can bring your own courier app to carry work to it and back. The API is
+  an MCP server that any courier app can connect to. It starts with what
+  the first courier app needs, and grows with the apps that use it. The link and the API have a circuit breaker of their own:
   a switch, off until you turn it on, that stops both at once. Each
   install reaches the other, and a courier app reaches an install, only
   with that switch and the LAN gate on, and nothing passes past your
