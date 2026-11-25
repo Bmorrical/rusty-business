@@ -18,14 +18,19 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 ## Next
 
 - **Many models at once, on your own network.** A computer on your private
-  network with several GPUs, or a GPU split into hardware slices, runs one
-  model on each GPU or slice, each in a container of its own. The app keeps
-  a list of these workers, each with its model, and reaches them only with
-  the LAN gate on. Then One question, many models asks each worker at the
-  same time: each answers on its own, and none waits for another. The
-  models on this computer still take turns, since the engine here holds one
-  at a time. Starting, placing, and stopping the containers belongs to the
-  computer that runs them: the app only asks the workers on its list.
+  network runs models on its GPUs, from one hardware slice of a card to
+  four whole cards. You split that compute the way you would partition a
+  drive: the app shows each card as a pie, and a slider gives each model
+  its share of what is free. A share can be part of one card, or span
+  several: a model that needs two and a half cards gets them. Run a model
+  rich or lean, with more of the compute or less, to get the results you
+  want. Each model runs in a container of its own, and the app reaches
+  them only with the LAN gate on. Then One question, many models asks each
+  model at the same time: each answers on its own, and none waits for
+  another. The models on this computer still take turns, since the engine
+  here holds one at a time. The app sets the shares, and the computer that
+  runs the models carries them out: it starts, places, and stops the
+  containers.
 - **Kits.** A kit is a small file, kept outside the app, that names what a
   board needs before work on it can start, such as a folder on this
   computer or a repository to fetch. The app reads a kit and says what is

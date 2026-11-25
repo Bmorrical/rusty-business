@@ -146,20 +146,35 @@ test('the engine for Windows is next, inside the installer, and is llama.cpp', (
 // that. I can assign a model to a worker node, or logically split it's
 // resource parts. this requires containerization, and heavy orchistration.
 // mark it next to do". Then: "this is extension of LAN capabilities", "so if
-// I had 4 hardware slices I could run 1 model on each one", and "asynch". So
-// it is first in Next, on your own network behind the LAN gate, one model to
-// each GPU or slice in its own container, and each answers without waiting.
-test('many models at once, on your own network, is first in Next, one model to each slice', () => {
+// I had 4 hardware slices I could run 1 model on each one", and "asynch".
+// Then: "ammend so if I had 1 slice or 4. I can also sub-divide the
+// resources. with 4 cards, I could run essentially run and split any model
+// on any percentage of available, can easily tune the resource availability
+// in app, like a slider or meter. I'm thinking like how we partition drives,
+// with pie graphs, but in this case it's compute", "I should be able to span
+// the resources across cards too, multiplex", "so if model 1 needs 2.5 cards
+// of compute, no problem", and "and I can run them rich or lean to get the
+// results I want". So it is first in Next, on your own network behind the
+// LAN gate: a pie for each card, a slider for each model's share, a share
+// that can span cards, run rich or lean, each model in its own container,
+// and each answering without waiting.
+test('many models at once, on your own network, is first in Next, with a pie and a slider for the compute', () => {
   const [first] = itemsOf(section('Next').body);
   assert.equal(first.title, 'Many models at once, on your own network.', 'many models at once is not first in Next');
-  assert.match(first.text, /your private\s+network/);
-  assert.match(first.text, /hardware slices/);
-  assert.match(first.text, /one\s+model on each GPU or slice/);
-  assert.match(first.text, /a container of its own/);
-  assert.match(first.text, /only with\s+the LAN gate on/);
-  assert.match(first.text, /at the\s+same time/);
-  assert.match(first.text, /none waits for another/);
-  assert.match(first.text, /the app only asks the workers on its list/);
+  const text = first.text.replace(/\s+/g, ' ');
+  assert.match(text, /your private network/);
+  assert.match(text, /from one hardware slice of a card to four whole cards/);
+  assert.match(text, /partition a drive/);
+  assert.match(text, /each card as a pie/);
+  assert.match(text, /a slider gives each model its share of what is free/);
+  assert.match(text, /part of one card, or span several/);
+  assert.match(text, /two and a half cards/);
+  assert.match(text, /Run a model rich or lean/);
+  assert.match(text, /a container of its own/);
+  assert.match(text, /only with the LAN gate on/);
+  assert.match(text, /at the same time/);
+  assert.match(text, /none waits for another/);
+  assert.match(text, /The app sets the shares, and the computer that runs the models carries them out/);
   const done = itemsOf(section('Done').body).map((item) => item.title);
   assert.ok(!done.includes('Many models at once, on your own network.'), 'it is called done before it is built');
 });
