@@ -303,8 +303,10 @@ test('newer models, and where each maker is from, is third in Next, with a filte
 // on the same LAN, it has it's own connection handshake", "I am driving one, and
 // it's telling the other over the LAN wire", "anything bubbled back ... goes to
 // rb to rb back to me", and "keep out the 'external connector' it doesn't fit
-// the shape of the project".
-test('one Rusty Business™ to another is fourth in Next, with its own handshake, behind the LAN gate', () => {
+// the shape of the project". Then: "no fork. LAN only there is an API exposed,
+// bring your own courier app, we shape it for my needs to start", and "that has
+// a circuit breaker too".
+test('one Rusty Business™ to another is fourth in Next, with its own handshake, a LAN-only API for your own courier app, and a circuit breaker, behind the LAN gate', () => {
   const item = itemsOf(section('Next').body)[3];
   assert.equal(item?.title, 'One Rusty Business™ to another, on your own network.', 'one Rusty Business™ to another is not fourth in Next');
   const text = item.text.replace(/\s+/g, ' ');
@@ -313,9 +315,15 @@ test('one Rusty Business™ to another is fourth in Next, with its own handshake
   assert.match(text, /You drive one, and it passes what you ask over the wire to the other/);
   assert.match(text, /bubbles back the same way: to the first install, and then to you/);
   assert.match(text, /nothing but Rusty Business™ at each end/);
-  assert.match(text, /only with the LAN gate on/);
+  assert.match(text, /opens an API on your private network/);
+  assert.match(text, /bring your own courier app to carry work to it and back/);
+  assert.match(text, /starts with what the first courier app needs/);
+  assert.match(text, /The link and the API have a circuit breaker of their own/);
+  assert.match(text, /off until you turn it on, that stops both at once/);
+  assert.match(text, /a courier app reaches an install, only with that switch and the LAN gate on/);
   assert.match(text, /nothing passes past your private network/);
   assert.doesNotMatch(text, /connector/i, 'an external connector does not fit the shape of the project');
+  assert.doesNotMatch(text, /\bfork/i, 'the courier API stays in this project, with no fork');
   const done = itemsOf(section('Done').body).map((each) => each.title);
   assert.ok(!done.includes('One Rusty Business™ to another, on your own network.'), 'it is called done before it is built');
 });
