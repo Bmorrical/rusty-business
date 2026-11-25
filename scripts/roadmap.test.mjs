@@ -338,3 +338,21 @@ test('one Rusty Business™ to another is fourth in Next, with its own handshake
   const done = itemsOf(section('Done').body).map((each) => each.title);
   assert.ok(!done.includes('One Rusty Business™ to another, on your own network.'), 'it is called done before it is built');
 });
+
+// Brad, 2026-11-25: "keep it in a postgres or mysql", then, asked whether Rust
+// has a better alternative for a desktop app: "SQLite, encrypted".
+test('boards kept in an encrypted database follow a source for boards in Next, in SQLite with its key in the system key store, and are not a board backend', () => {
+  const titles = itemsOf(section('Next').body).map((each) => each.title);
+  const at = titles.indexOf('Boards kept in an encrypted database.');
+  assert.ok(at > 0, 'boards kept in an encrypted database is not in Next');
+  assert.equal(titles[at - 1], 'A source for boards.', 'it does not follow a source for boards');
+  const text = itemsOf(section('Next').body)[at].text.replace(/\s+/g, ' ');
+  assert.match(text, /is kept in SQLite, a database that is one file the app opens itself, with no server to run/);
+  assert.match(text, /The file is encrypted, and its key stays in the operating system's own key store/);
+  assert.match(text, /a courier app hands the install over the MCP server goes there/);
+  assert.match(text, /goes back out as a board file/);
+  assert.match(text, /not a board's backend, so the rule in `BOARD\.md` stands/);
+  assert.doesNotMatch(text, /Postgre|MySQL/i, 'the copy of a board is kept in SQLite');
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('Boards kept in an encrypted database.'), 'it is called done before it is built');
+});

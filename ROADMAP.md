@@ -89,6 +89,14 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   syncs, pulled from the Workflow view. A pull leaves your notes. A source
   that is an address on a network is refused for now: `BOARD.md` has the
   rule.
+- **Boards kept in an encrypted database.** The copy of a board on this
+  computer is kept in SQLite, a database that is one file the app opens
+  itself, with no server to run. The file is encrypted, and its key stays
+  in the operating system's own key store, such as the Mac's Keychain. A
+  board that a courier app hands the install over the MCP server goes
+  there, and goes back out as a board file, exported as now. The database
+  is the app's own copy, not a board's backend, so the rule in `BOARD.md`
+  stands.
 - **Slices you can write.** Add and edit a story's slices in the Workflow
   view, each with a brief small enough for a local model, a meter that
   says whether the brief fits the model's window, and a way to copy your
