@@ -40,15 +40,15 @@ function rustFn(source, name) {
   return source.slice(start, end < 0 ? undefined : start + 1 + end);
 }
 
-// Brad, 2026-11-22: "I want a new "utilities" page or button"
-test('the side bar has a Utilities button after Installers, and the page lists each utility as a card', () => {
+// Brad, 2026-11-22: "I want a new "utilities" page or button". Todd,
+// 2026-11-24: it belongs on the Settings page, so it is the last tab there.
+test('Utilities is the last tab of Settings, and lists each utility as a card', () => {
   const app = read(APP);
-  const installers = app.indexOf(`@click="togglePage('installers')"`);
-  const utilities = app.indexOf(`@click="togglePage('utilities')"`);
-  const settings = app.indexOf(`@click="togglePage('settings')"`);
-  assert.ok(installers > 0 && installers < utilities && utilities < settings, 'Utilities sits between Installers and Settings');
-  const page = app.slice(app.indexOf(`<section v-if="page === 'utilities'"`), app.indexOf(`<section v-if="page === 'settings'"`));
-  assert.match(page, /<h2 id="utilities-title"[^>]*>Utilities<\/h2>/);
+  const nav = app.slice(app.indexOf('<nav class="settings-tabs" aria-label="Settings">'), app.indexOf('</nav>', app.indexOf('aria-label="Settings">')));
+  const utilities = nav.indexOf(`@click="openTab('utilities')">Utilities</button>`);
+  assert.ok(utilities > 0 && utilities > nav.indexOf("openTab('installers', 'outside')"), 'Utilities is not the last tab, after the installers');
+  const page = app.slice(app.indexOf('<!-- Utilities -->'), app.indexOf("<!-- Settings' own tabs -->"));
+  assert.match(page, /<div v-else-if="page === 'utilities'" class="settings-pane">\s*<h3>Utilities<\/h3>/);
   assert.match(page, /<article class="utility"[^>]*>\s*<h3 id="heic-title">HEIC to JPEG<\/h3>/);
   assert.match(page, /work with both gates off/);
 });

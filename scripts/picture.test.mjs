@@ -59,8 +59,10 @@ function pageFn(source, name) {
 }
 
 /** One page's template, from its section to the next. */
+const MARKERS = { installers: '<!-- Installers -->', utilities: '<!-- Utilities -->', settings: "<!-- Settings' own tabs -->" };
+/** One part of the Settings page, from its marker to the next part's. */
 function page(app, name, next) {
-  return app.slice(app.indexOf(`<section v-if="page === '${name}'"`), app.indexOf(`<section v-if="page === '${next}'"`));
+  return app.slice(app.indexOf(MARKERS[name]), app.indexOf(MARKERS[next]));
 }
 
 /** The page's script, without its template. */
@@ -179,7 +181,7 @@ test('the Utilities card is off until the person installs it, and works with bot
   const app = read(APP);
   const utilities = page(app, 'utilities', 'settings');
   assert.match(utilities, /<article class="utility" aria-labelledby="picture-title">\s*<h3 id="picture-title">Picture check<\/h3>/);
-  assert.match(utilities, /<p v-if="!pictureReady" class="gate-ask">[\s\S]*?@click="openPage\('installers'\)"/);
+  assert.match(utilities, /<p v-if="!pictureReady" class="gate-ask">[\s\S]*?@click="openTab\('installers', 'check'\)"/);
   const rust = shipped();
   assert.doesNotMatch(rustFn(rust, 'score_picture'), /gate|reqwest|client/, 'scoring needs no gate');
 });

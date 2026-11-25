@@ -291,6 +291,9 @@ test('each scene is a picture the script can make', () => {
     if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
     if (scene.page) {
       assert.ok(scene.page in PAGE_BUTTONS, `${scene.file} opens a page the side bar has a button for`);
+      const script = read('scripts/screenshots.mjs');
+      assert.ok(script.includes("document.querySelector('.gear').click()"), 'the script looks for a page button without opening the gear');
+      assert.ok(script.includes("document.querySelectorAll('.gear-menu button')"), "the script looks for the page's button outside the gear's menu");
       assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
     }
     if (scene.tab) {
@@ -298,7 +301,7 @@ test('each scene is a picture the script can make', () => {
       assert.ok(holder, `${scene.file} opens a tab, and only Settings and Installers have tabs`);
       assert.match(
         read('apps/desktop/src/App.vue'),
-        new RegExp(`@click="${holder} = '[a-z]+'">${scene.tab}</button>`),
+        new RegExp(`@click="openTab\\('${scene.page}', '[a-z]+'\\)">${scene.tab}</button>`),
         `${scene.file} opens a tab its page has`,
       );
     }
@@ -501,7 +504,7 @@ test('while a model downloads, the page shows it, stops it on Cancel, and starts
   // Brad, 2026-11-17: "off by default, everything stops". Download is off too
   // while the outbound gate is, and the picker offers to turn the gate on.
   assert.match(row, /:disabled="Boolean\(downloading\) \|\| !canDownload"\s*\n\s*@click="download\(offer\)"/, 'Download is off while a model downloads, or while the gate is off');
-  const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16}<\/li>/)?.[0] ?? '';
+  const listed = page.match(/<li v-for="entry in maker\.models"[\s\S]*?\n {16,18}<\/li>/)?.[0] ?? '';
   assert.match(
     listed,
     /v-else-if="entry\.offer && !entry\.onDisk"[\s\S]*?:disabled="makersLocked \|\| !canDownload"\s*\n\s*@click="install\(maker\.name, entry\.offer\)"/,
@@ -640,10 +643,20 @@ test('with the window open, the app asks for the stack to be started, and says w
 
   // The footer draws the stack's line under the engine's, with Try again
   // when the stack is not running.
-  const footer = page.match(/<footer class="engine"[\s\S]*?<\/footer>/)?.[0] ?? '';
-  const line = footer.indexOf('{{ stackLine(stack, false) }}');
-  assert.ok(line > footer.indexOf('{{ engine.startHint }}'), 'the stack comes after the engine');
-  assert.ok(footer.includes('@click="checkStack">Try again</button>'), 'Try again asks once more');
+  // Todd, 2026-11-24: the engine and the stack are a dot each at the foot of
+  // the side, with what each means in a tip, and a button to try the stack
+  // again when it is not running.
+  const status = page.slice(page.indexOf('<div v-if="engine?.reachable || stack || stackStarting" class="status-row">'), page.indexOf('<div class="gates">'));
+  assert.ok(status, 'the engine and the stack have no dots');
+  const engineDot = status.indexOf('aria-label="About the engine"');
+  const stackDot = status.indexOf('aria-label="About the stack"');
+  assert.ok(engineDot > 0 && stackDot > engineDot, 'the stack comes after the engine');
+  assert.ok(status.includes('{{ engine.name }} on {{ engineAddress }}.'), "the engine's tip no longer says where it answers");
+  assert.ok(status.includes('<span id="stack-line" class="tip" role="tooltip">{{ stackLine(stack, stackStarting) }}</span>'), "the stack's tip no longer says where it answers, or why it does not");
+  assert.match(status, /v-if="!stackStarting && stack && !stack\.running && gate"[\s\S]*?aria-label="Try the stack again"[\s\S]*?@click="checkStack"/, 'there is no way to ask the stack once more');
+  const footer = page.match(/<footer v-if="engineWords" class="engine"[\s\S]*?<\/footer>/)?.[0] ?? '';
+  assert.ok(footer, "the engine's footer no longer shows only what a person can act on");
+  assert.ok(!footer.includes('stackLine('), 'the stack has words of its own in the footer again');
 
   // What the pictures are told is what the app says: the same fields, in the
   // same order, and the address of the app's own front door.

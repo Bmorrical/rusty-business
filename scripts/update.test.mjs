@@ -130,7 +130,7 @@ test('"check for updates": a button asks now and says what it found', () => {
   const app = read(APP);
   // The button, which waits while a check is under way.
   assert.ok(
-    app.includes('<button class="wide" type="button" :disabled="updateChecking" @click="checkNow">\n          {{ updateChecking ? "Checking..." : "Check for updates" }}\n        </button>'),
+    app.includes('<button type="button" role="menuitem" :disabled="updateChecking" @click="checkNow">\n              {{ updateChecking ? "Checking..." : "Check for updates" }}\n            </button>'),
     `${APP} has no Check for updates button`,
   );
   assert.match(app, /async function checkNow\(\) \{\n  if \(!inApp \|\| updateChecking\.value\) return;\n  updateChecking\.value = true;/, `${APP} asks again while a check is under way`);

@@ -51,7 +51,7 @@ test('voting starts on, and a switch on the Votes tab turns it off for good', ()
   const app = read(APP);
   assert.match(app, /const votesOn = ref\(stored\("votes", "on"\) !== "off"\);/, 'votes must start on');
   assert.match(app, /watch\(votesOn, \(on\) => store\("votes", on \? "on" : "off"\)\);/, 'the choice must be kept');
-  assert.match(app, /@click="settingsTab = 'votes'">Votes<\/button>/, 'Settings has no Votes tab');
+  assert.match(app, /@click="openTab\('settings', 'votes'\)">Votes<\/button>/, 'Settings has no Votes tab');
   assert.match(votesPane(app), /<input v-model="votesOn" type="checkbox" \/>/, 'the switch must sit on the Votes tab');
 });
 

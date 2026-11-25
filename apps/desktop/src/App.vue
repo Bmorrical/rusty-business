@@ -130,6 +130,7 @@ const ICONS = {
   side: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM9 3v18",
   settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  retry: "M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6",
   up: "M12 19V5M5 12l7-7 7 7",
   chevron: "m6 9 6 6 6-6",
   back: "m15 18-6-6 6-6",
@@ -217,6 +218,9 @@ const webNote = ref("");
 const graderPick = ref(rememberedGrader());
 // What the main pane shows: "chat", "installers", or "settings".
 const page = ref("chat");
+// Settings, Installers, and Utilities share one page, with one row of tabs.
+const SETTINGS_PAGES = ["settings", "installers", "utilities"];
+const settingsPage = computed(() => SETTINGS_PAGES.includes(page.value));
 // The open page's title, which takes the focus when the page opens.
 const pageTitle = ref(null);
 let updateTimer = 0;
@@ -243,10 +247,12 @@ const query = ref("");
 const found = ref([]);
 const searchBox = ref(null);
 const menuFor = ref("");
+// The gear's menu at the foot of the side: open or shut.
+const gearOpen = ref(false);
 const settingsTab = ref("memory");
 // "start a grouping, maybe tabbed screens, for each "type" collections of
 // models, they can exists in more than one tab where applicable."
-const installersTab = ref("chat");
+const installersTab = ref("pictures");
 const projectDialog = ref(null);
 const editing = ref(null);
 let editingFrom = {};
@@ -380,6 +386,10 @@ const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : ga
 const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
 const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
 const unseenNote = computed(() => unseenLine(engine.value, off.value, engineAddress.value));
+// The engine's footer shows only what a person can act on: no engine yet,
+// the LAN gate off, an engine not answering, or models it does not list. An
+// engine that answers is a dot at the foot of the side.
+const engineWords = computed(() => !engine.value || (lanEngine.value && !lanGate.value) || !engine.value.reachable || Boolean(unseenNote.value));
 const unseenChip = computed(() => unseenShort(engine.value, off.value));
 const displayMakers = computed(() => {
   if (!lanEngine.value) return markUnseen(makers.value, engine.value);
@@ -820,25 +830,29 @@ async function setMaker(name, on, box) {
 }
 
 /**
- * Opens Workflow, Installers, or Settings in place of the chat. Installers and
- * Settings show the makers, and Installers shows the outside engines, as Rust
- * keeps them, so each asks Rust afresh. Workflow reads only its board, and
- * asks for that itself.
+ * Opens Workflow, Installers, Utilities, or Settings in place of the chat. The
+ * last three share the Settings page, so moving between them keeps the focus
+ * on the tabs and a memory being written. Installers and Settings show the
+ * makers, and Installers shows the outside engines, as Rust keeps them, so
+ * each asks Rust afresh. Workflow reads only its board, and asks for that
+ * itself.
  */
 async function openPage(name) {
+  const arriving = !(SETTINGS_PAGES.includes(name) && settingsPage.value);
   page.value = name;
   menuFor.value = "";
+  gearOpen.value = false;
   if (name === "workflow") return;
   if (name === "utilities") {
-    nextTick(() => pageTitle.value?.focus());
+    if (arriving) nextTick(() => pageTitle.value?.focus());
     await readUtilities();
     return;
   }
-  if (name === "settings") {
+  if (name === "settings" && arriving) {
     memoryDraft.value = memory.value;
     memorySaved.value = "";
   }
-  nextTick(() => pageTitle.value?.focus());
+  if (arriving) nextTick(() => pageTitle.value?.focus());
   await readMakers();
   await readOutside();
   await readOff();
@@ -853,7 +867,15 @@ function closePage() {
 
 /** A button in the side bar opens its page, or closes it when it is open. */
 function togglePage(name) {
-  return page.value === name ? closePage() : openPage(name);
+  const open = name === "settings" ? settingsPage.value : page.value === name;
+  return open ? closePage() : openPage(name);
+}
+
+/** A tab on the Settings page: one of Settings' own, an installer, or Utilities. */
+async function openTab(where, tab) {
+  if (where === "settings") settingsTab.value = tab;
+  if (where === "installers") installersTab.value = tab;
+  if (page.value !== where) await openPage(where);
 }
 
 /**
@@ -1938,13 +1960,15 @@ function onWindowKey(event) {
     event.preventDefault();
     sideOpen.value = true;
     nextTick(() => searchBox.value?.focus());
-  } else if (event.key === "Escape" && menuFor.value) {
+  } else if (event.key === "Escape" && (menuFor.value || gearOpen.value)) {
     menuFor.value = "";
+    gearOpen.value = false;
   }
 }
 
 function onWindowClick(event) {
   if (menuFor.value && !event.target.closest?.(".menu, .more")) menuFor.value = "";
+  if (gearOpen.value && !event.target.closest?.(".gear")) gearOpen.value = false;
 }
 
 function resizeComposer() {
@@ -2258,24 +2282,16 @@ onBeforeUnmount(() => {
         </template>
       </nav>
 
-      <footer class="engine" aria-live="polite">
+      <footer v-if="engineWords" class="engine" aria-live="polite">
         <template v-if="!engine">
           <p class="quiet">Looking for the engine...</p>
         </template>
         <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
-          <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
-          <template v-if="unseenNote">
-            <p id="engine-unseen" class="small">{{ unseenNote }}</p>
-            <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
-              {{ checking ? "Checking..." : "Check again" }}
-            </button>
-          </template>
-          <p v-else-if="startedElsewhere(engine)" class="quiet small">This window did not start this engine.</p>
-          <p v-if="engine.hidden" class="quiet small">
-            {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
-            {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
-          </p>
+          <p id="engine-unseen" class="small">{{ unseenNote }}</p>
+          <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
+            {{ checking ? "Checking..." : "Check again" }}
+          </button>
         </template>
         <template v-else>
           <p id="engine-error"><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
@@ -2295,81 +2311,120 @@ onBeforeUnmount(() => {
             {{ checking ? "Checking..." : "Try again" }}
           </button>
         </template>
-        <p v-if="stackStarting" class="quiet small">{{ stackLine(stack, true) }}</p>
-        <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-        <template v-else-if="stack">
-          <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-          <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
-        </template>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'workflow' ? 'page' : undefined"
-          @click="togglePage('workflow')"
-        >
-          Workflow
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'installers' ? 'page' : undefined"
-          @click="togglePage('installers')"
-        >
-          Installers
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'utilities' ? 'page' : undefined"
-          @click="togglePage('utilities')"
-        >
-          Utilities
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'settings' ? 'page' : undefined"
-          @click="togglePage('settings')"
-        >
-          Settings
-        </button>
-        <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
-          {{ updateChecking ? "Checking..." : "Check for updates" }}
-        </button>
-        <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
-        <div class="gate">
-          <button
-            class="switch"
-            type="button"
-            role="switch"
-            :aria-checked="gate"
-            aria-describedby="gate-line"
-            :disabled="gateBusy"
-            @click="setGate(!gate)"
-          >
-            <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            WAN gate
-          </button>
-          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
-          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
-        </div>
-        <div class="gate">
-          <button
-            class="switch"
-            type="button"
-            role="switch"
-            :aria-checked="lanGate"
-            aria-describedby="lan-gate-line"
-            :disabled="lanGateBusy"
-            @click="setLanGate(!lanGate)"
-          >
-            <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            LAN gate
-          </button>
-          <p id="lan-gate-line" class="quiet small">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</p>
-          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
-        </div>
       </footer>
+
+      <!-- The gates and the gear stay in sight, outside the part that scrolls. -->
+      <div class="side-foot">
+        <!-- The engine and the stack: a dot each, and what it means in a tip. -->
+        <div v-if="engine?.reachable || stack || stackStarting" class="status-row">
+          <span v-if="engine?.reachable" class="status">
+            <span class="dot on" aria-hidden="true"></span>{{ engine.name }}
+            <span class="info" tabindex="0" aria-label="About the engine" aria-describedby="engine-line">
+              <span aria-hidden="true">i</span>
+              <span id="engine-line" class="tip" role="tooltip">
+                {{ engine.name }} on {{ engineAddress }}.
+                <template v-if="startedElsewhere(engine)"> This window did not start this engine.</template>
+                <template v-if="engine.hidden">
+                  {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
+                  {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
+                </template>
+              </span>
+            </span>
+          </span>
+          <span v-if="stack || stackStarting" class="status">
+            <span class="dot" :class="stackStarting ? 'live' : stack?.running ? 'on' : 'off'" aria-hidden="true"></span>Stack
+            <span class="info" tabindex="0" aria-label="About the stack" aria-describedby="stack-line">
+              <span aria-hidden="true">i</span>
+              <span id="stack-line" class="tip" role="tooltip">{{ stackLine(stack, stackStarting) }}</span>
+            </span>
+          </span>
+          <button
+            v-if="!stackStarting && stack && !stack.running && gate"
+            class="icon small-icon retry"
+            type="button"
+            aria-label="Try the stack again"
+            title="Try the stack again"
+            @click="checkStack"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.retry" /></svg>
+          </button>
+        </div>
+        <div class="gates">
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="gate"
+              aria-describedby="gate-line"
+              :disabled="gateBusy"
+              @click="setGate(!gate)"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              WAN gate
+            </button>
+            <span class="info" tabindex="0" aria-label="About the WAN gate">
+              <span aria-hidden="true">i</span>
+              <span id="gate-line" class="tip" role="tooltip">{{ gateLine(gate) }}</span>
+            </span>
+          </div>
+          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="lanGate"
+              aria-describedby="lan-gate-line"
+              :disabled="lanGateBusy"
+              @click="setLanGate(!lanGate)"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              LAN gate
+            </button>
+            <span class="info" tabindex="0" aria-label="About the LAN gate">
+              <span aria-hidden="true">i</span>
+              <span id="lan-gate-line" class="tip" role="tooltip">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</span>
+            </span>
+          </div>
+          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
+          <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
+        </div>
+        <div class="gear-wrap">
+          <button
+            class="icon gear"
+            type="button"
+            aria-label="Settings and tools"
+            title="Settings and tools"
+            aria-haspopup="menu"
+            :aria-expanded="gearOpen"
+            @click="gearOpen = !gearOpen"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.settings" /></svg>
+          </button>
+          <div v-if="gearOpen" class="menu gear-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="page === 'workflow' ? 'page' : undefined"
+              @click="togglePage('workflow')"
+            >
+              Workflow
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="settingsPage ? 'page' : undefined"
+              @click="togglePage('settings')"
+            >
+              Settings
+            </button>
+            <button type="button" role="menuitem" :disabled="updateChecking" @click="checkNow">
+              {{ updateChecking ? "Checking..." : "Check for updates" }}
+            </button>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <main class="main">
@@ -2409,87 +2464,32 @@ onBeforeUnmount(() => {
         @side="sideOpen = true"
       />
 
-      <section v-if="page === 'installers'" class="settings" aria-labelledby="installers-title" @keydown.esc="closePage">
+      <section v-if="settingsPage" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
         <header class="bar">
           <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
           </button>
-          <h2 id="installers-title" ref="pageTitle" tabindex="-1">Installers</h2>
+          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
           <button type="button" @click="closePage">Back to the chat</button>
         </header>
         <div class="settings-body">
-          <nav class="settings-tabs" aria-label="Installers">
-            <button type="button" :class="{ here: installersTab === 'chat' }" @click="installersTab = 'chat'">Chat</button>
-            <button type="button" :class="{ here: installersTab === 'pictures' }" @click="installersTab = 'pictures'">Pictures</button>
-            <button type="button" :class="{ here: installersTab === 'check' }" @click="installersTab = 'check'">Picture check</button>
-            <button type="button" :class="{ here: installersTab === 'outside' }" @click="installersTab = 'outside'">Outside engines</button>
+          <nav class="settings-tabs" aria-label="Settings">
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'memory' }" @click="openTab('settings', 'memory')">Memory</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'models' }" @click="openTab('settings', 'models')">Models</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'folders' }" @click="openTab('settings', 'folders')">Folders</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'web' }" @click="openTab('settings', 'web')">Web</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
+            <span class="tabs-label" aria-hidden="true">Installers</span>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'check' }" @click="openTab('installers', 'check')">Picture check</button>
+            <button type="button" :class="{ here: page === 'installers' && installersTab === 'outside' }" @click="openTab('installers', 'outside')">Outside engines</button>
+            <span class="tabs-label" aria-hidden="true">Tools</span>
+            <button type="button" :class="{ here: page === 'utilities' }" @click="openTab('utilities')">Utilities</button>
           </nav>
-          <div v-if="installersTab === 'chat'" class="settings-pane">
-          <h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>
-          <p v-if="lanEngine" class="quiet">
-            Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
-          </p>
-          <p v-else class="quiet">
-            Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
-            top of the window. Nothing downloads until you press Install.
-          </p>
-          <p v-if="!installGateOpen" class="gate-ask">
-            <span>Turn on the {{ installGateName }} to install a model.</span>
-            <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
-          </p>
-          <ul class="makers" aria-label="Models to install">
-            <li v-for="maker in displayMakers" :key="maker.name" class="maker">
-              <div class="maker-head">
-                <span class="maker-name">{{ maker.name }}</span>
-                <span v-if="!maker.picked" class="quiet small">Not added</span>
-              </div>
-              <ul class="maker-models">
-                <li v-for="entry in maker.models" :key="entry.name" class="offer">
-                  <span class="offer-text">
-                    <span class="offer-name">
-                      {{ entry.name }}
-                      <span v-if="entry.pictures" class="tag small">Reads pictures</span>
-                    </span>
-                    <span class="quiet small">{{ installLine(maker, entry) }}</span>
-                  </span>
-                  <template v-if="entry.offer && downloading === entry.offer.id">
-                    <span class="offer-progress">
-                      <progress
-                        :value="progress?.total ? downloaded(progress) : undefined"
-                        max="1"
-                        :aria-label="`How much of ${entry.name} has downloaded`"
-                      ></progress>
-                      <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
-                    </span>
-                    <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
-                  </template>
-                  <button
-                    v-else-if="entry.onDisk && !maker.picked"
-                    type="button"
-                    :aria-label="`Show ${entry.name}`"
-                    :disabled="makersLocked"
-                    @click="setMaker(maker.name, true)"
-                  >
-                    Show
-                  </button>
-                  <button
-                    v-else-if="entry.offer && !entry.onDisk"
-                    type="button"
-                    :aria-label="`Install ${entry.name}`"
-                    :disabled="makersLocked || !canDownload"
-                    @click="install(maker.name, entry.offer)"
-                  >
-                    Install
-                  </button>
-                </li>
-              </ul>
-            </li>
-          </ul>
-          <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
-          <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
-          </div>
-
-          <div v-else-if="installersTab === 'pictures'" class="settings-pane">
+          <!-- Installers -->
+          <template v-if="page === 'installers'">
+          <div v-if="installersTab === 'pictures'" class="settings-pane">
           <h3>Models that read pictures</h3>
           <p class="quiet">
             Attach or paste a JPEG, PNG, or WebP in the chat, and a model here reads it with your words. Each runs on this
@@ -2700,17 +2700,10 @@ onBeforeUnmount(() => {
           </div>
           <p v-if="outsideNote" class="small" role="alert">{{ outsideNote }}</p>
           </div>
-        </div>
-      </section>
-      <section v-if="page === 'utilities'" class="settings" aria-labelledby="utilities-title" @keydown.esc="closePage">
-        <header class="bar">
-          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
-          </button>
-          <h2 id="utilities-title" ref="pageTitle" tabindex="-1">Utilities</h2>
-          <button type="button" @click="closePage">Back to the chat</button>
-        </header>
-        <div class="settings-body">
+          </template>
+          <!-- Utilities -->
+          <div v-else-if="page === 'utilities'" class="settings-pane">
+            <h3>Utilities</h3>
           <p class="quiet">Small tools that run on this computer alone, so they work with both gates off.</p>
           <article class="utility" aria-labelledby="heic-title">
             <h3 id="heic-title">HEIC to JPEG</h3>
@@ -2773,7 +2766,7 @@ onBeforeUnmount(() => {
             </p>
             <p v-if="!pictureReady" class="gate-ask">
               <span>The picture check is not installed. It is off until you choose it.</span>
-              <button type="button" @click="openPage('installers')">Open Installers</button>
+              <button type="button" @click="openTab('installers', 'check')">Install the picture check</button>
             </p>
             <template v-else>
               <div class="utility-drop">
@@ -2796,25 +2789,9 @@ onBeforeUnmount(() => {
             </template>
             <p v-if="pictureNote" class="small" role="alert">{{ pictureNote }}</p>
           </article>
-        </div>
-      </section>
-      <section v-if="page === 'settings'" class="settings" aria-labelledby="settings-title" @keydown.esc="closePage">
-        <header class="bar">
-          <button v-if="!sideOpen" class="icon" type="button" aria-label="Show the side" title="Show the side" @click="sideOpen = true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.side" /></svg>
-          </button>
-          <h2 id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>
-          <button type="button" @click="closePage">Back to the chat</button>
-        </header>
-        <div class="settings-body">
-          <nav class="settings-tabs" aria-label="Settings">
-            <button type="button" :class="{ here: settingsTab === 'memory' }" @click="settingsTab = 'memory'">Memory</button>
-            <button type="button" :class="{ here: settingsTab === 'models' }" @click="settingsTab = 'models'">Models</button>
-            <button type="button" :class="{ here: settingsTab === 'folders' }" @click="settingsTab = 'folders'">Folders</button>
-            <button type="button" :class="{ here: settingsTab === 'web' }" @click="settingsTab = 'web'">Web</button>
-            <button type="button" :class="{ here: settingsTab === 'votes' }" @click="settingsTab = 'votes'">Votes</button>
-            <button type="button" :class="{ here: settingsTab === 'appearance' }" @click="settingsTab = 'appearance'">Appearance</button>
-          </nav>
+          </div>
+          <!-- Settings' own tabs -->
+          <template v-else>
           <div v-if="settingsTab === 'memory'" class="settings-pane">
             <h3>Memory</h3>
             <p class="quiet">
@@ -2911,9 +2888,16 @@ onBeforeUnmount(() => {
                 Uninstall moves a model's files to {{ uninstallPlace?.trash || "the Trash" }}, where you can take them back.
               </template>
             </p>
-            <p class="quiet small">
-              To install a model or add an outside engine, go to the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+            <p v-if="lanEngine" class="quiet">
+              Install asks llama-server at {{ engineAddress }} to download a GGUF model from Hugging Face.
+            </p>
+            <p v-else class="quiet">
+              Install downloads a model from Hugging Face to this computer, then adds its maker, so the model shows at the
+              top of the window. Nothing downloads until you press Install.
+            </p>
+            <p v-if="!installGateOpen" class="gate-ask">
+              <span>Turn on the {{ installGateName }} to install a model.</span>
+              <button type="button" :disabled="installGateBusy" @click="turnOnInstallGate">Turn on the {{ installGateName }}</button>
             </p>
             <ul class="makers" aria-label="Model makers">
               <li v-for="maker in displayMakers" :key="maker.name" class="maker">
@@ -2942,10 +2926,24 @@ onBeforeUnmount(() => {
                 <ul class="maker-models">
                   <li v-for="entry in maker.models" :key="entry.name" class="offer">
                     <span class="offer-text">
-                      <span class="offer-name">{{ entry.name }}</span>
-                      <span class="quiet small">{{ modelLine(entry, off) }}</span>
+                      <span class="offer-name">
+                        {{ entry.name }}
+                        <span v-if="entry.pictures" class="tag small">Reads pictures</span>
+                      </span>
+                      <span class="quiet small">{{ entry.ids?.length ? modelLine(entry, off) : installLine(maker, entry) }}</span>
                     </span>
-                    <template v-if="!entry.remote && entry.ids?.length && askUninstall === entry.name">
+                    <template v-if="entry.offer && downloading === entry.offer.id">
+                      <span class="offer-progress">
+                        <progress
+                          :value="progress?.total ? downloaded(progress) : undefined"
+                          max="1"
+                          :aria-label="`How much of ${entry.name} has downloaded`"
+                        ></progress>
+                        <span class="quiet small">{{ stopping ? "Stopping..." : progress?.total ? downloadLine(progress) : "Waiting for the server…" }}</span>
+                      </span>
+                      <button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>
+                    </template>
+                    <template v-else-if="!entry.remote && entry.ids?.length && askUninstall === entry.name">
                       <span class="ask-uninstall small">{{ uninstallAsk(entry.name, uninstallPlace) }}</span>
                       <button
                         class="link"
@@ -2981,6 +2979,24 @@ onBeforeUnmount(() => {
                         {{ uninstalling === entry.name ? "Moving..." : "Uninstall" }}
                       </button>
                     </span>
+                    <button
+                      v-else-if="entry.onDisk && !maker.picked"
+                      type="button"
+                      :aria-label="`Show ${entry.name}`"
+                      :disabled="makersLocked"
+                      @click="setMaker(maker.name, true)"
+                    >
+                      Show
+                    </button>
+                    <button
+                      v-else-if="entry.offer && !entry.onDisk"
+                      type="button"
+                      :aria-label="`Install ${entry.name}`"
+                      :disabled="makersLocked || !canDownload"
+                      @click="install(maker.name, entry.offer)"
+                    >
+                      Install
+                    </button>
                   </li>
                 </ul>
               </li>
@@ -2988,6 +3004,7 @@ onBeforeUnmount(() => {
             <p v-if="pickedMakers(makers).length === 1" class="quiet small">One maker always stays picked.</p>
             <p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>
             <p v-if="modelNote" class="small" role="alert">{{ modelNote }}</p>
+            <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
 
             <h3 class="gap-above">Outside models</h3>
             <p class="quiet">A model switched off stays with its maker, and is left out here the same way.</p>
@@ -3014,8 +3031,8 @@ onBeforeUnmount(() => {
               </li>
             </ul>
             <p v-else class="quiet small">
-              No outside engine is added. Add one on the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+              No outside engine is added. Add one under
+              <button class="link in-text" type="button" @click="openTab('installers', 'outside')">Outside engines</button>.
             </p>
             <p v-if="outsideOffNote" class="small" role="alert">{{ outsideOffNote }}</p>
 
@@ -3116,6 +3133,8 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+          </template>
+          <!-- End of Settings -->
         </div>
       </section>
 
@@ -3211,8 +3230,10 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>
             <p class="quiet small">
-              More models, and the outside engines, are on the
-              <button class="link in-text" type="button" @click="openPage('installers')">Installers</button> page.
+              More models are in
+              <button class="link in-text" type="button" @click="openTab('settings', 'models')">Settings, Models</button>, and the
+              outside engines under
+              <button class="link in-text" type="button" @click="openTab('installers', 'outside')">Outside engines</button>.
             </p>
           </div>
           <template v-else>
@@ -4083,12 +4104,125 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-/* The outbound gate: a switch, off until the person turns it on. */
-.gate {
-  display: grid;
-  gap: 0.25rem;
-  padding-top: 0.5rem;
+/* The foot of the side: the two gates, and the gear's menu beside them. It
+   never scrolls, so the switches are always in reach. */
+.side-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.8rem;
   border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.gates {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.gear-wrap {
+  position: relative;
+}
+
+.gear-menu {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 0.3rem);
+}
+
+/* The outbound gate: a switch, off until the person turns it on, and what it
+   means in a tip beside it. */
+.gate {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gate button.switch {
+  width: auto;
+}
+
+.info {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--quiet);
+  border-radius: 50%;
+  color: var(--quiet);
+  font-family: var(--serif);
+  font-size: 0.7rem;
+  font-style: italic;
+  cursor: help;
+}
+
+/* The engine and the stack, a dot each, above the gates. */
+.status-row {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1rem;
+  padding-bottom: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.status .dot {
+  margin-right: 0.1rem;
+}
+
+/* Try the stack again, at the right of the row. */
+.status-row .retry {
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-left: auto;
+}
+
+.tip {
+  overflow-wrap: anywhere;
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: -1rem;
+  z-index: 5;
+  width: 14rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.35;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.info:hover .tip,
+.info:focus .tip {
+  visibility: visible;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tip {
+    transition: none;
+  }
 }
 
 button.switch {
@@ -4418,6 +4552,16 @@ button.switch {
 }
 
 /* Settings: its tabs down the side, and the open one beside them. */
+.tabs-label {
+  margin: 0.9rem 0 0.2rem;
+  padding: 0 0.9rem;
+  color: var(--quiet);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .settings-body:has(> .settings-tabs) {
   width: min(60rem, 100%);
   grid-template-columns: 12rem minmax(0, 1fr);

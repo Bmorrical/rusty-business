@@ -67,7 +67,7 @@ test('the page reads the gate as Rust keeps it, before it asks for anything', ()
 
 test('a switch at the foot of the window turns the gate on and off', () => {
   const app = read(APP);
-  const footer = app.slice(app.indexOf('<div class="gate">'), app.indexOf('</footer>'));
+  const footer = app.slice(app.indexOf('<div class="gate">'), app.indexOf('</aside>'));
   assert.ok(footer, 'the switch is gone from the foot of the window');
   for (const part of ['role="switch"', ':aria-checked="gate"', 'aria-describedby="gate-line"', ':disabled="gateBusy"', '@click="setGate(!gate)"', 'WAN gate', ':aria-checked="lanGate"', 'aria-describedby="lan-gate-line"', ':disabled="lanGateBusy"', '@click="setLanGate(!lanGate)"', 'LAN gate']) {
     assert.ok(footer.includes(part), `the gate's switch has lost ${part}`);
@@ -83,6 +83,37 @@ test('a switch at the foot of the window turns the gate on and off', () => {
   const rule = (selector) => new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`).exec(app)?.[1] ?? '';
   assert.match(rule('.engine'), /min-height: 0;[\s\S]*overflow-y: auto;/, 'the footer cannot scroll, so a short window hides the switch');
   assert.match(rule('.sessions'), /min-height: 5rem;/, 'the footer can squeeze the saved chats out of sight');
+});
+
+// Todd, 2026-11-24: the foot of the side "takes up so much space". The
+// gates stay one click away, each line moves into a tip, and the rest goes
+// under one gear.
+test('the gates stay in sight, each says what it means in a tip, and the rest sits under a gear', () => {
+  const app = read(APP);
+  const foot = app.slice(app.indexOf('<div class="side-foot">'), app.indexOf('</aside>'));
+  assert.ok(foot, 'the side has lost its foot');
+  assert.ok(app.indexOf('</footer>') < app.indexOf('<div class="side-foot">'), 'the gates have moved back into the part that scrolls');
+  const rule = (selector) => new RegExp(`\\n${selector.replace('.', '\\.')} \\{([^}]*)\\}`).exec(app)?.[1] ?? '';
+  assert.doesNotMatch(rule('.side-foot'), /overflow/, 'the foot scrolls, so a short window can hide a gate');
+
+  for (const [id, name] of [['gate-line', 'WAN'], ['lan-gate-line', 'LAN']]) {
+    assert.ok(foot.includes(`aria-label="About the ${name} gate"`), `the ${name} gate has lost its tip`);
+    assert.ok(foot.includes(`<span id="${id}" class="tip" role="tooltip">`), `the ${name} gate's line is not in its tip, so the switch no longer describes it`);
+  }
+  assert.match(rule('.info:hover .tip,\n.info:focus .tip'), /visibility: visible;/, 'a tip never shows');
+
+  const gear = foot.slice(foot.indexOf('<div class="gear-wrap">'));
+  for (const part of ['aria-haspopup="menu"', ':aria-expanded="gearOpen"', '@click="gearOpen = !gearOpen"', 'aria-label="Settings and tools"']) {
+    assert.ok(gear.includes(part), `the gear has lost ${part}`);
+  }
+  // Installers and Utilities are tabs of Settings, so the gear holds three.
+  const order = ["togglePage('workflow')", "togglePage('settings')", '@click="checkNow"'].map((part) => gear.indexOf(part));
+  assert.ok(order.every((at) => at > 0), 'the gear no longer holds every page and Check for updates');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'the gear lists its items out of order');
+  assert.ok(!foot.slice(0, foot.indexOf('<div class="gear-wrap">')).includes('togglePage('), 'a page button sits outside the gear again');
+
+  assert.match(functionOf(app, 'onWindowKey'), /gearOpen\.value = false;/, 'Escape no longer shuts the gear');
+  assert.match(functionOf(app, 'onWindowClick'), /if \(gearOpen\.value && !event\.target\.closest\?\.\("\.gear"\)\) gearOpen\.value = false;/, 'a click elsewhere no longer shuts the gear');
 });
 
 test('LAN and WAN switches independently control model discovery, providers, and installs', async () => {
