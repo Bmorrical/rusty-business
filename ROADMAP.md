@@ -25,7 +25,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   rulesheet says. Each step has a label on a label workflow that says
   who holds the ball, and when that party is done, the orchestrator
   moves the label and hands the ball to the next one. Watching those
-  labels and moving them is the orchestrator's job. When the work comes back as a pull request,
+  labels and moving them is the orchestrator's job. It sets a drift
+  threshold on its runners, the models it hands stories to, as the
+  rulesheet says. A runner that runs past it has its build rejected, and
+  the orchestrator is told to split the story into more shards. When the
+  work comes back as a pull request,
   Copilot
   takes over on GitHub: it keeps the stacks of pull requests in order and
   reviews a stack once it is ready. The orchestrator sends each review

@@ -163,8 +163,10 @@ test('the engine for Windows is next, inside the installer, and is llama.cpp', (
 // listening to me, it never merges to main or has the capability to. in fact
 // it doesn't merge anything", "the story may go to local, lan, or wan", and
 // Copilot "does not merge into main only I do that". Then: "roadmap it all,
-// descript is more general as this will grow".
-test('the orchestrator, run by your rulesheet, is first in Next, and merges nothing', () => {
+// descript is more general as this will grow". And: "it sets a drift threshold
+// on runners, if they run past that that build is rejected and it tells the
+// orchistrator to split into more shards".
+test('the orchestrator, run by your rulesheet, is first in Next, rejects a build past its drift threshold, and merges nothing', () => {
   const [first] = itemsOf(section('Next').body);
   assert.equal(first.title, 'The orchestrator, run by your rulesheet.', 'the orchestrator is not first in Next');
   const text = first.text.replace(/\s+/g, ' ');
@@ -178,6 +180,9 @@ test('the orchestrator, run by your rulesheet, is first in Next, and merges noth
   assert.match(text, /a label workflow that says who holds the ball/);
   assert.match(text, /hands the ball to the next one/);
   assert.match(text, /Watching those labels and moving them is the orchestrator's job/);
+  assert.match(text, /It sets a drift threshold on its runners, the models it hands stories to/);
+  assert.match(text, /A runner that runs past it has its build rejected/);
+  assert.match(text, /the orchestrator is told to split the story into more shards/);
   assert.match(text, /The orchestrator merges nothing, and only you merge into main/);
   const done = itemsOf(section('Done').body).map((item) => item.title);
   assert.ok(!done.includes('The orchestrator, run by your rulesheet.'), 'it is called done before it is built');
