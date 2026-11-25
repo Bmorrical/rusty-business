@@ -116,7 +116,8 @@ Select the picture to open it full size. The rest of the set is in
 - **The stack, started by the app.** When the stack's front door is not
   answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a
-  few minutes. The footer says where the stack answers, or why it is not
+  few minutes. A dot at the foot of the side shows the stack, as another
+  shows the engine, and its tip says where it answers, or why it is not
   running. As with the engine, it starts only what is missing, and when the
   app quits it stops only a stack it started. The app does not install
   Docker; the chat does not need the stack yet.

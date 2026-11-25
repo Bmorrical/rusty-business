@@ -130,6 +130,7 @@ const ICONS = {
   side: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2ZM9 3v18",
   settings: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  retry: "M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6",
   up: "M12 19V5M5 12l7-7 7 7",
   chevron: "m6 9 6 6 6-6",
   back: "m15 18-6-6 6-6",
@@ -385,6 +386,10 @@ const installGateBusy = computed(() => (lanEngine.value ? lanGateBusy.value : ga
 const installGateName = computed(() => (lanEngine.value ? "LAN gate" : "WAN gate"));
 const canDownload = computed(() => installGateOpen.value && (!lanEngine.value || engine.value.reachable));
 const unseenNote = computed(() => unseenLine(engine.value, off.value, engineAddress.value));
+// The engine's footer shows only what a person can act on: no engine yet,
+// the LAN gate off, an engine not answering, or models it does not list. An
+// engine that answers is a dot at the foot of the side.
+const engineWords = computed(() => !engine.value || (lanEngine.value && !lanGate.value) || !engine.value.reachable || Boolean(unseenNote.value));
 const unseenChip = computed(() => unseenShort(engine.value, off.value));
 const displayMakers = computed(() => {
   if (!lanEngine.value) return markUnseen(makers.value, engine.value);
@@ -2277,24 +2282,16 @@ onBeforeUnmount(() => {
         </template>
       </nav>
 
-      <footer class="engine" aria-live="polite">
+      <footer v-if="engineWords" class="engine" aria-live="polite">
         <template v-if="!engine">
           <p class="quiet">Looking for the engine...</p>
         </template>
         <p v-else-if="lanEngine && !lanGate" class="quiet small">Turn on the LAN gate to connect to your server.</p>
         <template v-else-if="engine.reachable">
-          <p><span class="dot on" aria-hidden="true"></span>{{ engine.name }} on {{ engineAddress }}</p>
-          <template v-if="unseenNote">
-            <p id="engine-unseen" class="small">{{ unseenNote }}</p>
-            <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
-              {{ checking ? "Checking..." : "Check again" }}
-            </button>
-          </template>
-          <p v-else-if="startedElsewhere(engine)" class="quiet small">This window did not start this engine.</p>
-          <p v-if="engine.hidden" class="quiet small">
-            {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
-            {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
-          </p>
+          <p id="engine-unseen" class="small">{{ unseenNote }}</p>
+          <button class="wide" type="button" aria-describedby="engine-unseen" :disabled="checking" @click="checkEngine">
+            {{ checking ? "Checking..." : "Check again" }}
+          </button>
         </template>
         <template v-else>
           <p id="engine-error"><span class="dot off" aria-hidden="true"></span>{{ engine.error }}</p>
@@ -2314,16 +2311,44 @@ onBeforeUnmount(() => {
             {{ checking ? "Checking..." : "Try again" }}
           </button>
         </template>
-        <p v-if="stackStarting" class="quiet small">{{ stackLine(stack, true) }}</p>
-        <p v-else-if="stack?.running"><span class="dot on" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-        <template v-else-if="stack">
-          <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
-          <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
-        </template>
       </footer>
 
       <!-- The gates and the gear stay in sight, outside the part that scrolls. -->
       <div class="side-foot">
+        <!-- The engine and the stack: a dot each, and what it means in a tip. -->
+        <div v-if="engine?.reachable || stack || stackStarting" class="status-row">
+          <span v-if="engine?.reachable" class="status">
+            <span class="dot on" aria-hidden="true"></span>{{ engine.name }}
+            <span class="info" tabindex="0" aria-label="About the engine" aria-describedby="engine-line">
+              <span aria-hidden="true">i</span>
+              <span id="engine-line" class="tip" role="tooltip">
+                {{ engine.name }} on {{ engineAddress }}.
+                <template v-if="startedElsewhere(engine)"> This window did not start this engine.</template>
+                <template v-if="engine.hidden">
+                  {{ engine.hidden }} other {{ engine.hidden === 1 ? "model" : "models" }} on this engine
+                  {{ engine.hidden === 1 ? "is" : "are" }} not on this app's list.
+                </template>
+              </span>
+            </span>
+          </span>
+          <span v-if="stack || stackStarting" class="status">
+            <span class="dot" :class="stackStarting ? 'live' : stack?.running ? 'on' : 'off'" aria-hidden="true"></span>Stack
+            <span class="info" tabindex="0" aria-label="About the stack" aria-describedby="stack-line">
+              <span aria-hidden="true">i</span>
+              <span id="stack-line" class="tip" role="tooltip">{{ stackLine(stack, stackStarting) }}</span>
+            </span>
+            <button
+              v-if="!stackStarting && stack && !stack.running && gate"
+              class="icon small-icon"
+              type="button"
+              aria-label="Try the stack again"
+              title="Try the stack again"
+              @click="checkStack"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.retry" /></svg>
+            </button>
+          </span>
+        </div>
         <div class="gates">
           <div class="gate">
             <button
@@ -4083,6 +4108,7 @@ kbd {
    never scrolls, so the switches are always in reach. */
 .side-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.5rem;
   padding: 0.5rem 1rem 0.8rem;
@@ -4135,7 +4161,36 @@ kbd {
   cursor: help;
 }
 
+/* The engine and the stack, a dot each, above the gates. */
+.status-row {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 1rem;
+  padding-bottom: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.status .dot {
+  margin-right: 0.1rem;
+}
+
+.status .small-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
 .tip {
+  overflow-wrap: anywhere;
   position: absolute;
   bottom: calc(100% + 0.4rem);
   left: -1rem;
