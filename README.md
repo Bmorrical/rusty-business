@@ -41,7 +41,7 @@ a private-network llama-server you configure. Turn on the LAN gate to use
 that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
 Gemini with your own keys.
 
-**Status:** version 0.8.4, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.5, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux). The Mac and
