@@ -435,7 +435,10 @@ async function takePicture(send, address, scene, engine, sessions) {
   }
   if (scene.page) {
     const label = JSON.stringify(PAGE_BUTTONS[scene.page]);
-    await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${label}).click()`);
+    // The pages sit under the gear at the foot of the side.
+    await inPage(send, tab, `document.querySelector('.gear').click()`);
+    await until(send, tab, `document.querySelector('.gear-menu') !== null`, "the gear's menu");
+    await inPage(send, tab, `[...document.querySelectorAll('.gear-menu button')].find((button) => button.textContent.trim() === ${label}).click()`);
     if (scene.tab) {
       const name = JSON.stringify(scene.tab);
       await until(send, tab, `document.querySelector('.settings-tabs') !== null`, "the page's tabs");

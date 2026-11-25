@@ -133,7 +133,7 @@ test('Settings adds or removes a maker in one click, and is reached from the foo
   }
   assert.match(settings, /Removing a maker leaves its\s+models on this computer\./, 'Settings no longer says removing a maker deletes nothing');
 
-  const foot = app.slice(app.indexOf('<footer class="engine"'), app.indexOf('</footer>', app.indexOf('<footer class="engine"')));
+  const foot = app.slice(app.indexOf('<div class="side-foot">'), app.indexOf('</aside>'));
   const settingsButton = foot.indexOf('@click="togglePage(\'settings\')"');
   assert.ok(settingsButton >= 0, 'the foot of the window has lost its Settings button');
   assert.ok(settingsButton < foot.indexOf('Check for updates'), 'Settings no longer sits above Check for updates');

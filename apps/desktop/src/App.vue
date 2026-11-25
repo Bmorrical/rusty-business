@@ -243,6 +243,8 @@ const query = ref("");
 const found = ref([]);
 const searchBox = ref(null);
 const menuFor = ref("");
+// The gear's menu at the foot of the side: open or shut.
+const gearOpen = ref(false);
 const settingsTab = ref("memory");
 // "start a grouping, maybe tabbed screens, for each "type" collections of
 // models, they can exists in more than one tab where applicable."
@@ -1938,13 +1940,15 @@ function onWindowKey(event) {
     event.preventDefault();
     sideOpen.value = true;
     nextTick(() => searchBox.value?.focus());
-  } else if (event.key === "Escape" && menuFor.value) {
+  } else if (event.key === "Escape" && (menuFor.value || gearOpen.value)) {
     menuFor.value = "";
+    gearOpen.value = false;
   }
 }
 
 function onWindowClick(event) {
   if (menuFor.value && !event.target.closest?.(".menu, .more")) menuFor.value = "";
+  if (gearOpen.value && !event.target.closest?.(".gear")) gearOpen.value = false;
 }
 
 function resizeComposer() {
@@ -2301,75 +2305,102 @@ onBeforeUnmount(() => {
           <p id="stack-reason"><span class="dot off" aria-hidden="true"></span>{{ stackLine(stack, false) }}</p>
           <button v-if="gate" class="wide" type="button" aria-describedby="stack-reason" @click="checkStack">Try again</button>
         </template>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'workflow' ? 'page' : undefined"
-          @click="togglePage('workflow')"
-        >
-          Workflow
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'installers' ? 'page' : undefined"
-          @click="togglePage('installers')"
-        >
-          Installers
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'utilities' ? 'page' : undefined"
-          @click="togglePage('utilities')"
-        >
-          Utilities
-        </button>
-        <button
-          class="wide"
-          type="button"
-          :aria-current="page === 'settings' ? 'page' : undefined"
-          @click="togglePage('settings')"
-        >
-          Settings
-        </button>
-        <button class="wide" type="button" :disabled="updateChecking" @click="checkNow">
-          {{ updateChecking ? "Checking..." : "Check for updates" }}
-        </button>
-        <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
-        <div class="gate">
-          <button
-            class="switch"
-            type="button"
-            role="switch"
-            :aria-checked="gate"
-            aria-describedby="gate-line"
-            :disabled="gateBusy"
-            @click="setGate(!gate)"
-          >
-            <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            WAN gate
-          </button>
-          <p id="gate-line" class="quiet small">{{ gateLine(gate) }}</p>
-          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
-        </div>
-        <div class="gate">
-          <button
-            class="switch"
-            type="button"
-            role="switch"
-            :aria-checked="lanGate"
-            aria-describedby="lan-gate-line"
-            :disabled="lanGateBusy"
-            @click="setLanGate(!lanGate)"
-          >
-            <span class="track" aria-hidden="true"><span class="knob"></span></span>
-            LAN gate
-          </button>
-          <p id="lan-gate-line" class="quiet small">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</p>
-          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
-        </div>
       </footer>
+
+      <!-- The gates and the gear stay in sight, outside the part that scrolls. -->
+      <div class="side-foot">
+        <div class="gates">
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="gate"
+              aria-describedby="gate-line"
+              :disabled="gateBusy"
+              @click="setGate(!gate)"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              WAN gate
+            </button>
+            <span class="info" tabindex="0" aria-label="About the WAN gate">
+              <span aria-hidden="true">i</span>
+              <span id="gate-line" class="tip" role="tooltip">{{ gateLine(gate) }}</span>
+            </span>
+          </div>
+          <p v-if="gateNote" class="small" role="alert">{{ gateNote }}</p>
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="lanGate"
+              aria-describedby="lan-gate-line"
+              :disabled="lanGateBusy"
+              @click="setLanGate(!lanGate)"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              LAN gate
+            </button>
+            <span class="info" tabindex="0" aria-label="About the LAN gate">
+              <span aria-hidden="true">i</span>
+              <span id="lan-gate-line" class="tip" role="tooltip">{{ lanGate ? "Your LAN server can list models, answer chats, and handle installs." : "Connections to your LAN server are blocked." }}</span>
+            </span>
+          </div>
+          <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
+          <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
+        </div>
+        <div class="gear-wrap">
+          <button
+            class="icon gear"
+            type="button"
+            aria-label="Settings and tools"
+            title="Settings and tools"
+            aria-haspopup="menu"
+            :aria-expanded="gearOpen"
+            @click="gearOpen = !gearOpen"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.settings" /></svg>
+          </button>
+          <div v-if="gearOpen" class="menu gear-menu" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="page === 'workflow' ? 'page' : undefined"
+              @click="togglePage('workflow')"
+            >
+              Workflow
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="page === 'installers' ? 'page' : undefined"
+              @click="togglePage('installers')"
+            >
+              Installers
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="page === 'utilities' ? 'page' : undefined"
+              @click="togglePage('utilities')"
+            >
+              Utilities
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              :aria-current="page === 'settings' ? 'page' : undefined"
+              @click="togglePage('settings')"
+            >
+              Settings
+            </button>
+            <button type="button" role="menuitem" :disabled="updateChecking" @click="checkNow">
+              {{ updateChecking ? "Checking..." : "Check for updates" }}
+            </button>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <main class="main">
@@ -4083,12 +4114,93 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-/* The outbound gate: a switch, off until the person turns it on. */
-.gate {
-  display: grid;
-  gap: 0.25rem;
-  padding-top: 0.5rem;
+/* The foot of the side: the two gates, and the gear's menu beside them. It
+   never scrolls, so the switches are always in reach. */
+.side-foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.8rem;
   border-top: 1px solid var(--line);
+  font-size: 0.82rem;
+}
+
+.gates {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.gear-wrap {
+  position: relative;
+}
+
+.gear-menu {
+  top: auto;
+  right: 0;
+  bottom: calc(100% + 0.3rem);
+}
+
+/* The outbound gate: a switch, off until the person turns it on, and what it
+   means in a tip beside it. */
+.gate {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gate button.switch {
+  width: auto;
+}
+
+.info {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--quiet);
+  border-radius: 50%;
+  color: var(--quiet);
+  font-family: var(--serif);
+  font-size: 0.7rem;
+  font-style: italic;
+  cursor: help;
+}
+
+.tip {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: -1rem;
+  z-index: 5;
+  width: 14rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-style: normal;
+  line-height: 1.35;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.info:hover .tip,
+.info:focus .tip {
+  visibility: visible;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tip {
+    transition: none;
+  }
 }
 
 button.switch {

@@ -47,7 +47,7 @@ function pageOf(app, name) {
 test('the side bar opens the Installers page, above Settings and Check for updates', () => {
   // Brad, 2026-11-17: "one click from an installers page would be good".
   const app = read(APP);
-  const foot = app.slice(app.indexOf('<footer class="engine"'), app.indexOf('</footer>', app.indexOf('<footer class="engine"')));
+  const foot = app.slice(app.indexOf('<div class="side-foot">'), app.indexOf('</aside>'));
   const installers = foot.indexOf(`@click="togglePage('installers')"`);
   const settings = foot.indexOf(`@click="togglePage('settings')"`);
   assert.ok(installers >= 0, 'the side bar has lost its Installers button');

@@ -291,6 +291,9 @@ test('each scene is a picture the script can make', () => {
     if (scene.open) assert.ok(ids.includes(scene.open), `${scene.file} opens a recorded chat`);
     if (scene.page) {
       assert.ok(scene.page in PAGE_BUTTONS, `${scene.file} opens a page the side bar has a button for`);
+      const script = read('scripts/screenshots.mjs');
+      assert.ok(script.includes("document.querySelector('.gear').click()"), 'the script looks for a page button without opening the gear');
+      assert.ok(script.includes("document.querySelectorAll('.gear-menu button')"), "the script looks for the page's button outside the gear's menu");
       assert.ok(!scene.open, `${scene.file} opens a page, not a chat`);
     }
     if (scene.tab) {
