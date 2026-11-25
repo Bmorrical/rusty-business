@@ -142,6 +142,28 @@ test('the engine for Windows is next, inside the installer, and is llama.cpp', (
   assert.ok(!later.includes('An engine for Windows.'), 'the engine is still in Later');
 });
 
+// Brad, 2026-11-25: "don't build it yet, in a x4 gpu rig, or even 1 slice of
+// that. I can assign a model to a worker node, or logically split it's
+// resource parts. this requires containerization, and heavy orchistration.
+// mark it next to do". Then: "this is extension of LAN capabilities", "so if
+// I had 4 hardware slices I could run 1 model on each one", and "asynch". So
+// it is first in Next, on your own network behind the LAN gate, one model to
+// each GPU or slice in its own container, and each answers without waiting.
+test('many models at once, on your own network, is first in Next, one model to each slice', () => {
+  const [first] = itemsOf(section('Next').body);
+  assert.equal(first.title, 'Many models at once, on your own network.', 'many models at once is not first in Next');
+  assert.match(first.text, /your private\s+network/);
+  assert.match(first.text, /hardware slices/);
+  assert.match(first.text, /one\s+model on each GPU or slice/);
+  assert.match(first.text, /a container of its own/);
+  assert.match(first.text, /only with\s+the LAN gate on/);
+  assert.match(first.text, /at the\s+same time/);
+  assert.match(first.text, /none waits for another/);
+  assert.match(first.text, /the app only asks the workers on its list/);
+  const done = itemsOf(section('Done').body).map((item) => item.title);
+  assert.ok(!done.includes('Many models at once, on your own network.'), 'it is called done before it is built');
+});
+
 test('the engine for Linux is done, inside the packages, and is llama.cpp', () => {
   const linux = itemsOf(section('Done').body).find((item) => item.title === 'An engine for Linux.');
   assert.ok(linux, 'the roadmap does not have the Linux engine done');
