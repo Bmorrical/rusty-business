@@ -14,21 +14,25 @@ alone. A release that is out is never changed, so their notes are here.
 
 No version went out as 0.1.0, 0.4.0, or 0.8.2.
 
-## 0.8.5
+## 0.8.6
 
 **New**
 
 - **HEIC to JPEG says what it saved, and where.** Each copy is read back from its folder before the list calls it saved. Once nothing is left to convert, a box says how many JPEGs were saved and found, in which folder, and whether where each picture was taken was kept or left out. Each folder has its own Show in the Finder button, and a picture that failed is named, with why.
+
+## 0.8.5
+
+Released 2026-11-25.
+
+**Fixed**
+
+- **No false warning about a picture model.** With Phi-3.5 Vision installed, the app no longer says the engine does not list it. Picture models run on the picture engine, so the chat engine leaves them out on purpose.
 
 **Changed**
 
 - **A tidier side bar.** The WAN and LAN gate switches stay at the foot of the side, and each gate's line moves into an ⓘ tip. Workflow, Settings, and Check for updates sit under one gear.
 - **One Settings page.** Installers and Utilities are now tabs of Settings. Settings, Models installs, shows, turns on or off, and uninstalls each chat model, so the Installers' Chat tab is gone and Installers opens on Pictures.
 - **Status dots.** The engine and the stack each show a green or red dot, with their line in a tip. A button tries the stack again. The engine's footer shows only what you can act on.
-
-**Fixed**
-
-- **No false warning about a picture model.** With Phi-3.5 Vision installed, the app no longer says the engine does not list it. Picture models run on the picture engine, so the chat engine leaves them out on purpose.
 
 ## 0.8.4
 
