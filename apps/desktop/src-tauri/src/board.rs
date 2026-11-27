@@ -40,6 +40,12 @@ const LINE: u32 = 2;
 pub const DRAFTS_FORMAT: &str = "board drafts v1";
 /// The format of the file that says where a board's shared file is kept.
 pub const SOURCE_FORMAT: &str = "board source v1";
+/// What the runners wrote for a board's slices: kept on this computer, in
+/// the board's own database, and never in the board's file.
+pub const WORK_FORMAT: &str = "board work v1";
+/// The most of one runner's work that is kept, in bytes. Past it, the work
+/// is cut, and says so.
+pub(crate) const WORK_LIMIT: usize = 64 * 1024;
 
 /// The five lanes a slice goes through, in order. A slice's `lane` is the
 /// last one it has been through; empty means none yet.
@@ -81,6 +87,11 @@ fn zero(number: &u64) -> bool {
 /// The made-up board the app carries, so the view has something to show
 /// before a board of the person's own arrives.
 const SAMPLE: &str = include_str!("../sample-board.json");
+
+/// What a runner's work says when keeping it would take a board's work past
+/// the size cap.
+const WORK_FULL: &str =
+    "The work kept for this board would be larger than 4 MB, so this slice's was not kept.";
 
 /// What a note says when one more would take the notes past the size cap.
 const NOTES_FULL: &str =
@@ -357,6 +368,30 @@ pub struct Drafts {
     pub format: String,
     #[serde(default)]
     pub stories: BTreeMap<u64, StoryDraft>,
+}
+
+/// What a runner wrote for one slice, and how long it took.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Work {
+    pub model: String,
+    pub took_ms: u64,
+    /// When it was kept, in milliseconds since 1970.
+    pub at: u64,
+    pub text: String,
+    /// True when the work was longer than the most that is kept, and cut.
+    #[serde(default)]
+    pub cut: bool,
+}
+
+/// Every slice's work on one board, by "story/slice".
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Works {
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    slices: BTreeMap<String, Work>,
 }
 
 /// A board as the view shows it: the snapshot, and the drafts beside it.
@@ -814,6 +849,7 @@ impl Boards {
             Kind::Drafts => self.drafts_dir(),
             Kind::Synced => self.synced_dir(),
             Kind::Source => self.sources_dir(),
+            Kind::Work => self.work_dir(),
         }
     }
 
@@ -825,6 +861,7 @@ impl Boards {
             Kind::Drafts => self.drafts_file(id),
             Kind::Synced => self.base_file(id),
             Kind::Source => self.source_file(id),
+            Kind::Work => self.work_file(id),
         }
     }
 
@@ -908,6 +945,11 @@ impl Boards {
         self.dir.join("sources")
     }
 
+    /// What the runners wrote for each board's slices.
+    fn work_dir(&self) -> PathBuf {
+        self.dir.join("work")
+    }
+
     fn ready(&self) -> Result<(), String> {
         if self.store.is_some() {
             return Ok(());
@@ -917,6 +959,7 @@ impl Boards {
             self.drafts_dir(),
             self.synced_dir(),
             self.sources_dir(),
+            self.work_dir(),
         ] {
             fs::create_dir_all(&dir).map_err(failed("Could not open the boards folder"))?;
             own(&dir, 0o700);
@@ -950,6 +993,13 @@ impl Boards {
             return Err("That is not a board.".to_string());
         }
         Ok(self.sources_dir().join(format!("{id}.json")))
+    }
+
+    fn work_file(&self, id: &str) -> Result<PathBuf, String> {
+        if !valid_id(id) {
+            return Err("That is not a board.".to_string());
+        }
+        Ok(self.work_dir().join(format!("{id}.json")))
     }
 
     /// Whether anything is at a path. A link counts, wherever it leads.
@@ -1352,6 +1402,59 @@ impl Boards {
         }
         let drafts = self.read_drafts(id)?;
         Ok((said, Local { board, drafts }))
+    }
+
+    fn read_works(&self, id: &str) -> Result<Works, String> {
+        let Some(text) = self.fetch(Kind::Work, id, "Could not read the runners' work")? else {
+            return Ok(Works::default());
+        };
+        serde_json::from_str(&text)
+            .map_err(|error| format!("Could not read the runners' work: {error}."))
+    }
+
+    /// What a runner last wrote for a slice, or `None` when none has.
+    pub fn work(&self, id: &str, story: u64, slice: &str) -> Result<Option<Work>, String> {
+        self.path(Kind::Work, id)?;
+        Ok(self
+            .read_works(id)?
+            .slices
+            .remove(&format!("{story}/{slice}")))
+    }
+
+    /// Keeps what a runner wrote for a slice, in place of what it wrote
+    /// before. Work past `WORK_LIMIT` is cut, and says so. The board and the
+    /// drafts are not touched.
+    pub fn keep_work(
+        &self,
+        id: &str,
+        story: u64,
+        slice: &str,
+        mut work: Work,
+    ) -> Result<Work, String> {
+        self.path(Kind::Work, id)?;
+        if work.text.len() > WORK_LIMIT {
+            let mut end = WORK_LIMIT;
+            while !work.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            work.text.truncate(end);
+            work.cut = true;
+        }
+        work.at = now_ms();
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut works = self.read_works(id)?;
+        works.format = WORK_FORMAT.to_string();
+        works
+            .slices
+            .insert(format!("{story}/{slice}"), work.clone());
+        let json = serde_json::to_string_pretty(&works)
+            .map_err(|_| "Could not write the runner's work.".to_string())?;
+        if json.len() as u64 > SIZE_LIMIT {
+            return Err(WORK_FULL.to_string());
+        }
+        self.put(Kind::Work, id, &json, "Could not keep the runner's work")?;
+        Ok(work)
     }
 
     /// Opens the made-up sample board. The first time, it is put in the

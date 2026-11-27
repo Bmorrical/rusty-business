@@ -564,7 +564,8 @@ next.
   which also keeps the two in step, or put in the boards folder. The view
   moves a slice from lane to lane under the rules, but cannot add a story
   or a slice, or change their words, yet. (On the roadmap: Slices you can
-  write.)
+  write.) It can hand a slice to a model on this computer or your network,
+  kept to its time limit, which writes it into written.
 - **A board moves as a file.** [BOARD.md](BOARD.md) is the file's ruleset:
   what it holds, each rule, and why, so anyone can bring in a road of their
   own and build the other side. No direct API connection to a board's

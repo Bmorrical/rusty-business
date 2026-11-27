@@ -7,7 +7,7 @@
 // Rust keeps the boards, and its tests in board.rs check how it behaves. The
 // page's reading of a board has its tests in board.test.js. These fail when
 // the side loses its Workflow button, when the view asks Rust for anything
-// but its four commands or a command takes a path, when the view or the store
+// but its own commands or a command takes a path, when the view or the store
 // gains a way to reach past this computer, to delete a file, or to start a
 // program, when a file could be written in one step, when a note could be
 // left behind, when one board that cannot be opened could hide the rest,
@@ -86,8 +86,11 @@ const NO_API = [
 /** Everything the view asks of Rust. */
 const COMMANDS = ['list_boards', 'load_board', 'open_sample_board', 'save_board_note'];
 
-/** What the view asks of the rules: to move a slice. scripts/rules.test.mjs checks it. */
-const RULE_COMMANDS = ['move_slice'];
+/** What the view asks of the rules: to move a slice, and the time limit. scripts/rules.test.mjs checks it. */
+const RULE_COMMANDS = ['move_slice', 'rules_status'];
+
+/** What the view asks of the runners: a slice handed to a model. scripts/runners.test.mjs checks it. */
+const RUNNER_COMMANDS = ['run_slice', 'stop_run', 'runs_going', 'slice_work'];
 
 /** What a command may take from the page: a board's id, a story's number, and a note. */
 const TAKEN = ['id: String', 'story: u64', 'text: String'];
@@ -240,11 +243,11 @@ test('the side has a Workflow button, and it opens the view in place of the chat
   assert.ok(early < open.indexOf('await '), 'opening Workflow asks Rust before it stops');
 });
 
-test('the view asks Rust for five things, and each is a command the app offers', () => {
+test('the view asks Rust for eleven things, and each is a command the app offers', () => {
   const view = read(VIEW);
   const asked = [...view.matchAll(/invoke\(\s*"([a-z_]+)"/g)].map((match) => match[1]);
   assert.equal(count(view, 'invoke('), asked.length, 'the view calls a command it does not name');
-  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS, ...RULE_COMMANDS].sort(), 'the view asks Rust for something else');
+  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS, ...RULE_COMMANDS, ...RUNNER_COMMANDS].sort(), 'the view asks Rust for something else');
 
   const lib = read(LIB);
   const store = code(read(STORE));
@@ -256,6 +259,7 @@ test('the view asks Rust for five things, and each is a command the app offers',
   assert.equal(count(store, '#[tauri::command]'), COMMANDS.length, 'the store offers a command the view does not use');
   assert.equal(count(lib, 'board::'), COMMANDS.length + 1, `${LIB} offers a board command this check does not know`);
   for (const name of RULE_COMMANDS) assert.ok(lib.includes(`rules::${name},`), `the app does not offer ${name}`);
+  for (const name of RUNNER_COMMANDS) assert.ok(lib.includes(`runners::${name},`), `the app does not offer ${name}`);
 });
 
 // Brad, 2026-11-20: "offline first, security second".
@@ -277,15 +281,15 @@ test('no command takes a path from the page, and an id cannot name one', () => {
     /fn valid_id\(id: &str\) -> bool \{\s+!id\.is_empty\(\) && id\.len\(\) <= 64 && id\.chars\(\)\.all\(\|c\| c\.is_ascii_alphanumeric\(\) \|\| c == '-'\)\s+\}/,
     'an id may hold more than letters, digits, and hyphens',
   );
-  // All four files of a board are found through the id check, and nowhere else.
-  for (const name of ['snapshot', 'drafts_file', 'base_file', 'source_file']) {
+  // All five files of a board are found through the id check, and nowhere else.
+  for (const name of ['snapshot', 'drafts_file', 'base_file', 'source_file', 'work_file']) {
     const start = store.indexOf(`fn ${name}(&self, id: &str)`);
     assert.ok(start >= 0, `${STORE} has no ${name}`);
     const body = store.slice(start, store.indexOf('\n    }', start));
     assert.ok(body.indexOf('if !valid_id(id)') >= 0, `${name} skips the id check`);
     assert.ok(body.indexOf('if !valid_id(id)') < body.indexOf('.join('), `${name} builds the path before it checks the id`);
   }
-  assert.equal(count(store, 'format!("{id}.json")'), 4, 'a board file is named somewhere the id check does not cover');
+  assert.equal(count(store, 'format!("{id}.json")'), 5, 'a board file is named somewhere the id check does not cover');
 });
 
 test('the view and the store have no way past this computer, delete nothing, and start nothing', () => {
@@ -425,7 +429,7 @@ test('a note is never left behind', () => {
   assert.ok(view.includes('@click="leave">Back to the chat</button>'), '"Back to the chat" leaves without saving the note');
   assert.match(functionOf(view, 'leave'), /if \(await saveNote\(\)\) emit\("close"\);/, 'the view closes on a note it could not save');
   assert.equal(count(view, 'emit("close")') + count(view, "emit('close')"), 1, 'the view closes some other way');
-  assert.match(view, /onBeforeUnmount\(\(\) => \{\s+saveNote\(\);\s+\}\);/, 'a note is not saved when the view goes');
+  assert.match(view, /onBeforeUnmount\(\(\) => \{(?:\s+\/\/[^\n]*)*\s+window\.clearInterval\(ticking\);\s+saveNote\(\);\s+\}\);/, 'a note is not saved when the view goes');
 
   // Another story, another board, or the sample opens only once the note is safe.
   const pick = functionOf(view, 'pickStory');

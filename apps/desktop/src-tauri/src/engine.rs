@@ -1021,6 +1021,31 @@ pub(crate) async fn courier_ask(
     chat_on_engine(&base, lan, chats, &request, stopped, emit).await
 }
 
+/// A runner's slice, put to the chat engine on this computer or on the LAN.
+/// The runner's clock starts only once it holds the turn, so time spent
+/// waiting behind another model never counts against it (`runners.rs`).
+pub(crate) async fn runner_ask(
+    lan: &LanGate,
+    chats: &Chats,
+    request: &ChatRequest,
+    cut_off: Option<Duration>,
+    stopped: &mut watch::Receiver<bool>,
+    emit: impl FnMut(ChatEvent),
+) -> Result<crate::runners::Timed, String> {
+    let base = base_url()?;
+    let ask = async {
+        let Some(_turn) = wait_for_turn(&chats.turn, stopped).await else {
+            return Ok(crate::runners::Timed::stopped());
+        };
+        crate::runners::timed(cut_off, run_chat(&base, request, stopped, emit)).await
+    };
+    if is_remote(&base) {
+        lan.run(ask).await
+    } else {
+        ask.await
+    }
+}
+
 /// Where a chat goes: an engine outside this computer, a server on the rig,
 /// or the engine here or on the LAN in its turn.
 #[allow(clippy::too_many_arguments)]

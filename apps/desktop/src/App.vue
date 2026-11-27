@@ -2678,6 +2678,7 @@ onBeforeUnmount(() => {
         :wan="gate"
         :lan="lanGate"
         :side-open="sideOpen"
+        :models="models"
         @close="closePage"
         @side="sideOpen = true"
       />

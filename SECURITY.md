@@ -148,6 +148,13 @@ I want to hear about:
   switch, but this one does not: no model, check, or reviewer moves a slice
   into main, and the app never merges. The switches are kept in a file only
   you can read.
+- **A slice goes only to a model here.** A slice is handed only to a model
+  on this computer, on your network, or on your rig. Direct API connections
+  are refused. The rules are checked before the model is asked and again
+  once it is done, and a model only ever moves a slice into written. A
+  runner is stopped at its time limit, and nothing it wrote is kept. What a
+  runner writes is kept in the app's own store, beside the board, cut to
+  64 KB, and readable by you only; it never goes into the board's file.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only. The courier

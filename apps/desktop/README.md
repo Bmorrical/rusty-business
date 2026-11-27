@@ -372,6 +372,30 @@ hands the move to you, and adds a note saying so.
 Every rule starts on. A rule only ever stops a move, and none reaches past
 this computer.
 
+## Runners
+
+A slice whose next lane is written can be handed to a model, a runner, from
+the open slice in the Workflow view: pick a model, then **Hand it to a
+model**. The runner writes the work the slice asks for, and the slice moves
+into written, for the check.
+
+- **Only a model here.** The list holds the models you turned on that are
+  on this computer, on your network, or on your rig, and that write words.
+  A model outside this computer is never a runner: direct API connections
+  are refused, as a rule for now.
+- **The rules first, and again after.** A move the rules would refuse is
+  refused before the model is asked. Once the model is done, the move is
+  checked again, with how long it took.
+- **The clock.** While a runner writes, the view shows how long it has
+  taken, and the limit while the time rule is on. At the limit, and a second
+  more, the runner is stopped: it has drifted, nothing it wrote is kept, and
+  the slice goes back to you. **Stop** stops it sooner, and keeps nothing.
+- **One at a time.** Only one runner writes a slice at a time. A runner goes
+  on when you close the view, and what it writes is kept.
+- **Where the work is kept.** What a runner wrote is kept in the app's own
+  store, beside the board, cut to 64 KB, readable by you only, and never in
+  the board's file. The open slice shows it under **What the model wrote**.
+
 ## Boards
 
 The Workflow view shows a board: releases, the stories and bugs under each,

@@ -14,6 +14,7 @@ mod projects;
 mod remote;
 mod rig;
 mod rules;
+mod runners;
 mod sessions;
 mod stack;
 mod starter;
@@ -119,6 +120,8 @@ pub fn run() {
             // The orchestrator's rules: coded checks on every move of a
             // slice, each behind its own toggle.
             app.manage(rules::Rules::new(data.join("rules.json")));
+            // The runners: slices handed to models, on their time limits.
+            app.manage(runners::Runs::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -146,6 +149,10 @@ pub fn run() {
             rules::set_rule_limit,
             rules::check_move,
             rules::move_slice,
+            runners::run_slice,
+            runners::stop_run,
+            runners::runs_going,
+            runners::slice_work,
             sessions::list_sessions,
             sessions::list_votes,
             sessions::load_session,

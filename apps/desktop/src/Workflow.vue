@@ -5,9 +5,11 @@
 // opens the same with both gates off. Rust keeps the board and your notes on
 // it. This page asks for them when it opens and when you pick something, and
 // it has no way to reach anything else. A move names only the lane: Rust
-// checks it against the rules and makes it as you.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+// checks it against the rules and makes it as you. A slice handed to a model
+// names only the model: Rust refuses one outside this computer, keeps the
+// runner to its time, and moves the slice only into written.
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 import {
   counts,
@@ -36,14 +38,17 @@ import {
   storyLine,
   storyMove,
 } from "./board.js";
+import { canHandOff, clock, clockLine, limitOf, ranLine, runnerModels } from "./runners.js";
 
-defineProps({
+const props = defineProps({
   /** The WAN gate, as the app has it. This view only says where it stands. */
   wan: { type: Boolean, default: false },
   /** The LAN gate, the same. */
   lan: { type: Boolean, default: false },
   /** Whether the side is showing, so the bar knows to offer it. */
   sideOpen: { type: Boolean, default: true },
+  /** The models switched on and on hand. Only those that can be runners are offered. */
+  models: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["close", "side"]);
 
@@ -192,6 +197,100 @@ function moveSlice(move) {
   });
 }
 
+/** The models a slice can go to, and the one picked. */
+const runners = computed(() => runnerModels(props.models));
+const runModel = ref("");
+/** The run this page started: which slice, since when, and its limit. */
+const running = ref(null);
+/** The slices being written, as "board/story/slice", from Rust. */
+const going = ref([]);
+const now = ref(Date.now());
+let ticking = 0;
+/** What the last run came to, said beside that slice only. */
+const ran = ref({ story: 0, slice: "", line: "", problem: "" });
+/** What a model wrote for the open slice, as Rust keeps it. */
+const kept = ref(null);
+
+const runKey = computed(() => (board.value && slice.value ? `${board.value.id}/${openNumber.value}/${slice.value.id}` : ""));
+const runningHere = computed(() => Boolean(runKey.value) && running.value?.key === runKey.value);
+/** A model is writing the open slice, started here or before the view was opened. */
+const writingHere = computed(() => runningHere.value || going.value.includes(runKey.value));
+const ranHere = computed(() => (ran.value.story === openNumber.value && ran.value.slice === openSliceId.value ? ran.value : null));
+const pickedRunner = computed(() => runners.value.find((entry) => entry.id === runModel.value) ?? runners.value[0] ?? null);
+
+async function readGoing() {
+  try {
+    going.value = await invoke("runs_going");
+  } catch {
+    going.value = [];
+  }
+}
+
+async function readWork() {
+  const key = runKey.value;
+  kept.value = null;
+  if (!key) return;
+  try {
+    const found = await invoke("slice_work", { id: board.value.id, story: openNumber.value, slice: slice.value.id });
+    if (runKey.value === key) kept.value = found;
+  } catch {
+    kept.value = null;
+  }
+}
+
+watch(runKey, () => {
+  readWork();
+  readGoing();
+});
+
+/**
+ * Hands the open slice to a model. The page names the model and nothing else;
+ * Rust checks every rule before it asks, and again when the model is done.
+ */
+async function handOff() {
+  const model = pickedRunner.value?.id;
+  const id = board.value?.id;
+  const number = openNumber.value;
+  const sliceId = openSliceId.value;
+  if (!model || !id || !sliceId || running.value) return;
+  if (!(await saveNote())) return;
+  let limit = null;
+  try {
+    limit = limitOf(await invoke("rules_status"));
+  } catch {
+    limit = null;
+  }
+  const key = `${id}/${number}/${sliceId}`;
+  running.value = { key, story: number, slice: sliceId, started: Date.now(), limit };
+  ran.value = { story: number, slice: sliceId, line: "", problem: "" };
+  now.value = Date.now();
+  ticking = window.setInterval(() => {
+    now.value = Date.now();
+  }, 1000);
+  try {
+    // The model's words come back as it writes; the page shows only the clock
+    // and what was kept, so the channel is drained and left.
+    const result = await invoke("run_slice", { id, story: number, slice: sliceId, model, onEvent: new Channel() });
+    if (result.local && board.value?.id === id) local.value = result.local;
+    ran.value = result.moved
+      ? { story: number, slice: sliceId, line: ranLine(result), problem: "" }
+      : { story: number, slice: sliceId, line: "", problem: ranLine(result) };
+  } catch (error) {
+    ran.value = { story: number, slice: sliceId, line: "", problem: String(error) };
+  } finally {
+    window.clearInterval(ticking);
+    running.value = null;
+    await readGoing();
+    await readWork();
+  }
+}
+
+async function stopRunner() {
+  if (!board.value || !slice.value) return;
+  await invoke("stop_run", { id: board.value.id, story: openNumber.value, slice: slice.value.id }).catch(() => false);
+  await readGoing();
+}
+
 const movedHere = computed(() =>
   moved.value.story === openNumber.value && moved.value.slice === openSliceId.value ? moved.value : null,
 );
@@ -283,6 +382,7 @@ async function keepNote() {
 onMounted(() => {
   nextTick(() => title.value?.focus());
   openFirst();
+  readGoing();
 });
 
 /**
@@ -294,6 +394,8 @@ async function leave() {
 }
 
 onBeforeUnmount(() => {
+  // A runner goes on when the view closes; Rust keeps what it writes.
+  window.clearInterval(ticking);
   saveNote();
 });
 </script>
@@ -538,7 +640,7 @@ onBeforeUnmount(() => {
                   :key="move.to"
                   type="button"
                   :class="{ primary: move.forward }"
-                  :disabled="busy"
+                  :disabled="busy || writingHere"
                   @click="moveSlice(move)"
                 >
                   {{ move.label }}
@@ -546,6 +648,44 @@ onBeforeUnmount(() => {
               </div>
               <p class="small wf-saved" role="status">{{ movedHere?.line }}</p>
               <p v-if="movedHere?.problem" class="wf-problem small" role="alert">{{ movedHere.problem }}</p>
+            </section>
+
+            <section v-if="canHandOff(slice) || writingHere" class="wf-block" aria-labelledby="wf-runner-title">
+              <h4 id="wf-runner-title" class="label">Hand it to a model</h4>
+              <template v-if="writingHere">
+                <p class="wf-clock" role="timer" aria-live="off">
+                  {{ runningHere ? clockLine(now - running.started, running.limit) : "A model is writing this slice." }}
+                </p>
+                <div class="wf-moves">
+                  <button type="button" @click="stopRunner">Stop</button>
+                </div>
+              </template>
+              <template v-else-if="runners.length">
+                <div class="wf-runner">
+                  <label class="sr-only" for="wf-runner-model">Model</label>
+                  <select id="wf-runner-model" :value="pickedRunner?.id" @change="runModel = $event.target.value">
+                    <option v-for="entry in runners" :key="entry.id" :value="entry.id">{{ entry.name || entry.id }}</option>
+                  </select>
+                  <button class="primary" type="button" :disabled="busy || Boolean(running)" @click="handOff">
+                    Hand it to a model
+                  </button>
+                </div>
+                <p class="quiet small">
+                  The model writes the slice on its time limit. A model on this computer or on your network only.
+                </p>
+              </template>
+              <p v-else class="quiet small">
+                No model on this computer or on your network is on hand. A slice is never sent to an outside engine.
+              </p>
+              <p class="small wf-saved" role="status">{{ ranHere?.line }}</p>
+              <p v-if="ranHere?.problem" class="wf-problem small" role="alert">{{ ranHere.problem }}</p>
+            </section>
+
+            <section v-if="kept" class="wf-block" aria-labelledby="wf-work-title">
+              <h4 id="wf-work-title" class="label">What the model wrote</h4>
+              <p class="quiet small">{{ kept.model }}, in {{ clock(kept.tookMs) }}.</p>
+              <p class="wf-brief">{{ kept.text }}</p>
+              <p v-if="kept.cut" class="quiet small">The rest was past the size kept for a slice, and was left out.</p>
             </section>
 
             <section v-if="sliceNotes.length" class="wf-block" aria-labelledby="wf-slice-notes-title">
@@ -989,6 +1129,27 @@ onBeforeUnmount(() => {
 .wf-steps {
   display: grid;
   gap: 0.5rem;
+}
+
+.wf-runner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.wf-runner select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page);
+  padding: 0.3rem 0.5rem;
+  max-width: 100%;
+}
+
+.wf-clock {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .wf-moves {

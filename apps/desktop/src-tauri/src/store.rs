@@ -27,19 +27,26 @@ const ACCOUNT: &str = "boards-key";
 /// How long the key is, in bytes.
 const KEY_BYTES: usize = 32;
 
-/// The four kinds of thing the store keeps for a board, each by the board's
-/// id: the snapshot, the person's drafts, the copy last synced, and where
-/// the board's file is.
+/// The five kinds of thing the store keeps for a board, each by the board's
+/// id: the snapshot, the person's drafts, the copy last synced, where the
+/// board's file is, and what the runners wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Board,
     Drafts,
     Synced,
     Source,
+    Work,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [Kind::Board, Kind::Drafts, Kind::Synced, Kind::Source];
+    pub const ALL: [Kind; 5] = [
+        Kind::Board,
+        Kind::Drafts,
+        Kind::Synced,
+        Kind::Source,
+        Kind::Work,
+    ];
 
     /// The name the database knows the kind by.
     fn name(self) -> &'static str {
@@ -48,6 +55,7 @@ impl Kind {
             Kind::Drafts => "drafts",
             Kind::Synced => "synced",
             Kind::Source => "source",
+            Kind::Work => "work",
         }
     }
 }

@@ -12,7 +12,9 @@ the network: everything it needs, it asks the Rust side for.
 | `Workflow.vue` | The Workflow view: a board's road of releases and stories, the open story with its hand and your note, and the open slice with its brief, its five lanes, and the buttons that move it |
 | `board.js`     | Helpers for the Workflow view, with no Vue and no Tauri in them: the five lanes, whose move a slice or a story is, a story's hand, the moves a slice offers, the road's filter and counts, and the line that says when the copy was pulled |
 | `board.test.js` | Tests for `board.js`, on the sample board the app carries. They run on Node alone: `npm test` |
+| `runners.js`   | Helpers for handing a slice to a model, with no Vue and no Tauri in them: the models a slice can go to, when a slice can be handed off, and the runner's clock and the line it ends with |
+| `runners.test.js` | Tests for `runners.js`. They run on Node alone: `npm test` |
 
 Logic that can be tested without a window belongs in `chat.js`, or in
-`board.js` for the Workflow view, with a test beside it. `App.vue` and
+`board.js` or `runners.js` for the Workflow view, with a test beside it. `App.vue` and
 `Workflow.vue` keep what needs the screen.

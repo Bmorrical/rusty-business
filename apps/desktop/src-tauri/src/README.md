@@ -26,6 +26,7 @@ The desktop app's Rust code.
 | `courier.rs`  | The courier door: an MCP server on the private network, for a courier app the person brings and pairs. It listens on port 4710 only while its own breaker and the LAN gate are on, and asks only the chat engine's models |
 | `rig.rs`      | The rig: many models at once on servers on the private network. Keeps the plan of its cards and each model's share of them, draws no key into it, and asks a rig model only while the LAN gate is on, without waiting for the turn here |
 | `rules.rs`    | The orchestrator's rules: the checks the Workflow applies to every move of a slice, coded here, each with its toggle, and the runner's time limit, kept for this account alone. It also moves a slice on a board, as you, once the rules allow it |
+| `runners.rs`  | The runners: a slice handed to a model on this computer, the network, or the rig, with the rules checked before and after, the clock that stops it at its time limit, one runner a slice, and its work kept beside the board |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -246,6 +247,20 @@ Five more live in `rules.rs`, each with tests:
   says the slice is in. An allowed move writes its lane and whose move is
   next, a refused one writes nothing, and a drifted runner leaves the lane
   where it was and adds a note.
+
+Five more live in `runners.rs`, each with tests:
+
+- A slice goes only to a model on this computer, on the network, or on the
+  rig, that writes words. A model outside this computer is refused before
+  anything is asked: direct API connections are refused.
+- The rules are checked before the model is asked, and again once it is
+  done, and a runner moves a slice only into written, as a model.
+- A runner is stopped at its time limit and a second more, and has drifted:
+  nothing it wrote is kept. The clock starts once it holds its turn.
+- A run you stop, or one that writes nothing, moves nothing, and only one
+  runner writes a slice at a time.
+- The work is kept beside the board, never in its file, cut to 64 KB, and
+  readable by its owner only.
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts
 has its front door on this computer only, and its passwords are made on its
