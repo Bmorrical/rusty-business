@@ -282,6 +282,34 @@ If your server supports chat only, you can install a catalog GGUF on the
 server and refresh the app after llama-server lists it. Use this HTTP
 connection on a trusted private network.
 
+## Courier apps
+
+A courier app is a program of your own, on another computer on your
+private network, that asks a model here a question. The app is its MCP
+server, over Streamable HTTP, at `http://<this computer>:4710/mcp`. Its
+two tools are `models`, the chat models you turned on, and `ask`, which
+asks one of them and streams the answer back as progress while it comes.
+
+1. Turn on the **LAN gate** and the **Courier breaker** at the foot of the
+   window. The door listens only while both are on.
+2. Open **Settings**, then **Couriers**, and select **Pair a courier app**.
+   A six-digit code shows for five minutes.
+3. From the courier app, send it once:
+
+   ```sh
+   curl -s http://192.168.1.20:4710/pair \
+     -H 'Content-Type: application/json' \
+     -d '{"code":"123456","name":"My courier"}'
+   ```
+
+   The answer holds the key, once. Keep it in the courier app.
+4. The courier app sends it with every request to `/mcp`, as
+   `Authorization: Bearer <key>`.
+
+**Unpair** in the same pane takes a key away. A request from a web page,
+or from an address outside your private network, is turned away. The door
+speaks plain http: use it on a network you trust.
+
 ## Boards
 
 The Workflow view shows a board: releases, the stories and bugs under each,

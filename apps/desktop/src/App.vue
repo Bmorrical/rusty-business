@@ -185,6 +185,12 @@ const gateNote = ref("");
 const lanGate = ref(false);
 const lanGateBusy = ref(false);
 const lanGateNote = ref("");
+// The courier door: its breaker, where it listens, the code shown while a
+// courier app pairs, and the apps paired. No key ever comes to the page.
+const courier = ref({ on: false, port: 4710, address: null, place: null, error: null, paired: [], code: null, codeSeconds: 0 });
+const courierBusy = ref(false);
+const courierNote = ref("");
+let courierTimer = 0;
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
@@ -605,6 +611,50 @@ async function setLanGate(open) {
     pickModels(picked.value);
     await checkEngine();
   }
+}
+
+async function readCourier() {
+  try {
+    courier.value = await invoke("courier_status");
+  } catch {
+    courier.value = { ...courier.value, on: false, address: null, place: null, code: null };
+  }
+}
+
+/** Turns the courier breaker on or off, pairs, stops pairing, or unpairs. */
+async function changeCourier(command, args = {}) {
+  if (courierBusy.value) return;
+  courierBusy.value = true;
+  courierNote.value = "";
+  try {
+    courier.value = await invoke(command, args);
+  } catch (error) {
+    courierNote.value = String(error);
+    await readCourier();
+  } finally {
+    courierBusy.value = false;
+  }
+}
+
+const courierLine = computed(() => {
+  if (!courier.value.on) return "The courier door is closed.";
+  if (!lanGate.value) return "On, but the LAN gate is off, so the courier door stays closed.";
+  return "Courier apps you pair can ask your models over your private network.";
+});
+
+/** The code as two groups of three, the way it is read aloud. */
+const courierCode = computed(() => {
+  const code = courier.value.code || "";
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+});
+
+const courierCountdown = computed(() => {
+  const seconds = courier.value.codeSeconds || 0;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+});
+
+function pairedSince(seconds) {
+  return new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function turnOnInstallGate() {
@@ -1117,6 +1167,13 @@ async function loadVotes() {
 
 watch([page, settingsTab], ([where, tab]) => {
   if (where === "settings" && tab === "votes") loadVotes();
+  // While the Couriers tab is open, its countdown and address stay current.
+  window.clearInterval(courierTimer);
+  courierTimer = 0;
+  if (where === "settings" && tab === "couriers") {
+    readCourier();
+    courierTimer = window.setInterval(readCourier, 1000);
+  }
 });
 
 function newChat(project = null) {
@@ -2097,6 +2154,7 @@ onMounted(async () => {
   clockTimer = window.setInterval(() => (now.value = Date.now()), 60_000);
   // While the gate is off, Rust starts no stack and asks for no new version.
   await Promise.all([readGate(), readLanGate()]);
+  readCourier();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   await readWeb();
@@ -2133,6 +2191,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("click", onWindowClick);
   window.clearInterval(updateTimer);
   window.clearInterval(clockTimer);
+  window.clearInterval(courierTimer);
   stopDropping?.();
 });
 </script>
@@ -2400,6 +2459,25 @@ onBeforeUnmount(() => {
             </span>
           </div>
           <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="courier.on"
+              aria-describedby="courier-line"
+              :disabled="courierBusy"
+              @click="changeCourier('set_courier', { open: !courier.on })"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              Courier breaker
+            </button>
+            <span class="info" tabindex="0" aria-label="About the courier breaker">
+              <span aria-hidden="true">i</span>
+              <span id="courier-line" class="tip" role="tooltip">{{ courierLine }}</span>
+            </span>
+          </div>
+          <p v-if="courierNote && page !== 'settings'" class="small" role="alert">{{ courierNote }}</p>
           <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
         </div>
         <div class="gear-wrap">
@@ -2491,6 +2569,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'folders' }" @click="openTab('settings', 'folders')">Folders</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'web' }" @click="openTab('settings', 'web')">Web</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'couriers' }" @click="openTab('settings', 'couriers')">Couriers</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
@@ -2905,6 +2984,44 @@ onBeforeUnmount(() => {
               </span>
             </form>
             <p v-if="webNote" class="small" role="alert">{{ webNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'couriers'" class="settings-pane">
+            <h3>Courier apps</h3>
+            <p class="quiet">
+              A courier app you bring can ask your models over your private network. It speaks MCP, and only an app you
+              pair here gets in. It never reaches an engine outside this computer, or a picture.
+            </p>
+            <p v-if="!courier.on" class="gate-ask">
+              <span>The courier breaker is off, so the door is closed.</span>
+              <button type="button" :disabled="courierBusy" @click="changeCourier('set_courier', { open: true })">Turn on the breaker</button>
+            </p>
+            <p v-else-if="!lanGate" class="gate-ask">
+              <span>The LAN gate is off, so the door stays closed.</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <p v-else-if="courier.place" class="small key-file">Listening at <code>{{ courier.place }}</code></p>
+            <p v-else-if="courier.address" class="small">Listening on {{ courier.address }}.</p>
+            <p v-if="courier.on && courier.error" class="small" role="alert">{{ courier.error }}</p>
+            <h3 class="gap-above">Pair a courier app</h3>
+            <template v-if="courier.code">
+              <p class="courier-code" aria-live="polite">{{ courierCode }}</p>
+              <p class="quiet small">Type this code into the courier app. It works once, for the next {{ courierCountdown }}.</p>
+              <div class="settings-actions">
+                <button type="button" :disabled="courierBusy" @click="changeCourier('stop_pairing_courier')">Stop pairing</button>
+              </div>
+            </template>
+            <div v-else class="settings-actions">
+              <button class="primary" type="button" :disabled="courierBusy || !courier.on" @click="changeCourier('pair_courier')">Pair a courier app</button>
+            </div>
+            <h3 class="gap-above">Paired</h3>
+            <p v-if="!courier.paired.length" class="quiet">None yet.</p>
+            <ul v-else class="couriers">
+              <li v-for="one in courier.paired" :key="one.id">
+                <span>{{ one.name }} <span class="quiet small">since {{ pairedSince(one.since) }}</span></span>
+                <button type="button" :disabled="courierBusy" @click="changeCourier('unpair_courier', { id: one.id })">Unpair</button>
+              </li>
+            </ul>
+            <p v-if="courierNote" class="small" role="alert">{{ courierNote }}</p>
           </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>
@@ -4681,6 +4798,32 @@ button.switch.model-switch {
 
 .key-file code {
   overflow-wrap: anywhere;
+}
+
+.courier-code {
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.couriers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-width: 32rem;
+}
+
+.couriers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
 }
 
 .key-path,

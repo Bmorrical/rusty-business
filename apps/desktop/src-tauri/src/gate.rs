@@ -61,6 +61,13 @@ impl Gate {
             .await;
     }
 
+    /// Waits until the gate is on. It is ready at once when the gate is
+    /// already on.
+    pub async fn opened(&self) {
+        let mut state = self.state.subscribe();
+        let _ = state.wait_for(|state| state.open).await;
+    }
+
     /// Turns the gate on or off, and keeps that for the next time the app
     /// opens. The gate changes even when it cannot be kept.
     pub fn set(&self, open: bool) -> Result<bool, String> {
@@ -115,6 +122,12 @@ impl Gate {
 impl LanGate {
     pub fn new(file: PathBuf) -> Self {
         Self(Gate::new(file))
+    }
+
+    /// The gate itself, for what waits on it: the courier door listens only
+    /// while it is on (`courier.rs`).
+    pub fn gate(&self) -> Gate {
+        self.0.clone()
     }
 
     /// Drop the entire request or stream when LAN access is withdrawn.

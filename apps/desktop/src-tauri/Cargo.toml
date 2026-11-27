@@ -31,7 +31,10 @@ serde_json = "1"
 # system's own TLS.
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "macros", "time"] }
+# "net" and "io-util" are the courier door's (courier.rs): its listener on
+# your private network, and reading and writing what arrives. Both are
+# features of the tokio already built, so no package is added.
+tokio = { version = "1", features = ["sync", "macros", "time", "net", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 # The `board` command runs without the app, so it finds the app's data folder
 # itself. This is the crate Tauri finds it with, so it is built once.

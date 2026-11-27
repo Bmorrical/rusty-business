@@ -113,9 +113,27 @@ I want to hear about:
   this computer by itself, and the app has no door for a backend to be
   reached through. "For now" is meant: the rule stands until a pull request
   changes [BOARD.md](BOARD.md), which has it in full.
+- **The courier door is off until you turn it on.** It lets a courier app
+  you bring, on your private network, ask a model on this computer a
+  question over MCP. It listens on port 4710 only while both its own
+  breaker, Courier breaker at the foot of the window, and the LAN gate are
+  on. Turning either off closes it and stops any answer under way. It
+  answers only an address on a private network (this computer, the private
+  ranges, and link-local addresses), turns away any request that carries
+  an Origin, which every web page's request does, and serves only a
+  courier app you paired. Pairing takes a six-digit code shown under
+  Settings, Couriers, for five minutes; five wrong codes void it. The key
+  it gives is sent once and kept only as its SHA-256, in a file only you
+  can read, and never reaches the page. A paired courier app can list the
+  models you turned on and ask one of them a question, and stop only its
+  own questions. It reads no chat, no file, and no setting, and reaches no
+  engine outside this computer. The door speaks plain http, so anyone on
+  the network can read what crosses it: pair only on a network you trust,
+  and unpair a courier app in Settings to take its key away.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
-- Every port the stack opens listens on this computer only.
+- Every port the stack opens listens on this computer only. The courier
+  door, above, is the app's one port beyond it.
 
 [AGENTS.md](AGENTS.md) sets the rules a change follows to keep these
 promises, for people and for the AI models that work for them.

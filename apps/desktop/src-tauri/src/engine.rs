@@ -960,6 +960,51 @@ pub(crate) async fn read_stream<B: AsRef<[u8]>, E>(
     Ok(done)
 }
 
+/// The models a courier app may ask (`courier.rs`): on the chat engine, from
+/// the makers picked, not switched off, and none that reads pictures, since a
+/// courier app sends words only.
+pub(crate) async fn courier_models(
+    lan: &LanGate,
+    makers: &Makers,
+    off: &[String],
+) -> Result<Vec<String>, String> {
+    let status = for_makers(status_at(base_url(), lan).await, makers);
+    if !status.reachable {
+        return Err(status
+            .error
+            .unwrap_or_else(|| "The engine is not answering.".to_string()));
+    }
+    Ok(status
+        .models
+        .into_iter()
+        .filter(|model| !off.contains(&model.id) && !reads_pictures(&model.id))
+        .map(|model| model.id)
+        .collect())
+}
+
+/// A courier app's question, put to the chat engine on this computer or on
+/// the LAN, in its turn like any other. It never goes to an engine outside.
+pub(crate) async fn courier_ask(
+    lan: &LanGate,
+    chats: &Chats,
+    model: &str,
+    question: &str,
+    stopped: &mut watch::Receiver<bool>,
+    emit: impl FnMut(ChatEvent),
+) -> Result<ChatDone, String> {
+    let base = base_url()?;
+    let request = ChatRequest {
+        model: model.to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: question.to_string(),
+            images: Vec::new(),
+        }],
+        max_tokens: None,
+    };
+    chat_on_engine(&base, lan, chats, &request, stopped, emit).await
+}
+
 #[tauri::command]
 pub async fn chat_stream(
     chats: tauri::State<'_, Chats>,

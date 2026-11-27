@@ -1,6 +1,7 @@
 mod attachments;
 mod board;
 mod cli;
+mod courier;
 mod deactivated;
 mod downloads;
 mod engine;
@@ -103,6 +104,13 @@ pub fn run() {
             ));
             // The picture check: its model, once the person installs it.
             app.manage(picture::PictureCheck::new(data.join("picture-check")));
+            // The courier door: an MCP server on your private network, behind
+            // its own circuit breaker (off until you turn it on) and the LAN gate.
+            app.manage(courier::Courier::new(
+                data.join("courier-breaker"),
+                data.join("couriers.json"),
+            ));
+            courier::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -150,6 +158,11 @@ pub fn run() {
             gate::set_gate,
             gate::lan_gate_status,
             gate::set_lan_gate,
+            courier::courier_status,
+            courier::set_courier,
+            courier::pair_courier,
+            courier::stop_pairing_courier,
+            courier::unpair_courier,
             makers::makers_status,
             makers::set_makers,
             outside::outside_status,

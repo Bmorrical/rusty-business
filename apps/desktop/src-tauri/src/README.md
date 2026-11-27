@@ -23,6 +23,7 @@ The desktop app's Rust code.
 | `store.rs`    | The boards' database: one SQLite file, `boards.db`, encrypted whole by SQLCipher, its key 32 random bytes kept in the system's key store, the Keychain, the Credential Manager, or the Secret Service. Boards already kept as files are copied in and left where they are |
 | `sync.rs`     | What two copies of a board come to: what each side changed since the last sync, and the conflicts. It only compares, and touches no file |
 | `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
+| `courier.rs`  | The courier door: an MCP server on the private network, for a courier app the person brings and pairs. It listens on port 4710 only while its own breaker and the LAN gate are on, and asks only the chat engine's models |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -203,6 +204,18 @@ and `cli.rs`, each with tests:
 - With conflicts and no side picked, nothing is written. With nothing to
   compare against, nothing is taken away.
 - The program leaves from `main.rs` alone, with what the command came to.
+
+Five more live in `courier.rs`, each with tests:
+
+- The door is closed until the person turns its breaker on, and while the
+  LAN gate is off. Turning either off turns away what arrives and stops an
+  answer part way.
+- Only an address on a private network is answered, and no request that
+  carries an Origin, so no web page reaches it.
+- Only a paired courier app is served. A code lasts five minutes and five
+  wrong tries void it. The key is given once and kept only as its SHA-256.
+- No key, and no hash of one, reaches the page.
+- A courier app can stop only its own questions.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts
