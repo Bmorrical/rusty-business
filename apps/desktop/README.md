@@ -13,8 +13,8 @@ Select the picture to open it full size. The rest of the set is in
 
 ## What it does
 
-- **The LAN and WAN gates**, two switches at the foot of the window. Both
-  start off and keep their settings independently. LAN controls discovery,
+- **The LAN and WAN gates**, two switches at the foot of the window, each with
+  a tip that says what it means. Both start off and keep their settings independently. LAN controls discovery,
   chat, and model install, pause, and resume requests to the configured
   server. WAN controls direct downloads onto this computer, updates, stack
   startup, and outside providers. Turning either gate off stops the app's
@@ -36,12 +36,13 @@ Select the picture to open it full size. The rest of the set is in
   Settings, which adds or removes one with one click. One maker always stays
   picked. Removing a maker hides its models and deletes nothing, and saved
   chats still name them.
-- **An Installers page**, at the foot of the window above Settings, that
-  lists every model on the list, from every maker, with its license and
-  download size. Install downloads one, with the gate on, then adds its
-  maker so it shows at the top of the window. A model already here whose
-  maker is not added has a Show button instead.
-- **A Workflow view**, at the foot of the window above Installers, that
+- **Install, in Settings under Models**, where every model on the list,
+  from every maker, shows with its license and download size. Install
+  downloads one, with the gate on, then adds its maker so it shows at the
+  top of the window. A model already here whose maker is not added has a
+  Show button instead. The Installers tabs beside it hold the picture
+  models, the picture check, and the outside engines.
+- **A Workflow view**, under the gear at the foot of the side, that
   shows a board: a road of releases, the stories and bugs under each, and
   the slices each story is cut into. A slice goes through five lanes,
   Sliced, Written, Checked, Reviewed, and Main, and the view says whose
@@ -115,7 +116,8 @@ Select the picture to open it full size. The rest of the set is in
 - **The stack, started by the app.** When the stack's front door is not
   answering and the gate is on, the app starts the stack in Docker, opening Docker Desktop first
   when it is not running. The first start downloads the stack, which takes a
-  few minutes. The footer says where the stack answers, or why it is not
+  few minutes. A dot at the foot of the side shows the stack, as another
+  shows the engine, and its tip says where it answers, or why it is not
   running. As with the engine, it starts only what is missing, and when the
   app quits it stops only a stack it started. The app does not install
   Docker; the chat does not need the stack yet.

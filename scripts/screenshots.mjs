@@ -52,13 +52,14 @@ export const SCENES = [
   { file: 'new-chat.png', scheme: 'light', engine: 'on' },
   { file: 'engine-off.png', scheme: 'light', engine: 'off' },
   { file: 'first-run.png', scheme: 'dark', engine: 'first-run' },
-  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'installers' },
+  { file: 'installers.png', scheme: 'dark', engine: 'on', page: 'settings', tab: 'Models' },
   { file: 'pictures.png', scheme: 'light', engine: 'on', page: 'installers', tab: 'Pictures' },
   { file: 'settings.png', scheme: 'light', engine: 'on', page: 'settings', tab: 'Models' },
 ];
 
 /** The button in the side bar that opens each page a picture shows. */
-export const PAGE_BUTTONS = { installers: 'Installers', settings: 'Settings' };
+// Installers is a group of tabs on the Settings page, so both open Settings.
+export const PAGE_BUTTONS = { installers: 'Settings', settings: 'Settings' };
 
 /**
  * The models that read pictures, as makers_status offers them on a Mac. The
@@ -435,7 +436,10 @@ async function takePicture(send, address, scene, engine, sessions) {
   }
   if (scene.page) {
     const label = JSON.stringify(PAGE_BUTTONS[scene.page]);
-    await inPage(send, tab, `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${label}).click()`);
+    // The pages sit under the gear at the foot of the side.
+    await inPage(send, tab, `document.querySelector('.gear').click()`);
+    await until(send, tab, `document.querySelector('.gear-menu') !== null`, "the gear's menu");
+    await inPage(send, tab, `[...document.querySelectorAll('.gear-menu button')].find((button) => button.textContent.trim() === ${label}).click()`);
     if (scene.tab) {
       const name = JSON.stringify(scene.tab);
       await until(send, tab, `document.querySelector('.settings-tabs') !== null`, "the page's tabs");

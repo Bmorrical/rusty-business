@@ -37,48 +37,66 @@ function functionOf(app, name) {
   return app.slice(start, end < 0 ? undefined : start + 1 + end);
 }
 
-/** One page of the window, from its section to the section's end. */
+/**
+ * One part of the Settings page, from its marker to the next. Installers,
+ * Utilities, and Settings' own tabs share the page since the gear came.
+ */
+const MARKERS = { installers: '<!-- Installers -->', utilities: '<!-- Utilities -->', settings: "<!-- Settings' own tabs -->" };
 function pageOf(app, name) {
-  const start = app.indexOf(`<section v-if="page === '${name}'" class="settings"`);
+  const start = app.indexOf(MARKERS[name]);
   assert.ok(start >= 0, `${APP} has lost its ${name} page`);
-  return app.slice(start, app.indexOf('</section>', start));
+  return app.slice(start, app.indexOf('<!-- ', start + 1));
 }
 
-test('the side bar opens the Installers page, above Settings and Check for updates', () => {
+test('Installers is one click from the Settings page, which the gear opens', () => {
   // Brad, 2026-11-17: "one click from an installers page would be good".
+  // Todd, 2026-11-24: Installers and Utilities "feel like they should be part
+  // of the Settings page".
   const app = read(APP);
-  const foot = app.slice(app.indexOf('<footer class="engine"'), app.indexOf('</footer>', app.indexOf('<footer class="engine"')));
-  const installers = foot.indexOf(`@click="togglePage('installers')"`);
+  const foot = app.slice(app.indexOf('<div class="side-foot">'), app.indexOf('</aside>'));
   const settings = foot.indexOf(`@click="togglePage('settings')"`);
-  assert.ok(installers >= 0, 'the side bar has lost its Installers button');
-  assert.ok(installers < settings, 'Installers no longer sits above Settings');
+  assert.ok(settings >= 0, 'the gear has lost Settings');
   assert.ok(settings < foot.indexOf('Check for updates'), 'Settings no longer sits above Check for updates');
-  assert.ok(foot.includes(`:aria-current="page === 'installers' ? 'page' : undefined"`), 'the button no longer says its page is open');
+  assert.ok(foot.includes(`:aria-current="settingsPage ? 'page' : undefined"`), 'the gear no longer says Settings is open');
+  for (const name of ['installers', 'utilities']) {
+    assert.ok(!foot.includes(`togglePage('${name}')`), `${name} has its own button again, apart from Settings`);
+  }
+
+  const nav = app.slice(app.indexOf('<nav class="settings-tabs" aria-label="Settings">'), app.indexOf('</nav>', app.indexOf('aria-label="Settings">')));
+  const order = ["openTab('settings', 'appearance')", "openTab('installers', 'pictures')", "openTab('installers', 'outside')", "openTab('utilities')"].map((part) => nav.indexOf(part));
+  assert.ok(order.every((at) => at > 0), "the Settings tabs have lost an installer or Utilities");
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "Settings' own tabs, the installers, and Utilities are out of order");
+  assert.match(app, /<section v-if="settingsPage" class="settings" aria-labelledby="settings-title"/, 'Settings, Installers, and Utilities no longer share one page');
 
   const open = functionOf(app, 'openPage');
   assert.match(open, /await readMakers\(\);/, 'the page opens without asking Rust which models are here');
   assert.match(open, /await readOutside\(\);/, 'the page opens without asking Rust about the outside engines');
-  assert.match(open, /nextTick\(\(\) => pageTitle\.value\?\.focus\(\)\);/, 'the page title no longer takes the focus');
-  assert.match(functionOf(app, 'togglePage'), /page\.value === name \? closePage\(\) : openPage\(name\)/, 'a second click no longer goes back to the chat');
+  assert.match(open, /if \(arriving\) nextTick\(\(\) => pageTitle\.value\?\.focus\(\)\);/, 'the page title no longer takes the focus, or takes it from the tabs');
+  assert.match(open, /if \(name === "settings" && arriving\) \{\s+memoryDraft\.value = memory\.value;/, 'moving between tabs throws away a memory being written');
+  assert.match(functionOf(app, 'togglePage'), /return open \? closePage\(\) : openPage\(name\);/, 'a second click no longer goes back to the chat');
+  assert.match(functionOf(app, 'togglePage'), /name === "settings" \? settingsPage\.value/, 'Settings from the gear does not close an installer or Utilities');
+  assert.match(functionOf(app, 'openTab'), /if \(page\.value !== where\) await openPage\(where\);/, 'a tab elsewhere on the page does not ask Rust afresh');
   assert.match(functionOf(app, 'closePage'), /page\.value = "chat";\s+focusComposer\(\);/, 'going back no longer returns to the chat');
 });
 
-test('the Installers page lists every maker, and installs any model in one click', () => {
+test('Settings, Models lists every maker, and installs any model in one click', () => {
   // Brad, 2026-11-17: "and claude and codex/gpt and gemmini and meta/google
   // models locally can be installed, one click from an installers page would
-  // be good".
-  const page = pageOf(read(APP), 'installers');
+  // be good". Todd, 2026-11-24: Installers' Chat tab and Settings, Models
+  // were the same list, so the list is one, under Models.
+  const app = read(APP);
+  const page = pageOf(app, 'settings');
+  // Escape and Back to the chat are the shared page's, above every tab.
+  const head = app.slice(app.indexOf('<section v-if="settingsPage"'), app.indexOf('<!-- Installers -->'));
+  assert.ok(head.includes('@keydown.esc="closePage"'), 'Escape no longer goes back to the chat');
+  assert.ok(head.includes('<button type="button" @click="closePage">Back to the chat</button>'), 'the page has lost Back to the chat');
   for (const part of [
-    'id="installers-title" ref="pageTitle" tabindex="-1">Installers</h2>',
-    '@keydown.esc="closePage"',
-    '<button type="button" @click="closePage">Back to the chat</button>',
-    '<h3>{{ lanEngine ? "Models on your LAN server" : "Models to run here" }}</h3>',
+    '<h3>Model makers</h3>',
     'Nothing downloads until you press Install.',
     '<span>Turn on the {{ installGateName }} to install a model.</span>',
     '<li v-for="maker in displayMakers" :key="maker.name" class="maker">',
-    '<span v-if="!maker.picked" class="quiet small">Not added</span>',
     '<li v-for="entry in maker.models" :key="entry.name" class="offer">',
-    '{{ installLine(maker, entry) }}',
+    '{{ entry.ids?.length ? modelLine(entry, off) : installLine(maker, entry) }}',
     '<button type="button" :disabled="stopping" @click="cancelDownload">{{ lanEngine ? "Pause" : "Cancel" }}</button>',
     '<p v-if="makersNote" class="small" role="alert">{{ makersNote }}</p>',
     '<p v-if="stoppedNote" class="quiet small">{{ stoppedNote }}</p>',
@@ -86,7 +104,8 @@ test('the Installers page lists every maker, and installs any model in one click
     assert.ok(page.includes(part), `the Installers page has lost ${part}`);
   }
   // Every maker's models are offered, not only the makers already added.
-  assert.ok(!/v-for="maker in makers\.filter|v-if="maker\.picked"/.test(page), 'the page lists only the makers already added');
+  assert.ok(!/v-for="maker in makers\.filter/.test(page), 'the page lists only the makers already added');
+  assert.ok(!app.includes("installersTab === 'chat'"), 'Installers has its own list of models again, apart from Settings, Models');
   // Brad, 2026-11-17: "off by default, everything stops". Install is off
   // while the gate is, and while a download or a change of makers runs.
   assert.match(
@@ -120,7 +139,7 @@ test('the outside engines are added on the Installers page, and nowhere else', (
   const app = read(APP);
   const page = pageOf(app, 'installers');
   // Since 0.8.4 they have a tab of their own, so the heading opens it.
-  assert.ok(page.includes(`@click="installersTab = 'outside'">Outside engines</button>`), 'the Installers page has lost its Outside engines tab');
+  assert.ok(app.includes(`@click="openTab('installers', 'outside')">Outside engines</button>`), 'the Installers page has lost its Outside engines tab');
   for (const part of [
     '<h3>Outside engines</h3>',
     'v-for="entry in outside"',
@@ -140,20 +159,17 @@ test('the outside engines are added on the Installers page, and nowhere else', (
   assert.ok(page.includes(':aria-label="`Remove ${entry.name}`"'), 'Remove no longer says which engine it removes');
 });
 
-test('Settings changes the makers and points to the Installers page, but downloads nothing', () => {
+test('Settings, Models points to the outside engines, and adds none itself', () => {
   const app = read(APP);
   const settings = pageOf(app, 'settings');
-  for (const part of ['download(', 'install(', '<progress', 'cancelDownload', 'stoppedNote', 'key-path']) {
-    // Uninstall, in Settings under Models, moves a model to the Trash; it is not an install.
-    assert.ok(!settings.replaceAll('uninstall(', '').includes(part), `Settings has ${part} again; it belongs on the Installers page`);
-  }
-  assert.match(settings, /To install a model or add an outside engine, go to the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'Settings no longer points to the Installers page');
-  assert.ok(settings.includes('id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>'), 'the Settings title no longer takes the focus');
+  assert.ok(!settings.includes('key-path'), 'Settings, Models adds an outside engine again; that belongs under Outside engines');
+  assert.match(settings, /No outside engine is added\. Add one under\s+<button class="link in-text" type="button" @click="openTab\('installers', 'outside'\)">Outside engines<\/button>\./, 'Settings, Models no longer points to Outside engines');
+  assert.ok(app.includes('id="settings-title" ref="pageTitle" tabindex="-1">Settings</h2>'), 'the Settings title no longer takes the focus');
 
   // The first run points there too, for the models it does not offer and for
   // the outside engines.
   const first = app.slice(app.indexOf('<div v-if="offers.length" class="first-run">'), app.indexOf('<template v-else>', app.indexOf('class="first-run"')));
-  assert.match(first, /More models, and the outside engines, are on the\s+<button class="link in-text" type="button" @click="openPage\('installers'\)">Installers<\/button> page\./, 'the first run no longer points to the Installers page');
+  assert.match(first, /More models are in\s+<button class="link in-text" type="button" @click="openTab\('settings', 'models'\)">Settings, Models<\/button>, and the\s+outside engines under\s+<button class="link in-text" type="button" @click="openTab\('installers', 'outside'\)">Outside engines<\/button>\./, 'the first run no longer points to more models and the outside engines');
 });
 
 test('one page shows at a time, and a chat takes the window back', () => {
@@ -161,7 +177,9 @@ test('one page shows at a time, and a chat takes the window back', () => {
   assert.ok(app.includes('const page = ref("chat");'), 'the window no longer opens on the chat');
   assert.ok(!/settingsOpen|settingsTitle|openSettings|closeSettings/.test(app), 'the old Settings switch is back beside the pages');
   assert.equal(app.split(`v-show="page === 'chat'"`).length, 4, 'the chat header, thread, and box no longer hide together');
-  assert.equal(app.split(`v-if="page === '`).length, 5, 'a page was added or lost without this check changing');
+  // Workflow, then the Settings page, whose installers come first.
+  assert.equal(app.split(`v-if="page === '`).length, 3, 'a page was added or lost without this check changing');
+  assert.equal(app.split('v-if="settingsPage"').length, 2, 'the Settings page shows in more than one place');
   for (const name of ['newChat', 'openSession']) {
     assert.match(functionOf(app, name), /page\.value = "chat";/, `${name} leaves a page open over the chat`);
   }
