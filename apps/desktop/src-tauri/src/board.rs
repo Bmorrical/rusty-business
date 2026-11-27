@@ -42,9 +42,9 @@ pub const SOURCE_FORMAT: &str = "board source v1";
 
 /// The five lanes a slice goes through, in order. A slice's `lane` is the
 /// last one it has been through; empty means none yet.
-const LANES: [&str; 5] = ["sliced", "written", "checked", "reviewed", "main"];
+pub(crate) const LANES: [&str; 5] = ["sliced", "written", "checked", "reviewed", "main"];
 /// Whose move it can be. Empty leaves it to the lane.
-const MOVES: [&str; 4] = ["you", "model", "check", "review"];
+pub(crate) const MOVES: [&str; 4] = ["you", "model", "check", "review"];
 const KINDS: [&str; 2] = ["story", "bug"];
 
 /// The most the app reads of one board file, and the most it writes.

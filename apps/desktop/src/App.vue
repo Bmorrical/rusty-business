@@ -130,6 +130,7 @@ import {
   withoutCard,
   withoutModel,
 } from "./rig.js";
+import { LIMIT_LEAST, LIMIT_MOST, limitOf, switchWord } from "./rules.js";
 
 // The page only works inside the app's own window, where Rust answers.
 const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -213,6 +214,12 @@ const rig = ref({ plan: { cards: [], models: [] }, cards: [], models: [] });
 const rigDraft = ref({ cards: [], models: [] });
 const rigBusy = ref(false);
 const rigNote = ref("");
+// The orchestrator's rules: coded in Rust, each with its toggle, and the
+// runner's time limit.
+const rulesView = ref({ rules: [], limitMinutes: 30 });
+const limitDraft = ref("30");
+const rulesBusy = ref(false);
+const rulesNote = ref("");
 let courierTimer = 0;
 const makers = ref([]);
 const makersBusy = ref(false);
@@ -654,6 +661,40 @@ async function readRig() {
   } catch {
     rig.value = { plan: { cards: [], models: [] }, cards: [], models: [] };
   }
+}
+
+async function readRules() {
+  try {
+    rulesView.value = await invoke("rules_status");
+    limitDraft.value = String(rulesView.value.limitMinutes);
+  } catch {
+    rulesView.value = { rules: [], limitMinutes: 30 };
+  }
+}
+
+/** Turns one rule on or off, or sets the time limit. */
+async function changeRules(command, args) {
+  if (rulesBusy.value) return;
+  rulesBusy.value = true;
+  rulesNote.value = "";
+  try {
+    rulesView.value = await invoke(command, args);
+    limitDraft.value = String(rulesView.value.limitMinutes);
+    if (command === "set_rule_limit") rulesNote.value = "Saved.";
+  } catch (error) {
+    rulesNote.value = String(error);
+  } finally {
+    rulesBusy.value = false;
+  }
+}
+
+function saveLimit() {
+  const minutes = limitOf(limitDraft.value);
+  if (minutes === null) {
+    rulesNote.value = `The time limit is from ${LIMIT_LEAST} to ${LIMIT_MOST} minutes.`;
+    return;
+  }
+  changeRules("set_rule_limit", { minutes });
 }
 
 /** Checks and keeps the rig plan as the draft lays it out. */
@@ -2241,6 +2282,7 @@ onMounted(async () => {
   await Promise.all([readGate(), readLanGate()]);
   readCourier();
   readRig();
+  readRules();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   await readWeb();
@@ -2657,6 +2699,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'couriers' }" @click="openTab('settings', 'couriers')">Couriers</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rig' }" @click="openTab('settings', 'rig')">Rig</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rules' }" @click="openTab('settings', 'rules')">Rules</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
@@ -3173,6 +3216,46 @@ onBeforeUnmount(() => {
               <button class="primary" type="button" :disabled="rigBusy" @click="saveRig">Save</button>
             </div>
             <p v-if="rigNote" class="small" role="alert">{{ rigNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'rules'" class="settings-pane">
+            <h3>Rules</h3>
+            <p class="quiet">
+              The Workflow checks every move of a slice against these rules. They are part of the app, and each has its own
+              switch. A rule only ever stops a move, and none reaches past this computer.
+            </p>
+            <ul class="maker-models" aria-label="Rules">
+              <li v-for="rule in rulesView.rules" :key="rule.id" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ rule.name }}</span>
+                  <span class="quiet small">{{ rule.words }}</span>
+                </span>
+                <button
+                  class="switch model-switch"
+                  type="button"
+                  role="switch"
+                  :aria-checked="rule.on"
+                  :aria-label="rule.name"
+                  :disabled="rule.locked || rulesBusy"
+                  @click="changeRules('set_rule', { id: rule.id, on: !rule.on })"
+                >
+                  <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                  <span class="quiet small">{{ switchWord(rule) }}</span>
+                </button>
+              </li>
+            </ul>
+            <h3 class="gap-above">Time limit</h3>
+            <p class="quiet">
+              How long a local model may take to write one slice before it has drifted, from {{ LIMIT_LEAST }} to
+              {{ LIMIT_MOST }} minutes.
+            </p>
+            <div class="settings-actions">
+              <label>
+                <span class="quiet small">Minutes</span>
+                <input v-model="limitDraft" type="number" inputmode="numeric" :min="LIMIT_LEAST" :max="LIMIT_MOST" step="1" />
+              </label>
+              <button class="primary" type="button" :disabled="rulesBusy" @click="saveLimit">Save</button>
+            </div>
+            <p v-if="rulesNote" class="small" role="alert">{{ rulesNote }}</p>
           </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>

@@ -238,6 +238,10 @@ been through. A slice with no `lane` has been through none.
 `check`, or `review`. Leave it out, and the move goes to whoever takes the
 slice into its next lane.
 
+The app checks every move of a slice against its rules, which are coded
+into it, each with a switch in Settings, under Rules. Only you take a slice
+into `main`: that rule has no switch, and the app never merges.
+
 Lanes and moves are this app's own. A backend that has no use for them keeps
 them and writes them back as they arrived.
 

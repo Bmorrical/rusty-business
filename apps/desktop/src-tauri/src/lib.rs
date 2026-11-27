@@ -13,6 +13,7 @@ mod picture;
 mod projects;
 mod remote;
 mod rig;
+mod rules;
 mod sessions;
 mod stack;
 mod starter;
@@ -115,6 +116,9 @@ pub fn run() {
             // The rig plan: many models at once on servers on your private
             // network, behind the LAN gate.
             app.manage(rig::Rig::new(data.join("rig.json")));
+            // The orchestrator's rules: coded checks on every move of a
+            // slice, each behind its own toggle.
+            app.manage(rules::Rules::new(data.join("rules.json")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -137,6 +141,10 @@ pub fn run() {
             board::load_board,
             board::open_sample_board,
             board::save_board_note,
+            rules::rules_status,
+            rules::set_rule,
+            rules::set_rule_limit,
+            rules::check_move,
             sessions::list_sessions,
             sessions::list_votes,
             sessions::load_session,

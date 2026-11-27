@@ -343,6 +343,28 @@ node scripts/fake-rig.mjs
 Then add a model at `127.0.0.1:8091` with the model id `phi-4`, and one at
 `127.0.0.1:8092`, and ask them both a question.
 
+## Rules
+
+The Workflow checks every move of a slice against the app's rules. They are
+coded into the app, with tests, not kept in a file you edit: what you keep is
+which are on, and one time limit. Open **Settings**, then **Rules**.
+
+- **Lanes in order.** A slice goes forward one lane at a time: sliced,
+  written, checked, reviewed, then main. It may go back to an earlier lane to
+  be done again, and a slice in main stays there.
+- **Each lane by its own party.** You slice, a local model writes, the check
+  checks, and a reviewer reviews. You may take any lane's move yourself.
+  After each move, the next move goes to the next lane's party.
+- **Only you take a slice into main.** This rule has no switch. No model,
+  check, or reviewer moves a slice into main, and the app never merges.
+- **A runner keeps to its time.** A local model that takes longer than the
+  time limit to write a slice has drifted. Its work is set aside, and the
+  slice goes back to you to be cut smaller. The limit is 30 minutes to start,
+  and from 5 to 480.
+
+Every rule starts on. A rule only ever stops a move, and none reaches past
+this computer.
+
 ## Boards
 
 The Workflow view shows a board: releases, the stories and bugs under each,

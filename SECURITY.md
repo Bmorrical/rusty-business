@@ -140,6 +140,11 @@ I want to hear about:
   in a file only you can read, and holds the path to a key, never the key.
   Anyone on the network can read what crosses plain http: use the rig on a
   network you trust.
+- **Only you take a slice into main.** The Workflow checks every move of a
+  slice against the app's rules, which are coded into it. Each rule has a
+  switch, but this one does not: no model, check, or reviewer moves a slice
+  into main, and the app never merges. The switches are kept in a file only
+  you can read.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only. The courier
