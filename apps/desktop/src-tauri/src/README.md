@@ -24,6 +24,7 @@ The desktop app's Rust code.
 | `sync.rs`     | What two copies of a board come to: what each side changed since the last sync, and the conflicts. It only compares, and touches no file |
 | `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
 | `courier.rs`  | The courier door: an MCP server on the private network, for a courier app the person brings and pairs. It listens on port 4710 only while its own breaker and the LAN gate are on, and asks only the chat engine's models |
+| `rig.rs`      | The rig: many models at once on servers on the private network. Keeps the plan of its cards and each model's share of them, draws no key into it, and asks a rig model only while the LAN gate is on, without waiting for the turn here |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -216,6 +217,19 @@ Five more live in `courier.rs`, each with tests:
   wrong tries void it. The key is given once and kept only as its SHA-256.
 - No key, and no hash of one, reaches the page.
 - A courier app can stop only its own questions.
+
+Five more live in `rig.rs`, each with tests:
+
+- A plan is checked before it is kept: at most four cards and sixteen
+  models, no card shared past 100 percent, and only a model on the app's
+  list, at a private address over plain http.
+- The plan is kept for this account alone, and holds the path to a key,
+  never the key. No key reaches the page.
+- A rig model is asked only while the LAN gate is on, and turning the gate
+  off stops its answer.
+- Rig models wait for no turn here: two answer at once, and one that cannot
+  be reached holds up no other.
+- A picture never goes to the rig.
 
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts

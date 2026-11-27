@@ -130,6 +130,16 @@ I want to hear about:
   engine outside this computer. The door speaks plain http, so anyone on
   the network can read what crosses it: pair only on a network you trust,
   and unpair a courier app in Settings to take its key away.
+- **The rig is asked only through the LAN gate.** A model on the rig is
+  asked only while the LAN gate is on, at an address on this computer or a
+  private network, over plain http, with no proxy and no redirects, and only
+  a model on the app's list. Turning the gate off stops any answer under
+  way. A picture never goes to the rig. If a server asks for a key, the app
+  reads it from the file you named for each chat and sends it only in that
+  server's Authorization header; it never reaches the page. The plan is kept
+  in a file only you can read, and holds the path to a key, never the key.
+  Anyone on the network can read what crosses plain http: use the rig on a
+  network you trust.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
 - Every port the stack opens listens on this computer only. The courier

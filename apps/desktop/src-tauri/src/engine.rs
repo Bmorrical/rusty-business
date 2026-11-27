@@ -24,6 +24,7 @@ use tokio::sync::watch;
 use crate::gate::{Gate, LanGate};
 use crate::makers::Makers;
 use crate::outside::{self, Outside};
+use crate::rig::{self, Rig};
 use crate::vision;
 
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
@@ -123,16 +124,16 @@ pub(crate) fn client() -> Result<reqwest::Client, String> {
 // Which models are offered
 // ---------------------------------------------------------------------------
 
-struct CatalogEntry {
+pub(crate) struct CatalogEntry {
     /// Lowercase text the engine's model id must contain.
     needle: &'static str,
-    name: &'static str,
+    pub(crate) name: &'static str,
     maker: &'static str,
     license: &'static str,
-    context: u32,
+    pub(crate) context: u32,
     /// True for a model that reads pictures as well as words. It runs on the
     /// picture engine (`vision.rs`), never on the chat engine.
-    pictures: bool,
+    pub(crate) pictures: bool,
 }
 
 /// The allow-list. A model the engine holds that is not here is never shown
@@ -238,7 +239,7 @@ pub fn reads_pictures_by_name(name: &str) -> bool {
         .any(|entry| entry.name == name && entry.pictures)
 }
 
-fn catalog_entry(id: &str) -> Option<&'static CatalogEntry> {
+pub(crate) fn catalog_entry(id: &str) -> Option<&'static CatalogEntry> {
     let lower = id.to_lowercase();
     CATALOG.iter().find(|entry| lower.contains(entry.needle))
 }
@@ -795,6 +796,18 @@ async fn run_chat(
     cancel: &mut watch::Receiver<bool>,
     emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
+    run_chat_keyed(base, request, None, cancel, emit).await
+}
+
+/// One chat on an engine at `base`, with the key a server on the rig asks
+/// for (`rig.rs`) sent as a Bearer header when there is one.
+pub(crate) async fn run_chat_keyed(
+    base: &str,
+    request: &ChatRequest,
+    key: Option<&str>,
+    cancel: &mut watch::Receiver<bool>,
+    emit: impl FnMut(ChatEvent),
+) -> Result<ChatDone, String> {
     checked_request(request)?;
     let body = serde_json::json!({
         "model": request.model,
@@ -803,10 +816,13 @@ async fn run_chat(
         "stream_options": { "include_usage": true },
         "max_tokens": request.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
     });
-    let sending = client()?
+    let mut sending = client()?
         .post(format!("{base}/chat/completions"))
-        .json(&body)
-        .send();
+        .json(&body);
+    if let Some(key) = key {
+        sending = sending.bearer_auth(key);
+    }
+    let sending = sending.send();
     let response = tokio::select! {
         _ = cancel.changed() => return Ok(ChatDone { stopped: true, ..ChatDone::default() }),
         response = sending => response.map_err(|_| "The engine is not answering.".to_string())?,
@@ -1005,12 +1021,52 @@ pub(crate) async fn courier_ask(
     chat_on_engine(&base, lan, chats, &request, stopped, emit).await
 }
 
+/// Where a chat goes: an engine outside this computer, a server on the rig,
+/// or the engine here or on the LAN in its turn.
+#[allow(clippy::too_many_arguments)]
+async fn route(
+    chats: &Chats,
+    gate: &Gate,
+    lan: &LanGate,
+    outside: &Outside,
+    rig: &Rig,
+    request: &ChatRequest,
+    stopped: &mut watch::Receiver<bool>,
+    emit: impl FnMut(ChatEvent),
+) -> Result<ChatDone, String> {
+    if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {
+        // A picture never leaves this computer.
+        Err(vision::STAYS_HERE.to_string())
+    } else if outside::is_outside(&request.model) {
+        // An engine outside this computer waits for no turn here.
+        outside::run_chat(gate, outside, request, stopped, emit).await
+    } else if rig::is_rig(&request.model) {
+        // A server on the rig holds its own model, so it waits for no turn
+        // here either, and many answer at once.
+        rig::run_chat(lan, rig, request, stopped, emit).await
+    } else {
+        // A model that reads pictures answers on the picture engine, on this
+        // computer, and takes its turn with the chat engine's models.
+        let base = if reads_pictures(&request.model) {
+            Ok(vision::PICTURE_BASE_URL.to_string())
+        } else {
+            base_url()
+        };
+        match base {
+            Ok(base) => chat_on_engine(&base, lan, chats, request, stopped, emit).await,
+            Err(error) => Err(error),
+        }
+    }
+}
+
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn chat_stream(
     chats: tauri::State<'_, Chats>,
     gate: tauri::State<'_, Gate>,
     lan: tauri::State<'_, LanGate>,
     outside: tauri::State<'_, Outside>,
+    rig: tauri::State<'_, Rig>,
     chat_id: String,
     request: ChatRequest,
     on_event: Channel<ChatEvent>,
@@ -1021,33 +1077,19 @@ pub async fn chat_stream(
         .lock()
         .map_err(|_| "Could not start the chat.".to_string())?
         .insert(chat_id.clone(), stop);
-    let result = if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {
-        // A picture never leaves this computer.
-        Err(vision::STAYS_HERE.to_string())
-    } else if outside::is_outside(&request.model) {
-        // An engine outside this computer waits for no turn here.
-        outside::run_chat(&gate, &outside, &request, &mut stopped, |event| {
+    let result = route(
+        &chats,
+        &gate,
+        &lan,
+        &outside,
+        &rig,
+        &request,
+        &mut stopped,
+        |event| {
             let _ = on_event.send(event);
-        })
-        .await
-    } else {
-        // A model that reads pictures answers on the picture engine, on this
-        // computer, and takes its turn with the chat engine's models.
-        let base = if reads_pictures(&request.model) {
-            Ok(vision::PICTURE_BASE_URL.to_string())
-        } else {
-            base_url()
-        };
-        match base {
-            Ok(base) => {
-                chat_on_engine(&base, &lan, &chats, &request, &mut stopped, |event| {
-                    let _ = on_event.send(event);
-                })
-                .await
-            }
-            Err(error) => Err(error),
-        }
-    };
+        },
+    )
+    .await;
     if let Ok(mut map) = chats.stops.lock() {
         map.remove(&chat_id);
     }
@@ -1636,6 +1678,104 @@ mod tests {
             );
             drop(second_stop);
         });
+    }
+
+    // Brad, 2026-11-24: "many models at once on the LAN". Each server on the
+    // rig holds its own model, so a rig model waits for no turn here.
+    #[test]
+    fn a_rig_model_answers_while_a_model_here_holds_the_turn() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 4096];
+            while let Ok(read) = stream.read(&mut buffer) {
+                if read == 0 {
+                    return;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                let text = String::from_utf8_lossy(&request).to_lowercase();
+                let Some(end) = text.find("\r\n\r\n") else {
+                    continue;
+                };
+                let length = text[..end]
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length:"))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if request.len() >= end + 4 + length {
+                    break;
+                }
+            }
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
+                  data: {\"choices\":[{\"delta\":{\"content\":\"from the rig\"}}]}\n\n\
+                  data: [DONE]\n\n",
+            );
+        });
+
+        let place = std::env::temp_dir().join(format!("rusty-engine-rig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&place);
+        std::fs::create_dir_all(&place).unwrap();
+        let lan = LanGate::new(place.join("lan-gate"));
+        lan.gate().set(true).unwrap();
+        let outside = Outside::new(place.join("outside.json"));
+        let rig = Rig::new(place.join("rig.json"));
+        rig.save(&rig::Plan {
+            cards: vec![rig::Card {
+                name: "Card one".to_string(),
+                memory_gb: 96.0,
+            }],
+            models: vec![rig::RigModel {
+                name: "Phi".to_string(),
+                address,
+                model: "phi-4-q4".to_string(),
+                shares: vec![rig::Share {
+                    card: 0,
+                    percent: 50,
+                }],
+                ..rig::RigModel::default()
+            }],
+        })
+        .unwrap();
+        let chats = Chats::default();
+        let request = ChatRequest {
+            model: "rig:m1".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hello?".to_string(),
+                images: Vec::new(),
+            }],
+            max_tokens: None,
+        };
+        let done = tauri::async_runtime::block_on(async {
+            let _held = chats.turn.lock().await;
+            let (_stop, mut stopped) = watch::channel(false);
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                route(
+                    &chats,
+                    &Gate::at(false),
+                    &lan,
+                    &outside,
+                    &rig,
+                    &request,
+                    &mut stopped,
+                    |_| {},
+                ),
+            )
+            .await
+            .expect("the rig model waited for the turn here")
+        });
+        assert_eq!(done.unwrap().answer, "from the rig");
+        std::fs::remove_dir_all(&place).unwrap();
     }
 
     /// Needs the engine running with Phi-4 on hand: `cargo test -- --ignored`.

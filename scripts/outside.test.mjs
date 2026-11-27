@@ -90,7 +90,7 @@ function pageFunction(app, name) {
 test('the key stays in Rust: never sent to the page, never logged, never kept by the app', () => {
   const source = code(OUTSIDE);
   // The key has no Debug, Display, Clone, or Serialize to leak it through.
-  assert.match(source, /\n\/\/\/[^\n]*\n(?:\/\/\/[^\n]*\n)*struct Key\(String\);/, 'the key is no longer a type of its own');
+  assert.match(source, /\n\/\/\/[^\n]*\n(?:\/\/\/[^\n]*\n)*(?:pub\(crate\) )?struct Key\(String\);/, 'the key is no longer a type of its own');
   assert.doesNotMatch(source, /#\[derive[^\]]*\]\s*(?:\/\/\/[^\n]*\s*)*struct Key\b/, 'the key can now be printed, copied, or sent');
   for (const way of ['println!', 'eprintln!', 'print!', 'dbg!', 'log::', 'tracing::']) {
     assert.ok(!source.includes(way), `${OUTSIDE} writes with ${way}`);
@@ -186,14 +186,16 @@ test("each engine is asked at its maker's API alone, over https, and only while 
 
 test('an outside engine waits for no turn, and the app knows its commands', () => {
   const engine = code(ENGINE);
-  const stream = rustFunction(engine, 'chat_stream');
+  // The chat command hands every chat to route, which picks its engine.
+  assert.ok(rustFunction(engine, 'chat_stream').includes('let result = route('), 'the chat no longer goes by route');
+  const stream = rustFunction(engine, 'route');
   // A picture is turned away first: it never leaves this computer.
-  const refused = stream.indexOf('let result = if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {');
+  const refused = stream.indexOf('    if outside::is_outside(&request.model) && vision::has_pictures(&request.messages) {');
   assert.ok(refused >= 0, 'a picture can reach an outside engine');
   const outside = stream.indexOf('} else if outside::is_outside(&request.model) {');
   assert.ok(outside > refused, "the chat no longer sends an outside engine's models to it");
   assert.ok(stream.indexOf('chat_on_engine(') > outside, 'an outside engine waits for the turn the on-device and LAN models take');
-  assert.ok(stream.includes('outside::run_chat(&gate, &outside,'), 'an outside engine is asked without the gate');
+  assert.ok(stream.includes('outside::run_chat(gate, outside,'), 'an outside engine is asked without the gate');
 
   const lib = read(LIB);
   assert.ok(lib.includes('app.manage(outside::Outside::new(data.join("outside.json")));'), "the app no longer keeps the paths in its own folder");
@@ -221,7 +223,7 @@ test('the page sends only the path, keeps none of it, and offers an engine only 
       app.includes('const outsideModels = computed(() => (gate.value ? outsideListed.value : []));'),
     "an outside engine's models are offered with the gate off, or before it is added",
   );
-  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.engineModels\.value, \.\.\.visionModels\.value, \.\.\.outsideModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.engineModels\.value, \.\.\.visionModels\.value, \.\.\.outsideModels\.value, \.\.\.rigModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
   assert.ok(app.includes('const models = computed(() => switchedOn(onHand.value, off.value));'), 'an outside engine switched off is still asked');
   // Rust gives every engine, as a list.
   assert.ok(pageFunction(app, 'readOutside').includes('outside.value = Array.isArray(listed) ? listed : [];'), 'the page no longer reads the engines as a list');
@@ -270,7 +272,7 @@ test('the page sends only the path, keeps none of it, and offers an engine only 
   assert.ok(app.includes('<span class="quiet small chip-detail">{{ chipDetail(entry) }}</span>'), 'a chip no longer says when its model is asked online');
   // A saved chat still names an outside model once the gate is off or its
   // engine is removed.
-  assert.ok(pageFunction(app, 'modelName').includes('...outside.value.flatMap((entry) => entry.models ?? [])]'), 'a saved chat loses the name of the outside model that answered it');
+  assert.ok(pageFunction(app, 'modelName').includes('...outside.value.flatMap((entry) => entry.models ?? [])'), 'a saved chat loses the name of the outside model that answered it');
 });
 
 test("every rule for the outside engines has its Rust test", () => {

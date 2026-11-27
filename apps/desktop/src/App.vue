@@ -114,6 +114,22 @@ import {
   smallDownloadLine,
   splitDrop,
 } from "./utilities.js";
+import {
+  CARDS_MOST,
+  draftOf,
+  MODELS_MOST,
+  pieOf,
+  pieStyle,
+  planOf,
+  rigModels as rigOffered,
+  roomFor,
+  SHARE_STEP,
+  shareLine,
+  withCard,
+  withModel,
+  withoutCard,
+  withoutModel,
+} from "./rig.js";
 
 // The page only works inside the app's own window, where Rust answers.
 const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -190,6 +206,13 @@ const lanGateNote = ref("");
 const courier = ref({ on: false, port: 4710, address: null, place: null, error: null, paired: [], code: null, codeSeconds: 0 });
 const courierBusy = ref(false);
 const courierNote = ref("");
+// The rig: many models at once on servers on your private network. The page
+// edits a draft; Rust checks and keeps the plan, and works out what it comes
+// to. No key ever comes to the page, only the path to its file.
+const rig = ref({ plan: { cards: [], models: [] }, cards: [], models: [] });
+const rigDraft = ref({ cards: [], models: [] });
+const rigBusy = ref(false);
+const rigNote = ref("");
 let courierTimer = 0;
 const makers = ref([]);
 const makersBusy = ref(false);
@@ -270,7 +293,8 @@ let learnedTimer = 0;
 let clockTimer = 0;
 let learning = Promise.resolve();
 
-let chatId = "";
+// The chats under way, so Stop stops every one: the rig's models answer at once.
+const liveChats = new Set();
 let learnId = "";
 /** True once Stop is pressed: the models still waiting, and the steps in a project's folder, end too. */
 let stopAll = false;
@@ -299,7 +323,9 @@ const visionNote = ref("");
 let visionStarting = false;
 const visionModels = computed(() => (vision.value?.reachable ? (vision.value.models ?? []) : []).map((entry) => ({ ...entry, pictures: true })));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value]);
+// The rig's models are offered only while the LAN gate is on.
+const rigModels = computed(() => rigOffered(rig.value, lanGate.value));
+const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value, ...rigModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -619,6 +645,41 @@ async function readCourier() {
   } catch {
     courier.value = { ...courier.value, on: false, address: null, place: null, code: null };
   }
+}
+
+async function readRig() {
+  try {
+    rig.value = await invoke("rig_status");
+    rigDraft.value = draftOf(rig.value.plan);
+  } catch {
+    rig.value = { plan: { cards: [], models: [] }, cards: [], models: [] };
+  }
+}
+
+/** Checks and keeps the rig plan as the draft lays it out. */
+async function saveRig() {
+  if (rigBusy.value) return;
+  rigBusy.value = true;
+  rigNote.value = "";
+  try {
+    rig.value = await invoke("save_rig", { plan: planOf(rigDraft.value) });
+    rigDraft.value = draftOf(rig.value.plan);
+    rigNote.value = "Saved.";
+  } catch (error) {
+    rigNote.value = String(error);
+  } finally {
+    rigBusy.value = false;
+  }
+}
+
+/** What a saved model's shares come to, by its id. */
+function rigShare(id) {
+  return shareLine(rig.value.models.find((model) => model.id === id));
+}
+
+/** Where a rig model is served, for the card over its answer. */
+function placeOf(id) {
+  return rig.value.models.find((model) => model.chatId === id)?.place ?? "";
 }
 
 /** Turns the courier breaker on or off, pairs, stops pairing, or unpairs. */
@@ -1435,15 +1496,20 @@ async function send() {
   }
   const replies = session.messages.slice(start);
   const failed = [];
+  // Each server on the rig holds its own model, so the rig's models answer at
+  // once, while the models here take their turns.
+  const onRig = askRig(asked, replies, history, failed);
   for (const [index, entry] of asked.entries()) {
     // Stop ends the reply under way, and the models still waiting are not asked.
     if (stopAll) break;
+    if (entry.rig) continue;
     const reply = replies[index];
     reply.waiting = false;
     const error = await ask(reply, entry, requestMessages(history, entry.id, "", entry.pictures === true));
     // One model failing does not keep the next from answering.
     if (error) failed.push(`${entry.name}: ${error}`);
   }
+  await onRig;
   for (const reply of replies) {
     reply.pending = false;
     reply.waiting = false;
@@ -1474,6 +1540,23 @@ async function send() {
   focusComposer();
   // An outside engine looks for memories only when Settings allows it.
   if (answered && text && (learnOutside.value || !isOutside(asked[0].id))) learning = learn(text, asked[0].id, project);
+}
+
+/**
+ * Brad, 2026-11-24: "many models at once on the LAN". Asks every rig model
+ * picked at once, each into its own reply. One failing keeps no other from
+ * answering.
+ */
+function askRig(asked, replies, history, failed) {
+  return Promise.all(
+    asked.map(async (entry, index) => {
+      if (!entry.rig) return;
+      const reply = replies[index];
+      reply.waiting = false;
+      const error = await ask(reply, entry, requestMessages(history, entry.id, "", false));
+      if (error) failed.push(`${entry.name}: ${error}`);
+    }),
+  );
 }
 
 /** The chat with what the model is told first, when there is anything to tell. */
@@ -1844,7 +1927,8 @@ async function ask(reply, entry, messages) {
     }
     followAnswer();
   };
-  chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  liveChats.add(chatId);
   try {
     const done = await invoke("chat_stream", {
       chatId,
@@ -1865,7 +1949,7 @@ async function ask(reply, entry, messages) {
     return String(error);
   } finally {
     reply.pending = false;
-    chatId = "";
+    liveChats.delete(chatId);
   }
 }
 
@@ -2000,7 +2084,7 @@ function decide(yes) {
 function stop() {
   if (!busy.value) return;
   stopAll = true;
-  if (chatId) invoke("stop_chat", { chatId });
+  for (const chatId of liveChats) invoke("stop_chat", { chatId });
   // A look for memories the new question waits on stops too.
   if (learnId) invoke("stop_chat", { chatId: learnId });
   approve?.(false);
@@ -2113,7 +2197,8 @@ function modelName(id) {
   // chat still names the model that wrote it.
   // So does a chat an outside engine answered after the engine is removed.
   // A model switched off still names the chats it wrote.
-  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
+  // So does a chat a rig model answered while the LAN gate is off.
+  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? []), ...rigOffered(rig.value, true)];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -2155,6 +2240,7 @@ onMounted(async () => {
   // While the gate is off, Rust starts no stack and asks for no new version.
   await Promise.all([readGate(), readLanGate()]);
   readCourier();
+  readRig();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   await readWeb();
@@ -2570,6 +2656,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'web' }" @click="openTab('settings', 'web')">Web</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'couriers' }" @click="openTab('settings', 'couriers')">Couriers</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rig' }" @click="openTab('settings', 'rig')">Rig</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
@@ -3023,6 +3110,70 @@ onBeforeUnmount(() => {
             </ul>
             <p v-if="courierNote" class="small" role="alert">{{ courierNote }}</p>
           </div>
+          <div v-else-if="settingsTab === 'rig'" class="settings-pane">
+            <h3>Rig</h3>
+            <p class="quiet">
+              Lay out the cards on a rig on your private network, and the models served on it, each at its own address. Each
+              model answers at once beside the others. Give each a share of one card or more, and each card shows as a pie.
+              A picture never goes to the rig.
+            </p>
+            <p v-if="!lanGate" class="gate-ask">
+              <span>The LAN gate is off, so the rig's models are not offered.</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <h3 class="gap-above">Cards</h3>
+            <p v-if="!rigDraft.cards.length" class="quiet">None yet.</p>
+            <ul v-else class="rig-cards">
+              <li v-for="(card, place) in rigDraft.cards" :key="place" class="rig-card">
+                <div class="rig-pie" role="img" :aria-label="`${card.name || 'Card'}: ${pieOf(rigDraft, place).free} percent free`" :style="pieStyle(pieOf(rigDraft, place))"></div>
+                <div class="rig-fields">
+                  <label>Name <input v-model="card.name" type="text" maxlength="40" :disabled="rigBusy" /></label>
+                  <label>Memory, GB <input v-model.number="card.memoryGb" type="number" min="1" max="1024" step="1" :disabled="rigBusy" /></label>
+                  <p class="quiet small" :role="pieOf(rigDraft, place).over ? 'alert' : null">
+                    {{ pieOf(rigDraft, place).over ? "Shared past 100 percent." : `${pieOf(rigDraft, place).free} percent free` }}
+                  </p>
+                  <ul class="rig-slices small">
+                    <li v-for="slice in pieOf(rigDraft, place).slices" :key="slice.name"><span class="rig-swatch" :style="`background: ${slice.color};`"></span>{{ slice.name }}, {{ slice.percent }}%</li>
+                  </ul>
+                </div>
+                <button type="button" :disabled="rigBusy" :aria-label="`Remove ${card.name || 'this card'}`" @click="rigDraft = withoutCard(rigDraft, place)">Remove</button>
+              </li>
+            </ul>
+            <div class="settings-actions">
+              <button type="button" :disabled="rigBusy || rigDraft.cards.length >= CARDS_MOST" @click="rigDraft = withCard(rigDraft)">Add a card</button>
+            </div>
+            <h3 class="gap-above">Models</h3>
+            <p v-if="!rigDraft.models.length" class="quiet">None yet.</p>
+            <ul v-else class="rig-models">
+              <li v-for="(model, index) in rigDraft.models" :key="index" class="rig-model">
+                <div class="rig-fields">
+                  <label>Name <input v-model="model.name" type="text" maxlength="40" :disabled="rigBusy" /></label>
+                  <label>Address <input v-model="model.address" type="text" placeholder="192.168.1.20:8091" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Model id on the server <input v-model="model.model" type="text" placeholder="phi-4" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Key file, if the server asks for one <input v-model="model.keyFile" type="text" placeholder="~/keys/rig.key" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Needs, GB <input v-model="model.needsGb" type="number" min="0" step="1" :disabled="rigBusy" /></label>
+                  <label v-for="(card, place) in rigDraft.cards" :key="place" class="rig-share">
+                    Share of {{ card.name || `card ${place + 1}` }}: {{ model.percents[place] }}%
+                    <input
+                      v-model.number="model.percents[place]"
+                      type="range"
+                      min="0"
+                      :max="roomFor(rigDraft, index, place)"
+                      :step="SHARE_STEP"
+                      :disabled="rigBusy"
+                    />
+                  </label>
+                  <p v-if="model.id && rigShare(model.id)" class="quiet small">{{ rigShare(model.id) }}</p>
+                </div>
+                <button type="button" :disabled="rigBusy" :aria-label="`Remove ${model.name || 'this model'}`" @click="rigDraft = withoutModel(rigDraft, index)">Remove</button>
+              </li>
+            </ul>
+            <div class="settings-actions">
+              <button type="button" :disabled="rigBusy || !rigDraft.cards.length || rigDraft.models.length >= MODELS_MOST" @click="rigDraft = withModel(rigDraft)">Add a model</button>
+              <button class="primary" type="button" :disabled="rigBusy" @click="saveRig">Save</button>
+            </div>
+            <p v-if="rigNote" class="small" role="alert">{{ rigNote }}</p>
+          </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>
             <p v-if="lanEngine" class="quiet">
@@ -3429,7 +3580,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
             <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn), best: votesOn && turn.best }">
-              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}<span v-if="placeOf(turn.model)" class="quiet"> on {{ placeOf(turn.model) }}</span></h3>
               <button
                 v-if="round.answers.length > 1"
                 class="copy widen"
@@ -5315,6 +5466,50 @@ textarea.memory:focus,
 .field input:focus,
 .field textarea:focus {
   border-color: var(--faint);
+}
+
+.rig-cards,
+.rig-models,
+.rig-slices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rig-card,
+.rig-model {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rig-pie {
+  flex: none;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 50%;
+}
+
+.rig-fields {
+  display: grid;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.rig-fields label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.rig-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
 }
 
 .settings-actions {

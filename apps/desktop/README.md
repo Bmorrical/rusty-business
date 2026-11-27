@@ -310,6 +310,39 @@ asks one of them and streams the answer back as progress while it comes.
 or from an address outside your private network, is turned away. The door
 speaks plain http: use it on a network you trust.
 
+## Rig
+
+The rig is a computer on your private network with cards of its own, each
+serving models with llama-server, one model to a server, each at its own
+port. The app asks them at once: each answers beside the others while the
+models on this computer still take their turns.
+
+1. Turn on the **LAN gate** at the foot of the window.
+2. Open **Settings**, then **Rig**. Add each card, with its memory.
+3. Add each model: a name, the server's address (such as
+   `192.168.1.20:8091`), the model's id on that server, which must be on the
+   app's list, and, if the server asks for one, the path to a file that holds
+   its key.
+4. Give each model its share of one card or more with the sliders. Each card
+   shows as a pie of the models that share it, and each model says what its
+   shares come to, in cards and in GB.
+5. Select **Save**. The rig's models join the models you can pick in the
+   chat.
+
+The app works out each model's split across the cards, such as `2,2,1`,
+for the server's `--tensor-split`; for now you start each server with it
+yourself. A picture never goes to the rig.
+
+To try the pane with no cards, start a stand-in rig on this computer: four
+small servers, at ports 8091 to 8094, that answer a word at a time.
+
+```sh
+node scripts/fake-rig.mjs
+```
+
+Then add a model at `127.0.0.1:8091` with the model id `phi-4`, and one at
+`127.0.0.1:8092`, and ask them both a question.
+
 ## Boards
 
 The Workflow view shows a board: releases, the stories and bugs under each,

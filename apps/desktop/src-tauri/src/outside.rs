@@ -464,7 +464,41 @@ fn gemini_version(id: &str) -> Option<(u32, u32)> {
 
 /// The person's key, read from their file for one call and dropped after it.
 /// It has no `Debug` and no `Display`, so nothing can print it.
-struct Key(String);
+pub(crate) struct Key(String);
+
+impl Key {
+    /// The key itself, for the one header that carries it.
+    pub(crate) fn text(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The key for a server on the rig (`rig.rs`), from the file at the path
+/// the person gave, read the same way as an outside engine's.
+pub(crate) fn lan_key(given: &str) -> Result<Key, String> {
+    read_key(&lan_key_path(given)?)
+}
+
+/// The path to a rig server's key file, whole. A key pasted in its place is
+/// refused, and the message never repeats it.
+pub(crate) fn lan_key_path(given: &str) -> Result<PathBuf, String> {
+    let whole = || "Give the whole path to the key file, such as ~/keys/rig.key.".to_string();
+    let given = given.trim();
+    if given.is_empty() || given.chars().count() > PATH_MOST {
+        return Err(whole());
+    }
+    let path = match given
+        .strip_prefix("~/")
+        .or_else(|| given.strip_prefix("~\\"))
+    {
+        Some(rest) => home().ok_or_else(whole)?.join(rest),
+        None => PathBuf::from(given),
+    };
+    if !path.is_absolute() {
+        return Err(whole());
+    }
+    Ok(path)
+}
 
 /// The key in the file at `path`. A file that holds anything but one key is
 /// refused, and no message says what the file holds.

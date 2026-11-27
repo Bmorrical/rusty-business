@@ -12,6 +12,7 @@ mod outside;
 mod picture;
 mod projects;
 mod remote;
+mod rig;
 mod sessions;
 mod stack;
 mod starter;
@@ -111,6 +112,9 @@ pub fn run() {
                 data.join("couriers.json"),
             ));
             courier::start(app.handle());
+            // The rig plan: many models at once on servers on your private
+            // network, behind the LAN gate.
+            app.manage(rig::Rig::new(data.join("rig.json")));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -159,6 +163,8 @@ pub fn run() {
             gate::lan_gate_status,
             gate::set_lan_gate,
             courier::courier_status,
+            rig::rig_status,
+            rig::save_rig,
             courier::set_courier,
             courier::pair_courier,
             courier::stop_pairing_courier,
