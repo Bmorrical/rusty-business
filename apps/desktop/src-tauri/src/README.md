@@ -25,7 +25,7 @@ The desktop app's Rust code.
 | `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
 | `courier.rs`  | The courier door: an MCP server on the private network, for a courier app the person brings and pairs. It listens on port 4710 only while its own breaker and the LAN gate are on, and asks only the chat engine's models |
 | `rig.rs`      | The rig: many models at once on servers on the private network. Keeps the plan of its cards and each model's share of them, draws no key into it, and asks a rig model only while the LAN gate is on, without waiting for the turn here |
-| `rules.rs`    | The orchestrator's rules: the checks the Workflow applies to every move of a slice, coded here, each with its toggle, and the runner's time limit, kept for this account alone |
+| `rules.rs`    | The orchestrator's rules: the checks the Workflow applies to every move of a slice, coded here, each with its toggle, and the runner's time limit, kept for this account alone. It also moves a slice on a board, as you, once the rules allow it |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -232,7 +232,7 @@ Five more live in `rig.rs`, each with tests:
   be reached holds up no other.
 - A picture never goes to the rig.
 
-Four more live in `rules.rs`, each with tests:
+Five more live in `rules.rs`, each with tests:
 
 - A slice goes through the lanes in order, and each lane is worked by its
   own party or by you; each has a toggle, and starts on.
@@ -242,7 +242,10 @@ Four more live in `rules.rs`, each with tests:
   slice goes back to you to be cut smaller.
 - The toggles are kept for this account alone. A move into a lane, or by a
   party, the app does not know is refused.
-
+- A move from the Workflow view is made as you, from the lane the board
+  says the slice is in. An allowed move writes its lane and whose move is
+  next, a refused one writes nothing, and a drifted runner leaves the lane
+  where it was and adds a note.
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts
 has its front door on this computer only, and its passwords are made on its

@@ -10,8 +10,10 @@
 // rules.rs stops quoting the ask or loses a test that keeps the rules, when a
 // rule leaves the list or the main rule gains a toggle, when the rules' lanes
 // and parties stop matching the Workflow's, when the Rules tab loses a switch
-// or the time limit, or when SECURITY.md, BOARD.md, and the desktop README
-// stop saying that only you take a slice into main.
+// or the time limit, when SECURITY.md, BOARD.md, and the desktop README
+// stop saying that only you take a slice into main, or when the Workflow's
+// move of a slice could be made as anyone but you, or from a lane the page
+// names.
 //
 // The checks read the files as text, so nothing has to be installed to run
 // them.
@@ -27,6 +29,7 @@ const APP = 'apps/desktop/src/App.vue';
 const RULES = 'apps/desktop/src-tauri/src/rules.rs';
 const LIB = 'apps/desktop/src-tauri/src/lib.rs';
 const BOARD_JS = 'apps/desktop/src/board.js';
+const VIEW = 'apps/desktop/src/Workflow.vue';
 
 /** The Rust tests that keep the rules. */
 const RULES_TESTS = [
@@ -38,6 +41,11 @@ const RULES_TESTS = [
   'a_move_the_app_does_not_know_is_refused',
   'the_toggles_are_kept_for_this_account_alone_and_read_back',
   'the_rules_know_the_boards_lanes_and_moves',
+  'a_move_you_make_is_written_with_whose_move_is_next',
+  'a_refused_move_writes_nothing',
+  'a_runner_that_drifted_leaves_the_lane_and_hands_the_slice_back',
+  'a_slice_you_send_back_goes_to_that_lanes_party_next',
+  'a_story_or_slice_not_on_the_board_is_said_and_nothing_is_written',
 ];
 
 function read(file) {
@@ -58,7 +66,7 @@ test("rules.rs keeps Brad's words and every test that keeps the rules", () => {
   }
   const lib = read(LIB);
   assert.match(lib, /^mod rules;$/m, `${LIB} no longer builds the rules`);
-  for (const name of ['rules_status', 'set_rule', 'set_rule_limit', 'check_move']) {
+  for (const name of ['rules_status', 'set_rule', 'set_rule_limit', 'check_move', 'move_slice']) {
     assert.ok(lib.includes(`rules::${name},`), `${LIB} no longer registers ${name}`);
   }
   assert.ok(lib.includes('app.manage(rules::Rules::new(data.join("rules.json")));'), 'the toggles are no longer kept in the app folder');
@@ -121,4 +129,36 @@ test('SECURITY.md, BOARD.md, and the desktop README say that only you take a sli
   const desktop = read('apps/desktop/README.md');
   assert.match(desktop, /^## Rules$/m, 'the desktop README has lost its Rules section');
   assert.ok(flat(desktop).includes('**Only you take a slice into main.** This rule has no switch.'), 'the desktop README no longer says the main rule has no switch');
+});
+
+test('a move from the Workflow is made as you, from the lane the board says', () => {
+  const rules = read(RULES);
+  const start = rules.indexOf('pub fn move_slice(');
+  assert.ok(start >= 0, `${RULES} has lost move_slice`);
+  const taken = rules
+    .slice(start + 'pub fn move_slice('.length, rules.indexOf(') ->', start))
+    .split('\n')
+    .map((each) => each.trim().replace(/,$/, ''))
+    .filter(Boolean);
+  assert.deepEqual(
+    taken,
+    ["boards: tauri::State<'_, Boards>", "rules: tauri::State<'_, Rules>", 'id: String', 'story: u64', 'slice: String', 'to: String'],
+    'move_slice takes more from the page than the slice and its lane',
+  );
+  const body = rules.slice(start, rules.indexOf('\n}', start));
+  assert.match(body, /by: "you"\.to_string\(\),\s+\.\.Move::default\(\)/, 'a move from the page is not made as you');
+  const take = rules.slice(rules.indexOf('pub fn take('), rules.indexOf('\n}', rules.indexOf('pub fn take(')));
+  assert.match(take, /\|held\| \{\s+step\.from = held\.lane\.clone\(\);/, 'where the slice is comes from the caller');
+  assert.ok(take.includes('let verdict = rules.check(&step)?;'), 'a move is written without the rules');
+
+  const view = read(VIEW);
+  const asks = [...view.matchAll(/invoke\("move_slice", \{([^}]*)\}\)/g)].map((match) => match[1].split(',').map((each) => each.trim().split(':')[0]));
+  assert.deepEqual(asks, [['id', 'story', 'slice', 'to']], 'the page sends more than the slice and its lane');
+
+  const security = flat(read('SECURITY.md'));
+  assert.ok(
+    security.includes('is made as you: the page names only the lane, so it cannot say a model, the check, or a reviewer made it.'),
+    'SECURITY.md no longer says a move from the page is made as you',
+  );
+  assert.ok(flat(read('BOARD.md')).includes('`board sync` then carries them to the shared file'), 'BOARD.md no longer says a move reaches the shared file');
 });

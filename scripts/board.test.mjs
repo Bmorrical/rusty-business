@@ -86,6 +86,9 @@ const NO_API = [
 /** Everything the view asks of Rust. */
 const COMMANDS = ['list_boards', 'load_board', 'open_sample_board', 'save_board_note'];
 
+/** What the view asks of the rules: to move a slice. scripts/rules.test.mjs checks it. */
+const RULE_COMMANDS = ['move_slice'];
+
 /** What a command may take from the page: a board's id, a story's number, and a note. */
 const TAKEN = ['id: String', 'story: u64', 'text: String'];
 
@@ -237,11 +240,11 @@ test('the side has a Workflow button, and it opens the view in place of the chat
   assert.ok(early < open.indexOf('await '), 'opening Workflow asks Rust before it stops');
 });
 
-test('the view asks Rust for four things, and each is a command the app offers', () => {
+test('the view asks Rust for five things, and each is a command the app offers', () => {
   const view = read(VIEW);
   const asked = [...view.matchAll(/invoke\(\s*"([a-z_]+)"/g)].map((match) => match[1]);
   assert.equal(count(view, 'invoke('), asked.length, 'the view calls a command it does not name');
-  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS].sort(), 'the view asks Rust for something else');
+  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS, ...RULE_COMMANDS].sort(), 'the view asks Rust for something else');
 
   const lib = read(LIB);
   const store = code(read(STORE));
@@ -252,6 +255,7 @@ test('the view asks Rust for four things, and each is a command the app offers',
   }
   assert.equal(count(store, '#[tauri::command]'), COMMANDS.length, 'the store offers a command the view does not use');
   assert.equal(count(lib, 'board::'), COMMANDS.length + 1, `${LIB} offers a board command this check does not know`);
+  for (const name of RULE_COMMANDS) assert.ok(lib.includes(`rules::${name},`), `the app does not offer ${name}`);
 });
 
 // Brad, 2026-11-20: "offline first, security second".
@@ -460,7 +464,7 @@ test('a picked story or slice is in view, with the keyboard on its heading', () 
   assert.ok(bring.includes('?.scrollIntoView({ block: "start" });'), 'the pane is not brought into view');
 });
 
-test('the view shows a board as text, says where the gates stand, and changes neither', () => {
+test('the view shows a board as text, says where the gates stand, and changes neither gate', () => {
   const view = read(VIEW);
   assert.ok(!view.includes('v-html'), 'the view shows a board\'s words as markup');
   assert.ok(!view.includes('innerHTML'), 'the view writes markup itself');
@@ -468,7 +472,7 @@ test('the view shows a board as text, says where the gates stand, and changes ne
 
   assert.ok(view.includes('WAN {{ wan ? "on" : "off" }}'), 'the view does not say where the WAN gate stands');
   assert.ok(view.includes('LAN {{ lan ? "on" : "off" }}'), 'the view does not say where the LAN gate stands');
-  assert.ok(view.includes('This view reads only that copy.'), 'the view does not say it reads the local copy alone');
+  assert.ok(view.includes('This view reads and moves only that copy.'), 'the view does not say it reads and moves the local copy alone');
   // Its only words to the rest of the page: close me, and show the side.
   assert.ok(view.includes('const emit = defineEmits(["close", "side"]);'), 'the view can ask the page for something else');
   assert.ok(view.includes('pulledLine(board.pulledAt)'), 'the view does not say when the copy was pulled');
@@ -554,7 +558,7 @@ test('the READMEs, the roadmap, and SECURITY.md say what the view does', () => {
 
   const security = read('SECURITY.md');
   const promises = security.slice(security.indexOf('These are the promises that matter most.'));
-  assert.match(promises, /The Workflow view reads only the boards kept on this computer/, 'SECURITY.md does not promise the view reads the local copy alone');
+  assert.match(promises, /The Workflow view reads and moves only the boards kept on this\s+computer/, 'SECURITY.md does not promise the view reads and moves the local copy alone');
   assert.match(promises, /with both\s+gates\s+off/, 'SECURITY.md does not say the view works with both gates off');
   assert.match(promises, /never\s+changes\s+(?:or\s+removes\s+)?your\s+notes/, 'SECURITY.md does not promise a new copy leaves the notes');
 });

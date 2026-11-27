@@ -48,8 +48,10 @@ Select the picture to open it full size. The rest of the set is in
   Sliced, Written, Checked, Reviewed, and Main, and the view says whose
   move each slice and each story is. A story shows five marks, one for
   each lane all of its slices have been through, and all five make a royal
-  flush. The view reads only a copy kept on this computer, so it works
-  with both gates off, and it keeps a note of your own on any story. The
+  flush. You move a slice into its next lane, or back to be done again,
+  and the [rules](#rules) check each move first. The view reads and moves
+  only a copy kept on this computer, so it works with both gates off, and
+  it keeps a note of your own on any story. The
   sample board is made up, and shows how one reads. [Boards](#boards)
   says where a board is kept and what is in one.
 - **A switch for each model**, in Settings under Models, for the models on
@@ -361,6 +363,11 @@ which are on, and one time limit. Open **Settings**, then **Rules**.
   time limit to write a slice has drifted. Its work is set aside, and the
   slice goes back to you to be cut smaller. The limit is 30 minutes to start,
   and from 5 to 480.
+
+A move the rules allow is written into the board's copy on this computer:
+the slice's lane, and whose move is next. A refused move writes nothing,
+and the view says why. A runner that drifted leaves the slice in its lane,
+hands the move to you, and adds a note saying so.
 
 Every rule starts on. A rule only ever stops a move, and none reaches past
 this computer.

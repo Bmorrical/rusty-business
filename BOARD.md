@@ -242,6 +242,10 @@ The app checks every move of a slice against its rules, which are coded
 into it, each with a switch in Settings, under Rules. Only you take a slice
 into `main`: that rule has no switch, and the app never merges.
 
+When you move a slice in the Workflow view, the app writes its `lane` and
+`move` into the copy on this computer, and nothing else on the board.
+`board sync` then carries them to the shared file like any other change.
+
 Lanes and moves are this app's own. A backend that has no use for them keeps
 them and writes them back as they arrived.
 

@@ -145,6 +145,7 @@ pub fn run() {
             rules::set_rule,
             rules::set_rule_limit,
             rules::check_move,
+            rules::move_slice,
             sessions::list_sessions,
             sessions::list_votes,
             sessions::load_session,

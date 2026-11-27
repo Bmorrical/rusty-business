@@ -90,11 +90,14 @@ I want to hear about:
   key. The app keeps the path to your key file, never the key, and the key
   never reaches the page. What comes back is cut to at most 8 results of
   plain text, with every tag taken out, before the model reads it.
-- The Workflow view reads only the boards kept on this computer, in the
-  app's own data folder. It asks nothing of the network and works with both
-  gates off. No command it uses takes a path, a new copy of a board never
-  changes or removes your notes, and nothing in the boards folder is
-  deleted.
+- The Workflow view reads and moves only the boards kept on this
+  computer, in the app's own data folder. It asks nothing of the network
+  and works with both gates off. No command it uses takes a path, a new
+  copy of a board never changes or removes your notes, and nothing in the
+  boards folder is deleted. A move of a slice is checked against the rules
+  before anything is written, and is made as you: the page names only the
+  lane, so it cannot say a model, the check, or a reviewer made it. Where
+  the slice is comes from the board, never from the page.
 - The `board` command, run in a terminal, reads and writes one board file
   at a path you type. The path never comes from the page. The file is read
   as a plain file of at most 4 MB, never through a link, and checked

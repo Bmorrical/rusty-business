@@ -990,8 +990,8 @@ async function setMaker(name, on, box) {
  * last three share the Settings page, so moving between them keeps the focus
  * on the tabs and a memory being written. Installers and Settings show the
  * makers, and Installers shows the outside engines, as Rust keeps them, so
- * each asks Rust afresh. Workflow reads only its board, and asks for that
- * itself.
+ * each asks Rust afresh. Workflow reads and moves only its board, and asks
+ * for that itself.
  */
 async function openPage(name) {
   const arriving = !(SETTINGS_PAGES.includes(name) && settingsPage.value);

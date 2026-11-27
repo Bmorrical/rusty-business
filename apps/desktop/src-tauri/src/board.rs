@@ -1,8 +1,9 @@
 //! Boards: a road of epics, stories, and slices, one JSON file per board in
 //! the app's own data folder, beside the saved chats.
 //!
-//! The Workflow view reads only these copies, so it opens with both gates
-//! off. Nothing here uses the network, takes a path from the page, or
+//! The Workflow view reads and moves only these copies, so it opens with
+//! both gates off. A move changes one slice's lane and whose move it is,
+//! under the rules in `rules.rs`. Nothing here uses the network, takes a path from the page, or
 //! deletes a file. A pull replaces a board's snapshot. What the person wrote,
 //! their drafts, lives in a second file that a pull never touches.
 //!
@@ -53,7 +54,7 @@ const BOARD_LIMIT: usize = 100;
 const EPIC_LIMIT: usize = 500;
 const STORY_LIMIT: usize = 5_000;
 const SLICE_LIMIT: usize = 100;
-const NOTES_LIMIT: usize = 200;
+pub(crate) const NOTES_LIMIT: usize = 200;
 const NUMBER_LIMIT: u64 = 999_999_999;
 const NAME_LIMIT: usize = 120;
 const TITLE_LIMIT: usize = 300;
@@ -1317,6 +1318,40 @@ impl Boards {
         }
         self.put(Kind::Drafts, id, &json, "Could not save the note")?;
         Ok(drafts)
+    }
+
+    /// Changes one slice in the local copy of a board, and keeps it when the
+    /// change says so. The copy is checked as a pull checks it, and its
+    /// `pulled_at` stays as it was: a move is not a pull. The drafts are not
+    /// touched. A change that keeps nothing writes nothing.
+    pub fn shift<T>(
+        &self,
+        id: &str,
+        story: u64,
+        slice: &str,
+        change: impl FnOnce(&mut Slice) -> Result<(T, bool), String>,
+    ) -> Result<(T, Local), String> {
+        self.path(Kind::Board, id)?;
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut board = self.read(id)?;
+        let held = board
+            .epics
+            .iter_mut()
+            .flat_map(|epic| epic.stories.iter_mut())
+            .find(|found| found.number == story)
+            .ok_or("That story is not on this board.")?
+            .slices
+            .iter_mut()
+            .find(|found| found.id == slice)
+            .ok_or("That slice is not on this story.")?;
+        let (said, keep) = change(held)?;
+        if keep {
+            let text = Self::json(&board)?;
+            self.put(Kind::Board, id, &text, "Could not save the board")?;
+        }
+        let drafts = self.read_drafts(id)?;
+        Ok((said, Local { board, drafts }))
     }
 
     /// Opens the made-up sample board. The first time, it is put in the

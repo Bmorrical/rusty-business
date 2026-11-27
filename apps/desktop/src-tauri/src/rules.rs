@@ -19,7 +19,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::board::{LANES, MOVES};
+use crate::board::{Boards, LANES, Local, MOVES, NOTES_LIMIT};
 
 /// The rule that keeps lanes in order.
 pub const IN_ORDER: &str = "in-order";
@@ -371,6 +371,53 @@ impl Rules {
     }
 }
 
+/// A move made on a board: what the rules said, and the board after it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Taken {
+    pub verdict: Verdict,
+    pub local: Local,
+}
+
+/// Moves one slice on a board's local copy, under the rules. Where the slice
+/// is comes from the board, never from the caller. An allowed move writes the
+/// lane and whose move is next. A runner that drifted leaves the lane where
+/// it was, hands the move to you, and says why in the slice's notes. Any
+/// other refusal writes nothing.
+pub fn take(
+    boards: &Boards,
+    rules: &Rules,
+    id: &str,
+    story: u64,
+    slice: &str,
+    mut step: Move,
+) -> Result<Taken, String> {
+    let (verdict, local) = boards.shift(id, story, slice, |held| {
+        step.from = held.lane.clone();
+        let verdict = rules.check(&step)?;
+        let keep = if verdict.allowed {
+            held.lane = step.to.clone();
+            held.turn = verdict.turn.clone();
+            true
+        } else if verdict.split {
+            held.turn = verdict.turn.clone();
+            if held.notes.len() < NOTES_LIMIT
+                && let Some(drift) = verdict
+                    .refusals
+                    .iter()
+                    .find(|refusal| refusal.rule == ON_TIME)
+            {
+                held.notes.push(drift.words.clone());
+            }
+            true
+        } else {
+            false
+        };
+        Ok((verdict, keep))
+    })?;
+    Ok(Taken { verdict, local })
+}
+
 /// Writes what is kept readable by this account alone, whole or not at all.
 fn keep(file: &Path, kept: &Kept) -> Result<(), String> {
     let unkept = |error: std::io::Error| format!("The app could not keep the rules: {error}.");
@@ -417,6 +464,25 @@ pub fn set_rule_limit(rules: tauri::State<'_, Rules>, minutes: u32) -> Result<Ru
 #[tauri::command]
 pub fn check_move(rules: tauri::State<'_, Rules>, step: Move) -> Result<Verdict, String> {
     rules.check(&step)
+}
+
+/// Moves a slice as you. The page names only where it goes: who moves it is
+/// fixed here, so the page cannot say a model, the check, or a reviewer did.
+#[tauri::command]
+pub fn move_slice(
+    boards: tauri::State<'_, Boards>,
+    rules: tauri::State<'_, Rules>,
+    id: String,
+    story: u64,
+    slice: String,
+    to: String,
+) -> Result<Taken, String> {
+    let step = Move {
+        to,
+        by: "you".to_string(),
+        ..Move::default()
+    };
+    take(&boards, &rules, &id, story, &slice, step)
 }
 
 #[cfg(test)]
@@ -678,5 +744,158 @@ mod tests {
                 "{lane} has no party"
             );
         }
+    }
+
+    /// A folder with the sample board in it, and every rule on.
+    fn sample_board(name: &str) -> (Boards, Rules, PathBuf) {
+        let place = folder(name);
+        let boards = Boards::new(place.join("boards"));
+        boards.sample().unwrap();
+        let rules = Rules::new(place.join("rules.json"));
+        (boards, rules, place.join("boards").join("sample.json"))
+    }
+
+    fn slice_of<'a>(local: &'a Local, story: u64, id: &str) -> &'a crate::board::Slice {
+        local
+            .board
+            .epics
+            .iter()
+            .flat_map(|epic| epic.stories.iter())
+            .find(|found| found.number == story)
+            .and_then(|found| found.slices.iter().find(|slice| slice.id == id))
+            .unwrap()
+    }
+
+    fn by_you(to: &str) -> Move {
+        Move {
+            to: to.to_string(),
+            by: "you".to_string(),
+            ..Move::default()
+        }
+    }
+
+    #[test]
+    fn a_move_you_make_is_written_with_whose_move_is_next() {
+        let (boards, rules, file) = sample_board("move");
+        boards.note("sample", 412, "Mine.").unwrap();
+        let before = boards.load("sample").unwrap();
+        let taken = take(&boards, &rules, "sample", 412, "d", by_you("written")).unwrap();
+        assert!(taken.verdict.allowed, "{:?}", taken.verdict.refusals);
+        let moved = slice_of(&taken.local, 412, "d");
+        assert_eq!(
+            (moved.lane.as_str(), moved.turn.as_str()),
+            ("written", "check")
+        );
+        // The move is kept, and it is not a pull: the stamp and the notes stay.
+        let again = boards.load("sample").unwrap();
+        assert_eq!(again, taken.local, "the move was not kept");
+        assert_eq!(
+            again.board.pulled_at, before.board.pulled_at,
+            "a move restamped the copy"
+        );
+        assert_eq!(again.drafts, before.drafts, "a move touched your notes");
+        assert!(
+            fs::read_to_string(&file)
+                .unwrap()
+                .contains("\"move\": \"check\"")
+        );
+        // Taking a reviewed slice into main is yours, and then no move is next.
+        let main = take(&boards, &rules, "sample", 415, "a", by_you("main")).unwrap();
+        assert!(main.verdict.allowed);
+        let landed = slice_of(&main.local, 415, "a");
+        assert_eq!((landed.lane.as_str(), landed.turn.as_str()), ("main", ""));
+    }
+
+    #[test]
+    fn a_refused_move_writes_nothing() {
+        let (boards, rules, file) = sample_board("refused");
+        let text = fs::read_to_string(&file).unwrap();
+        let refused = [
+            (412, "d", by_you("checked"), IN_ORDER),
+            (409, "a", by_you("sliced"), IN_ORDER),
+            (412, "d", step("", "written", "review"), OWN_PARTY),
+            (415, "a", step("", "main", "model"), MAIN_IS_YOURS),
+        ];
+        for (story, slice, move_, rule) in refused {
+            let taken = take(&boards, &rules, "sample", story, slice, move_).unwrap();
+            assert!(!taken.verdict.allowed, "{story}{slice} moved");
+            assert!(
+                rules_of(&taken.verdict).contains(&rule),
+                "{story}{slice}: {:?}",
+                taken.verdict.refusals
+            );
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                text,
+                "a refused move wrote the board"
+            );
+        }
+        // Where the slice is comes from the board, not from the caller.
+        let told = take(
+            &boards,
+            &rules,
+            "sample",
+            412,
+            "d",
+            step("written", "checked", "you"),
+        )
+        .unwrap();
+        assert!(
+            !told.verdict.allowed,
+            "the caller moved the slice from a lane it is not in"
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), text);
+    }
+
+    #[test]
+    fn a_runner_that_drifted_leaves_the_lane_and_hands_the_slice_back() {
+        let (boards, rules, file) = sample_board("drift");
+        let mut late = step("", "written", "model");
+        late.took_ms = Some(u64::from(LIMIT_START + 1) * 60_000);
+        let taken = take(&boards, &rules, "sample", 412, "d", late).unwrap();
+        assert!(!taken.verdict.allowed && taken.verdict.split);
+        let held = slice_of(&taken.local, 412, "d");
+        assert_eq!(held.lane, "sliced", "a drifted runner's work was kept");
+        assert_eq!(held.turn, "you");
+        assert!(
+            held.notes.last().unwrap().contains("cut smaller"),
+            "{:?}",
+            held.notes
+        );
+        assert_eq!(
+            boards.load("sample").unwrap(),
+            taken.local,
+            "the drift was not kept"
+        );
+        assert!(fs::read_to_string(&file).unwrap().contains("drifted"));
+    }
+
+    #[test]
+    fn a_slice_you_send_back_goes_to_that_lanes_party_next() {
+        let (boards, rules, _) = sample_board("back");
+        let taken = take(&boards, &rules, "sample", 412, "b", by_you("sliced")).unwrap();
+        assert!(taken.verdict.allowed);
+        let back = slice_of(&taken.local, 412, "b");
+        assert_eq!(
+            (back.lane.as_str(), back.turn.as_str()),
+            ("sliced", "model")
+        );
+    }
+
+    #[test]
+    fn a_story_or_slice_not_on_the_board_is_said_and_nothing_is_written() {
+        let (boards, rules, file) = sample_board("missing");
+        let text = fs::read_to_string(&file).unwrap();
+        let story = take(&boards, &rules, "sample", 999, "a", by_you("sliced")).unwrap_err();
+        assert_eq!(story, "That story is not on this board.");
+        let slice = take(&boards, &rules, "sample", 412, "z", by_you("sliced")).unwrap_err();
+        assert_eq!(slice, "That slice is not on this story.");
+        assert!(take(&boards, &rules, "nothing", 412, "d", by_you("written")).is_err());
+        assert!(take(&boards, &rules, "sample", 412, "d", by_you("nowhere")).is_err());
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            text,
+            "a move that failed wrote the board"
+        );
     }
 }

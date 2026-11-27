@@ -1,10 +1,11 @@
 <script setup>
 // The Workflow view: a board's road, a story's hand, and its slices.
 //
-// It reads only the copy of a board kept on this computer, so it opens the
-// same with both gates off. Rust keeps the board and your notes on it. This
-// page asks for them when it opens and when you pick something, and it has no
-// way to reach anything else.
+// It reads and moves only the copy of a board kept on this computer, so it
+// opens the same with both gates off. Rust keeps the board and your notes on
+// it. This page asks for them when it opens and when you pick something, and
+// it has no way to reach anything else. A move names only the lane: Rust
+// checks it against the rules and makes it as you.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -15,7 +16,9 @@ import {
   handLabel,
   kindLabel,
   laneCounts,
+  LANES,
   moveLabel,
+  movesFor,
   nextLane,
   noteOf,
   notesOf,
@@ -71,6 +74,8 @@ const noteText = ref("");
 const noteWas = ref("");
 const noteLine = ref("");
 const noteProblem = ref("");
+/** What the last move of a slice came to, said beside that slice only. */
+const moved = ref({ story: 0, slice: "", line: "", problem: "" });
 
 const board = computed(() => local.value?.board ?? null);
 const drafts = computed(() => local.value?.drafts ?? null);
@@ -164,6 +169,32 @@ function openSample() {
     boards.value = await invoke("list_boards");
   });
 }
+
+/**
+ * Moves the open slice into a lane. The note is kept first, so nothing typed
+ * is left behind. Rust decides: a move the rules refuse says why, and changes
+ * nothing unless a runner drifted.
+ */
+function moveSlice(move) {
+  const id = board.value?.id;
+  const number = openNumber.value;
+  const sliceId = openSliceId.value;
+  if (!id || !sliceId) return Promise.resolve();
+  return run(async () => {
+    if (!(await saveNote())) return;
+    moved.value = { story: number, slice: sliceId, line: "", problem: "" };
+    const taken = await invoke("move_slice", { id, story: number, slice: sliceId, to: move.to });
+    if (board.value?.id === id) local.value = taken.local;
+    const lane = LANES.find((entry) => entry.id === move.to)?.name ?? move.to;
+    moved.value = taken.verdict.allowed
+      ? { story: number, slice: sliceId, line: `${move.forward ? "Moved into" : "Moved back to"} ${lane}.`, problem: "" }
+      : { story: number, slice: sliceId, line: "", problem: taken.verdict.refusals.map((refusal) => refusal.words).join(" ") };
+  });
+}
+
+const movedHere = computed(() =>
+  moved.value.story === openNumber.value && moved.value.slice === openSliceId.value ? moved.value : null,
+);
 
 let saving = null;
 
@@ -296,7 +327,7 @@ onBeforeUnmount(() => {
         <span class="quiet small">{{ pulledLine(board.pulledAt) }}</span>
       </p>
       <p class="wf-gates small">
-        <span class="quiet">This view reads only that copy.</span>
+        <span class="quiet">This view reads and moves only that copy.</span>
         <span class="wf-gate" :class="{ on: wan }">WAN {{ wan ? "on" : "off" }}</span>
         <span class="wf-gate" :class="{ on: lan }">LAN {{ lan ? "on" : "off" }}</span>
         <button v-if="!hasSample" class="link" type="button" :disabled="busy" @click="openSample">
@@ -501,6 +532,20 @@ onBeforeUnmount(() => {
                   <span class="wf-step-what quiet small">{{ step.lane.what }}</span>
                 </li>
               </ol>
+              <div v-if="movesFor(slice).length" class="wf-moves">
+                <button
+                  v-for="move in movesFor(slice)"
+                  :key="move.to"
+                  type="button"
+                  :class="{ primary: move.forward }"
+                  :disabled="busy"
+                  @click="moveSlice(move)"
+                >
+                  {{ move.label }}
+                </button>
+              </div>
+              <p class="small wf-saved" role="status">{{ movedHere?.line }}</p>
+              <p v-if="movedHere?.problem" class="wf-problem small" role="alert">{{ movedHere.problem }}</p>
             </section>
 
             <section v-if="sliceNotes.length" class="wf-block" aria-labelledby="wf-slice-notes-title">
@@ -944,6 +989,13 @@ onBeforeUnmount(() => {
 .wf-steps {
   display: grid;
   gap: 0.5rem;
+}
+
+.wf-moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
 }
 
 .wf-steps li {

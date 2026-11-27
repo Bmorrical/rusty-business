@@ -256,9 +256,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 - **The Workflow view.** A board is a road of releases, the stories and
   bugs under each, and the slices each story is cut into. The view shows
   one, with the five lanes a slice goes through, Sliced, Written, Checked,
-  Reviewed, and Main, and whose move each slice and each story is. It
-  reads only a copy kept on this computer, so it works with both gates
-  off, and it keeps a note of your own on any story. A made-up sample
+  Reviewed, and Main, and whose move each slice and each story is. You
+  move a slice into its next lane, or back to be done again, and the rules
+  check each move first. It reads and moves only a copy kept on this
+  computer, so it works with both gates off, and it keeps a note of your
+  own on any story. A made-up sample
   board shows how one reads.
 - **A board in step with a file.** One command in a terminal,
   `rusty-business board`, keeps a board on this computer in step with one

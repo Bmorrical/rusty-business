@@ -559,10 +559,12 @@ next.
   Its engine, mlx-vlm, is not in the download yet: `pip install mlx-vlm`
   puts it on the Mac. Phi-4-multimodal and Molmo-7B-O are listed as coming,
   and scanned PDFs are not read. (On the roadmap: Reading images.)
-- **The Workflow view only reads.** A board gets there as a file: imported
-  with the `board` command in a terminal, which also keeps the two in step,
-  or put in the boards folder. The view cannot change a story or a slice
-  yet. (On the roadmap: Slices you can write.)
+- **The Workflow view moves slices, and writes nothing else.** A board
+  gets there as a file: imported with the `board` command in a terminal,
+  which also keeps the two in step, or put in the boards folder. The view
+  moves a slice from lane to lane under the rules, but cannot add a story
+  or a slice, or change their words, yet. (On the roadmap: Slices you can
+  write.)
 - **A board moves as a file.** [BOARD.md](BOARD.md) is the file's ruleset:
   what it holds, each rule, and why, so anyone can bring in a road of their
   own and build the other side. No direct API connection to a board's
