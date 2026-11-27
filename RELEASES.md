@@ -19,6 +19,17 @@ No version went out as 0.1.0, 0.4.0, or 0.8.2.
 **New**
 
 - **HEIC to JPEG says what it saved, and where.** Each copy is read back from its folder before the list calls it saved. Once nothing is left to convert, a box says how many JPEGs were saved and found, in which folder, and whether where each picture was taken was kept or left out. Each folder has its own Show in the Finder button, and a picture that failed is named, with why.
+- **Boards kept encrypted.** The app keeps its own copy of each board, your notes on it, and the file it syncs with in one database, `boards.db`, which SQLCipher encrypts whole. Its key is made the first time, kept in the system's key store (the Keychain on a Mac, the Credential Manager on Windows, and the Secret Service on Linux), and never written to a file. A board file put in the `boards` folder is copied in and left where it is, and `rusty-business board export` takes a board out as a file.
+- **Courier apps.** A program of your own, on another computer on your private network, can ask a model here a question. The app is its MCP server, with two tools: `models`, the chat models you turned on, and `ask`, which streams the answer back as it comes. It listens only while the LAN gate and the Courier breaker are both on. Pair a courier app from Settings, Couriers, with a six-digit code, and Unpair takes its key away. A request from a web page, or from outside your private network, is turned away.
+- **The rig.** Settings, Rig, adds a computer on your private network with cards of its own, and the models its servers hold. A slider sets each model's share of one card or more, each card shows as a pie of the models that share it, and the app works out each model's split across the cards. The rig's models join the ones you can pick in the chat, and they answer at once, beside each other, while the models on this computer still take their turns. A picture never goes to the rig.
+- **Rules for the Workflow.** Every move of a slice is checked against four rules coded into the app, with tests: lanes in order, each lane by its own party, only you take a slice into main, and a runner keeps to its time. Settings, Rules, turns the first, second, and fourth on or off, and sets the time limit: 30 minutes to start, from 5 to 480. The main rule has no switch, and the app never merges.
+- **Move slices in the Workflow view.** Each slice offers its next lane and a way back to each lane it has been through. A move the rules allow is written into the board on this computer, with whose move is next. A refused move writes nothing, and the view says which rule refused it and why. A move from the page is made as you.
+- **Hand a slice to a model.** A slice whose next lane is written can go to a runner: a model you turned on, on this computer, on your network, or on your rig. A model outside this computer is never one, because direct API connections are refused. The rules are checked before the model is asked and again once it is done. A clock shows how long it has taken, beside the limit, and at the limit the runner is stopped, nothing it wrote is kept, and the slice comes back to you. Stop stops it sooner. What a runner wrote is kept beside the board, cut to 64 KB, and never in the board's file.
+
+**Good to know**
+
+- On a computer with no key store, the boards stay as files, and the app says so when it starts.
+- The app works out each rig model's split, and for now you start each of the rig's servers with it yourself.
 
 ## 0.8.5
 
