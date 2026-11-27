@@ -59,6 +59,7 @@ const APP = 'apps/desktop/src/App.vue';
 const VIEW = 'apps/desktop/src/Workflow.vue';
 const HELPERS = 'apps/desktop/src/board.js';
 const STORE = 'apps/desktop/src-tauri/src/board.rs';
+const KEPT = 'apps/desktop/src-tauri/src/store.rs';
 const LIB = 'apps/desktop/src-tauri/src/lib.rs';
 const SAMPLE = 'apps/desktop/src-tauri/sample-board.json';
 const MERGE = 'apps/desktop/src-tauri/src/sync.rs';
@@ -292,9 +293,37 @@ test('the view and the store have no way past this computer, delete nothing, and
   // The tests too: not one of them deletes, or reaches out.
   const store = read(STORE);
   for (const never of NEVER) assert.ok(!store.includes(never), `${STORE} holds ${never}`);
-  // The store stands alone. It asks nothing of the network, so it needs no gate.
-  assert.ok(!code(store).includes('crate::'), `${STORE} reaches into another part of the app`);
+  // The store stands alone, but for its database. It asks nothing of the
+  // network, so it needs no gate.
+  const reaches = code(store).match(/crate::[a-z_]+/g) ?? [];
+  assert.deepEqual([...new Set(reaches)], ['crate::store'], `${STORE} reaches into another part of the app`);
   assert.ok(!code(store).includes('std::env'), `${STORE} reads the environment`);
+
+  // The database is held to the same: the tests too.
+  const kept = read(KEPT);
+  for (const never of NEVER) assert.ok(!kept.includes(never), `${KEPT} holds ${never}`);
+  assert.ok(!code(kept, KEPT).includes('crate::'), `${KEPT} reaches into another part of the app`);
+  assert.ok(!code(kept, KEPT).includes('std::env'), `${KEPT} reads the environment`);
+});
+
+// The road's line for this: "Boards kept in an encrypted SQLite database,
+// with its key in the system's key store".
+test('the boards are kept in an encrypted database, its key in the key store', () => {
+  const kept = code(read(KEPT), KEPT);
+  const cargo = read('apps/desktop/src-tauri/Cargo.toml');
+  assert.match(cargo, /^rusqlite = \{ version = "[^"]+", features = \["bundled-sqlcipher"\] \}$/m, 'rusqlite is not built with SQLCipher');
+  assert.match(cargo, /^rusqlite = \{ version = "[^"]+", features = \["bundled-sqlcipher-vendored-openssl"\] \}$/m, 'Windows has no SQLCipher');
+  assert.ok(!/features = \["bundled"\]/.test(cargo), 'a plain SQLite is built beside SQLCipher');
+  // The key goes to SQLCipher before anything is read, and a build that
+  // cannot encrypt is refused.
+  assert.ok(kept.indexOf('pragma_update(None, "key"') >= 0, `${KEPT} never gives the database its key`);
+  assert.ok(kept.indexOf('pragma_update(None, "key"') < kept.indexOf('PRAGMA cipher_version'), `${KEPT} reads before it gives the key`);
+  assert.ok(kept.includes('This build cannot encrypt'), `${KEPT} would open a database it cannot encrypt`);
+  assert.ok(kept.includes('keyring::Entry::new'), `${KEPT} does not keep its key in the system's key store`);
+  // The app and the command both open the boards through it.
+  assert.ok(read(LIB).includes('board::Boards::open('), `${LIB} keeps the boards as files`);
+  assert.ok(read('apps/desktop/src-tauri/src/cli.rs').includes('Boards::open('), 'the board command keeps the boards as files');
+  assert.ok(read(LIB).includes('mod store;'), `${LIB} does not hold the database`);
 });
 
 test('a file is written beside itself, then moved into place', () => {
@@ -328,7 +357,7 @@ test('a file is written beside itself, then moved into place', () => {
     const from = store.indexOf(`pub fn ${name}(&self`);
     const body = store.slice(from, store.indexOf('\n    }', from));
     assert.ok(body.includes('self.writing.lock()'), `${name} does not wait its turn to write`);
-    assert.ok(body.indexOf('self.writing.lock()') < body.indexOf('write(&path'), `${name} writes before it has its turn`);
+    assert.ok(body.indexOf('self.writing.lock()') < body.indexOf('self.put('), `${name} writes before it has its turn`);
   }
 });
 
@@ -361,9 +390,11 @@ test('a pull writes the snapshot alone, and a note the drafts alone', () => {
     assert.ok(from >= 0, `${STORE} has no ${name}`);
     return store.slice(from, store.indexOf('\n    }', from));
   };
-  assert.ok(body('pull').includes('let path = self.snapshot(&board.id)?;'), 'a pull writes somewhere other than the snapshot');
+  assert.match(body('pull'), /self\.put\(\s*Kind::Board,\s*&board\.id,/, 'a pull writes somewhere other than the snapshot');
   assert.ok(!body('pull').includes('drafts'), 'a pull touches the notes');
-  assert.ok(body('note').includes('let path = self.drafts_file(id)?;'), 'a note is written somewhere other than the drafts');
+  assert.match(body('note'), /self\.put\(\s*Kind::Drafts,\s*id,/, 'a note is written somewhere other than the drafts');
+  assert.equal(count(body('note'), 'self.put('), 1, 'a note writes more than the drafts');
+  assert.equal(count(body('pull'), 'self.put('), 1, 'a pull writes more than the snapshot');
   assert.ok(!body('note').includes('self.snapshot('), 'a note writes the snapshot');
   // A file that is a link, or larger than a board may be, is not read.
   assert.match(store, /fs::symlink_metadata\(path\)\s+\.map\(\|found\| found\.file_type\(\)\.is_file\(\)\)/, 'a linked file is read');
@@ -548,7 +579,7 @@ test('one command in a terminal does it, and the program leaves from its entry a
   // It runs without the app, so it finds the app's data folder by the app's own name.
   const identifier = JSON.parse(read(CONF)).identifier;
   assert.ok(command.includes(`pub const IDENTIFIER: &str = "${identifier}";`), `${COMMAND} and ${CONF} name two data folders`);
-  assert.ok(command.includes('Boards::new(data.join(IDENTIFIER).join("boards"))'), 'the command reads another boards folder than the app');
+  assert.ok(/Boards::open\(\s+data\.join\(IDENTIFIER\)\.join\("boards"\),/.test(command), 'the command reads another boards folder than the app');
 
   for (const word of WORDS) {
     assert.ok(command.includes(`["${word}"`), `the command does not take ${word}`);
@@ -643,8 +674,8 @@ test('the file somewhere else is read and written as any board file is', () => {
   assert.equal(count(store, 'write(path, &text,'), 1, 'the store writes to a typed path somewhere other than a send');
 
   // The last synced copy and the remembered file each have their own folder.
-  assert.ok(body('keep_base').includes('let path = self.base_file(&board.id)?;'), 'the last synced copy is written somewhere else');
-  assert.ok(body('remember').includes('let path = self.source_file(id)?;'), 'the file is remembered somewhere else');
+  assert.match(body('keep_base'), /self\.put\(\s*Kind::Synced,\s*&board\.id,/, 'the last synced copy is written somewhere else');
+  assert.match(body('remember'), /self\.put\(\s*Kind::Source,\s*id,/, 'the file is remembered somewhere else');
   assert.ok(!body('keep_base').includes('self.snapshot(') && !body('remember').includes('self.snapshot('), 'the sync files write the snapshot');
 });
 

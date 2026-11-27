@@ -14,6 +14,7 @@ mod remote;
 mod sessions;
 mod stack;
 mod starter;
+mod store;
 mod sync;
 mod uninstall;
 mod update;
@@ -93,8 +94,13 @@ pub fn run() {
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             // Web search: the path to a Brave key, never the key.
             app.manage(web::Web::new(data.join("web.json")));
-            // Boards: the local copies the Workflow view reads, and the notes on them.
-            app.manage(board::Boards::new(data.join("boards")));
+            // Boards: the local copies the Workflow view reads, and the notes on
+            // them, in an encrypted database whose key is in the system's key store.
+            app.manage(board::Boards::open(
+                data.join("boards"),
+                &store::SystemKeys::new(&app.config().identifier),
+                |said| eprintln!("{said}"),
+            ));
             // The picture check: its model, once the person installs it.
             app.manage(picture::PictureCheck::new(data.join("picture-check")));
             Ok(())

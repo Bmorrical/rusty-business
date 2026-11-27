@@ -19,7 +19,8 @@ The desktop app's Rust code.
 | `web.rs`      | Web search: while Settings allows it and the gate is on, a model's search goes to Brave Search's API with the person's key, kept as a path, or to DuckDuckGo's plain results page without one |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
-| `board.rs`    | Boards for the Workflow view: a copy of each board as one JSON file, your notes in a second file, and the made-up sample board. It also does every read and write for a board in step with a file. It asks nothing of the network, and nothing deletes |
+| `board.rs`    | Boards for the Workflow view: a copy of each board, your notes on it apart from the copy, and the made-up sample board, kept in `store.rs`'s encrypted database, or as JSON files when the system has no key store. It also does every read and write for a board in step with a file. It asks nothing of the network, and nothing deletes |
+| `store.rs`    | The boards' database: one SQLite file, `boards.db`, encrypted whole by SQLCipher, its key 32 random bytes kept in the system's key store, the Keychain, the Credential Manager, or the Secret Service. Boards already kept as files are copied in and left where they are |
 | `sync.rs`     | What two copies of a board come to: what each side changed since the last sync, and the conflicts. It only compares, and touches no file |
 | `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
@@ -176,6 +177,17 @@ Six more live in `board.rs`, each with tests:
   is: one that breaks the format, is larger than 4 MB, or is a link.
 - On a Mac and on Linux, the boards folder and its files are readable by
   this computer's user only.
+
+Three more live in `store.rs`, each with tests:
+
+- The database is encrypted whole: no board, note, or path in it reads as
+  text without its key, and a build that cannot encrypt refuses to open it.
+- The key is never written to a file, a log, or the page. A key is made
+  only when there is no database yet, so a database whose key is missing is
+  said and left as it is, never written over.
+- The boards already kept as files are copied in, once, and the files are
+  left where they are. A board file dropped in the folder later is taken in
+  too. With no key store, the boards stay files, and the app says so.
 
 Five more keep a board in step with a file, across `board.rs`, `sync.rs`,
 and `cli.rs`, each with tests:

@@ -297,6 +297,23 @@ file is named `<id>.json`, and its name is the board's id: up to 64 letters,
 digits, and hyphens. The view lists every board in the folder. A file it
 cannot read is listed with what is wrong, and left as it is.
 
+### Kept encrypted
+
+The app keeps its own copy of each board, your notes on it, and the file it
+syncs with in one database in that folder, `boards.db`. SQLCipher encrypts
+the whole file, so none of it reads as text without its key. The key is 32
+random bytes the app makes the first time, kept in the system's key store:
+the Keychain on a Mac, the Credential Manager on Windows, and the Secret
+Service on Linux. It is never written to a file. The database runs inside
+the app, with no server to start, and asks nothing of the network.
+
+A board file put in the folder is copied in, the first time the app starts
+and whenever it lists the boards, and the file is left where it is. From
+then on the database's copy is the one the app reads and writes: a change
+goes there, not back to the file. To take a board out as a file, use
+`rusty-business board export`. On a computer with no key store, the app
+keeps the boards as files, as below, and says so when it starts.
+
 The file's ruleset is [BOARD.md](../../BOARD.md), at the root of the
 repository: what the file holds, each rule, and why the rule is there. In
 short:
