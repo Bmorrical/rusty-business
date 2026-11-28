@@ -23,6 +23,11 @@
 //!   away, so no web page can reach it.
 //! - Its tools reach the chat engine's models only: never an engine outside
 //!   this computer, and never a picture.
+//! - Another Rusty Business™ install pairs the same way, and from then on
+//!   signs each request and checks each answer's proof (`handshake.rs`). Its
+//!   key never crosses the network after pairing, and a Bearer key is never
+//!   taken for it. It reaches the chat engine's models here and nothing
+//!   further: never another install's.
 //!
 //! It is written by hand on tokio, which the app already builds, so no
 //! package is added for it.
@@ -47,6 +52,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::engine::{ChatDone, ChatEvent, Chats};
 use crate::gate::{Gate, LanGate};
+use crate::handshake;
 
 /// The port the courier door listens on, on every address of this computer.
 /// Only a peer on a private network is answered.
@@ -65,6 +71,10 @@ const CODE_LIFE: Duration = Duration::from_secs(5 * 60);
 const CODE_TRIES: u8 = 5;
 /// The most courier apps paired at once, and the longest name one may give.
 const MOST_PAIRED: usize = 20;
+/// The most signed requests remembered, so none is taken twice.
+const MOST_SEEN: usize = 4096;
+/// The most earlier turns a question may carry.
+const MOST_BEFORE: usize = 200;
 const LONGEST_NAME: usize = 60;
 
 /// The MCP versions the door speaks, newest first.
@@ -92,11 +102,25 @@ struct Inner {
     paired: Mutex<Vec<Paired>>,
     pairing: Mutex<Option<Pairing>>,
     asks: Mutex<HashMap<String, watch::Sender<bool>>>,
+    /// The signed requests' numbers taken lately, with their times.
+    seen: Mutex<HashMap<String, u64>>,
     listening: Mutex<Listening>,
     at_once: AtomicUsize,
 }
 
-/// A courier app paired: its name, and its key's SHA-256, never the key.
+/// What paired: a courier app, or another Rusty Business™ install.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// Sends its key as a Bearer token.
+    #[default]
+    Courier,
+    /// Signs each request with the handshake, and never sends its key.
+    Install,
+}
+
+/// A courier app or an install paired: its name, and its key's SHA-256,
+/// never the key.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct Paired {
     id: String,
@@ -104,6 +128,9 @@ struct Paired {
     hash: String,
     /// Seconds since 1970 when it paired.
     since: u64,
+    /// Kept files from before installs paired are courier apps.
+    #[serde(default)]
+    kind: Kind,
 }
 
 struct Pairing {
@@ -142,6 +169,7 @@ pub struct PairedView {
     pub id: String,
     pub name: String,
     pub since: u64,
+    pub kind: Kind,
 }
 
 /// Why a pairing was turned away.
@@ -161,14 +189,14 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn random<const N: usize>() -> Result<[u8; N], String> {
+pub(crate) fn random<const N: usize>() -> Result<[u8; N], String> {
     let mut bytes = [0u8; N];
     getrandom::fill(&mut bytes).map_err(|_| "Could not make a random number.".to_string())?;
     Ok(bytes)
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    handshake::hex(bytes)
 }
 
 fn digest(key: &str) -> String {
@@ -177,12 +205,7 @@ fn digest(key: &str) -> String {
 
 /// Equal, in the same time however soon the two differ.
 fn same(one: &[u8], other: &[u8]) -> bool {
-    one.len() == other.len()
-        && one
-            .iter()
-            .zip(other)
-            .fold(0u8, |differ, (a, b)| differ | (a ^ b))
-            == 0
+    handshake::same(one, other)
 }
 
 fn well_formed_hash(hash: &str) -> bool {
@@ -211,7 +234,7 @@ fn new_code() -> Result<String, String> {
     }
 }
 
-fn seconds_now() -> u64 {
+pub(crate) fn seconds_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
@@ -301,6 +324,7 @@ impl Courier {
             paired: Mutex::new(paired),
             pairing: Mutex::new(None),
             asks: Mutex::new(HashMap::new()),
+            seen: Mutex::new(HashMap::new()),
             listening: Mutex::new(Listening::default()),
             at_once: AtomicUsize::new(0),
         }))
@@ -346,6 +370,7 @@ impl Courier {
                     id: entry.id.clone(),
                     name: entry.name.clone(),
                     since: entry.since,
+                    kind: entry.kind,
                 })
                 .collect(),
             code: pairing.as_ref().map(|shown| shown.code.clone()),
@@ -356,7 +381,7 @@ impl Courier {
     }
 
     /// Shows a new code, in place of any shown before.
-    fn start_pairing(&self, now: Instant) -> Result<String, String> {
+    pub(crate) fn start_pairing(&self, now: Instant) -> Result<String, String> {
         if !self.is_on() {
             return Err(BREAKER_OFF.to_string());
         }
@@ -380,7 +405,13 @@ impl Courier {
 
     /// A courier app sends the code shown. The right code, in time, pairs it
     /// and gives back its key, once: (id, key).
-    fn pair(&self, code: &str, name: &str, now: Instant) -> Result<(String, String), NoPair> {
+    fn pair(
+        &self,
+        code: &str,
+        name: &str,
+        kind: Kind,
+        now: Instant,
+    ) -> Result<(String, String), NoPair> {
         let mut pairing = lock(&self.0.pairing);
         let Some(shown) = pairing.as_mut() else {
             return Err(NoPair::NotOpen);
@@ -410,6 +441,7 @@ impl Courier {
             name: name.to_string(),
             hash: digest(&key),
             since: seconds_now(),
+            kind,
         };
         let mut next = paired.clone();
         next.push(entry.clone());
@@ -443,16 +475,43 @@ impl Courier {
     }
 
     /// The courier app a key belongs to. Every paired key is compared, in
-    /// the same time, whichever matches.
+    /// the same time, whichever matches. An install's key is never taken
+    /// this way: an install signs.
     fn who(&self, key: &str) -> Option<String> {
         let hash = digest(key);
         let mut found = None;
         for entry in lock(&self.0.paired).iter() {
-            if same(hash.as_bytes(), entry.hash.as_bytes()) {
+            if same(hash.as_bytes(), entry.hash.as_bytes()) && entry.kind == Kind::Courier {
                 found = Some(entry.id.clone());
             }
         }
         found
+    }
+
+    /// The install that signed a request, and the proof its answer carries:
+    /// (id, proof). The signature must hold for that install's secret and
+    /// this body, its time be near `now`, and its number be new.
+    fn install_who(&self, said: &str, body: &[u8], now: u64) -> Option<(String, String)> {
+        let signed = handshake::read(said)?;
+        let secret = lock(&self.0.paired)
+            .iter()
+            .find(|entry| entry.kind == Kind::Install && entry.id == signed.id)
+            .map(|entry| entry.hash.clone())?;
+        if !handshake::holds(&signed, &secret, body, now) {
+            return None;
+        }
+        let mut seen = lock(&self.0.seen);
+        seen.retain(|_, time| now.abs_diff(*time) <= 2 * handshake::CLOCK_SLACK);
+        if seen.contains_key(&signed.nonce) || seen.len() >= MOST_SEEN {
+            return None;
+        }
+        seen.insert(signed.nonce.clone(), signed.time);
+        Some((signed.id, handshake::proof(&secret, &signed.nonce)))
+    }
+
+    /// The breaker, for an install here asking another (`installs.rs`).
+    pub(crate) fn breaker(&self) -> Gate {
+        self.0.breaker.clone()
     }
 
     fn set_listening(&self, listening: Listening) {
@@ -487,7 +546,7 @@ fn private_v6(ip: Ipv6Addr) -> bool {
 
 /// This computer's address on the private network, as a courier app would
 /// reach it. Nothing is sent to find it: a UDP socket only picks its route.
-fn this_address() -> Option<IpAddr> {
+pub(crate) fn this_address() -> Option<IpAddr> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("192.168.255.254:9").ok()?;
     let ip = socket.local_addr().ok()?.ip();
@@ -698,9 +757,11 @@ fn refusal_words(status: u16) -> &'static str {
 /// through the engine; the tests bring their own.
 pub(crate) trait Answers: Send + Sync {
     fn models(&self) -> impl Future<Output = Result<Vec<String>, String>> + Send;
+    /// `before` holds the earlier turns, each a role and its words.
     fn ask(
         &self,
         model: &str,
+        before: &[(String, String)],
         question: &str,
         stopped: &mut watch::Receiver<bool>,
         emit: impl FnMut(ChatEvent) + Send,
@@ -721,13 +782,14 @@ impl Answers for AppEngine {
     async fn ask(
         &self,
         model: &str,
+        before: &[(String, String)],
         question: &str,
         stopped: &mut watch::Receiver<bool>,
         emit: impl FnMut(ChatEvent) + Send,
     ) -> Result<ChatDone, String> {
         let lan = self.0.state::<LanGate>();
         let chats = self.0.state::<Chats>();
-        crate::engine::courier_ask(&lan, &chats, model, question, stopped, emit).await
+        crate::engine::courier_ask(&lan, &chats, model, before, question, stopped, emit).await
     }
 }
 
@@ -770,6 +832,9 @@ where
 struct PairAsk {
     code: String,
     name: String,
+    /// "install" when another Rusty Business™ install pairs; else a courier.
+    #[serde(default)]
+    kind: Kind,
 }
 
 async fn pair_route<S: AsyncWrite + Unpin>(stream: &mut S, courier: &Courier, request: &Request) {
@@ -782,7 +847,7 @@ async fn pair_route<S: AsyncWrite + Unpin>(stream: &mut S, courier: &Courier, re
     let Ok(ask) = serde_json::from_slice::<PairAsk>(&request.body) else {
         return refuse(stream, 400, "Send the code and the courier app's name.", "").await;
     };
-    match courier.pair(ask.code.trim(), ask.name.trim(), Instant::now()) {
+    match courier.pair(ask.code.trim(), ask.name.trim(), ask.kind, Instant::now()) {
         Ok((id, key)) => {
             let _ = send(stream, 200, Some(&json!({ "id": id, "key": key })), "").await;
         }
@@ -835,7 +900,21 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "model": { "type": "string", "description": "A model id from the models tool." },
-                    "question": { "type": "string", "description": "The question, in words." }
+                    "question": { "type": "string", "description": "The question, in words." },
+                    "before": {
+                        "type": "array",
+                        "description": "The conversation so far, oldest first, without the question.",
+                        "maxItems": MOST_BEFORE,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "role": { "type": "string", "enum": ["user", "assistant", "system"] },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["role", "content"],
+                            "additionalProperties": false
+                        }
+                    }
                 },
                 "required": ["model", "question"],
                 "additionalProperties": false
@@ -872,9 +951,32 @@ enum Reply {
     Ask {
         id: Value,
         model: String,
+        before: Vec<(String, String)>,
         question: String,
         progress: Option<Value>,
     },
+}
+
+/// The earlier turns a question carries: none, or up to `MOST_BEFORE`, each
+/// a role of user, assistant, or system and its words. Anything else is not.
+fn before_of(arguments: &Value) -> Option<Vec<(String, String)>> {
+    let Some(before) = arguments.get("before") else {
+        return Some(Vec::new());
+    };
+    let turns = before.as_array()?;
+    if turns.len() > MOST_BEFORE {
+        return None;
+    }
+    turns
+        .iter()
+        .map(|turn| {
+            let role = turn.get("role")?.as_str()?;
+            let content = turn.get("content")?.as_str()?;
+            let fits =
+                turn.as_object()?.len() == 2 && matches!(role, "user" | "assistant" | "system");
+            fits.then(|| (role.to_string(), content.to_string()))
+        })
+        .collect()
 }
 
 /// Works out what a message asks, before anything is asked of a model.
@@ -929,6 +1031,12 @@ fn read_message(courier: &Courier, who: &str, message: &Value) -> Reply {
                         .and_then(Value::as_str)
                         .map(str::trim);
                     let question = arguments.get("question").and_then(Value::as_str);
+                    let Some(before) = before_of(&arguments) else {
+                        let words = format!(
+                            "Before is a list of up to {MOST_BEFORE} turns, each a role and its words."
+                        );
+                        return Reply::Json(rpc_error(id, -32602, &words));
+                    };
                     match (model, question) {
                         (Some(model), Some(question))
                             if !model.is_empty() && !question.trim().is_empty() =>
@@ -936,6 +1044,7 @@ fn read_message(courier: &Courier, who: &str, message: &Value) -> Reply {
                             Reply::Ask {
                                 id: id.clone(),
                                 model: model.to_string(),
+                                before,
                                 question: question.to_string(),
                                 progress: params
                                     .get("_meta")
@@ -979,14 +1088,28 @@ where
         )
         .await;
     }
-    let who = request
-        .header("authorization")
-        .and_then(|said| said.strip_prefix("Bearer "))
-        .and_then(|key| courier.who(key.trim()));
-    let Some(who) = who else {
-        let words = "Pair this courier app first, and send its key as a Bearer token.";
-        return refuse(stream, 401, words, "WWW-Authenticate: Bearer\r\n").await;
+    // An install signs; a courier app sends its key. A request signed is
+    // never also taken on a key.
+    let (who, extra) = if request.all(handshake::SIGNED).next().is_some() {
+        let found = request
+            .header(handshake::SIGNED)
+            .and_then(|said| courier.install_who(said, &request.body, seconds_now()));
+        let Some((who, proof)) = found else {
+            return refuse(stream, 401, "That install's handshake did not hold.", "").await;
+        };
+        (who, format!("{}: {proof}\r\n", handshake::PROOF))
+    } else {
+        let who = request
+            .header("authorization")
+            .and_then(|said| said.strip_prefix("Bearer "))
+            .and_then(|key| courier.who(key.trim()));
+        let Some(who) = who else {
+            let words = "Pair this courier app first, and send its key as a Bearer token.";
+            return refuse(stream, 401, words, "WWW-Authenticate: Bearer\r\n").await;
+        };
+        (who, String::new())
     };
+    let extra = extra.as_str();
     if let Some(version) = request.header("mcp-protocol-version")
         && !VERSIONS.contains(&version)
     {
@@ -994,24 +1117,24 @@ where
             stream,
             400,
             "That MCP version is not one the door speaks.",
-            "",
+            extra,
         )
         .await;
     }
     if !request.json() {
-        return refuse(stream, 415, "Send JSON.", "").await;
+        return refuse(stream, 415, "Send JSON.", extra).await;
     }
     let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
         let error = rpc_error(&Value::Null, -32700, "The message is not JSON.");
-        let _ = send(stream, 400, Some(&error), "").await;
+        let _ = send(stream, 400, Some(&error), extra).await;
         return;
     };
     match read_message(courier, &who, &message) {
         Reply::Accepted => {
-            let _ = send(stream, 202, None, "").await;
+            let _ = send(stream, 202, None, extra).await;
         }
         Reply::Json(reply) => {
-            let _ = send(stream, 200, Some(&reply), "").await;
+            let _ = send(stream, 200, Some(&reply), extra).await;
         }
         Reply::Models(id) => {
             let result = match engine.models().await {
@@ -1023,11 +1146,12 @@ where
                 }
                 Err(error) => tool_text(&error, true),
             };
-            let _ = send(stream, 200, Some(&rpc_result(&id, result)), "").await;
+            let _ = send(stream, 200, Some(&rpc_result(&id, result)), extra).await;
         }
         Reply::Ask {
             id,
             model,
+            before,
             question,
             progress,
         } => {
@@ -1036,10 +1160,11 @@ where
                 stream,
                 courier,
                 engine,
-                &who,
+                (&who, extra),
                 Asked {
                     id,
                     model,
+                    before,
                     question,
                     progress,
                 },
@@ -1053,6 +1178,7 @@ where
 struct Asked {
     id: Value,
     model: String,
+    before: Vec<(String, String)>,
     question: String,
     progress: Option<Value>,
 }
@@ -1066,7 +1192,7 @@ async fn ask<S, E>(
     stream: &mut S,
     courier: &Courier,
     engine: &E,
-    who: &str,
+    (who, extra): (&str, &str),
     asked: Asked,
     streamed: bool,
 ) where
@@ -1076,6 +1202,7 @@ async fn ask<S, E>(
     let Asked {
         id,
         model,
+        before,
         question,
         progress,
     } = asked;
@@ -1085,7 +1212,7 @@ async fn ask<S, E>(
             let _ = stream.write_all(event(&message).as_bytes()).await;
             let _ = stream.flush().await;
         } else {
-            let _ = send(stream, 200, Some(&message), "").await;
+            let _ = send(stream, 200, Some(&message), extra).await;
         }
     };
     let key = format!("{who} {id}");
@@ -1104,12 +1231,13 @@ async fn ask<S, E>(
             -32600,
             "A question with that id is already being answered.",
         );
-        let _ = send(stream, 200, Some(&error), "").await;
+        let _ = send(stream, 200, Some(&error), extra).await;
         return;
     }
     let _in_flight = InFlight { courier, key };
     if streamed {
-        let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{COMMON}\r\n");
+        let head =
+            format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{COMMON}{extra}\r\n");
         if stream.write_all(head.as_bytes()).await.is_err() {
             return;
         }
@@ -1125,7 +1253,7 @@ async fn ask<S, E>(
     }
     let (pieces, mut arriving) = mpsc::unbounded_channel::<ChatEvent>();
     let done = {
-        let asking = engine.ask(&model, &question, &mut stopped, move |piece| {
+        let asking = engine.ask(&model, &before, &question, &mut stopped, move |piece| {
             let _ = pieces.send(piece);
         });
         tokio::pin!(asking);
@@ -1369,7 +1497,7 @@ mod tests {
     fn paired(courier: &Courier) -> String {
         let code = courier.start_pairing(Instant::now()).unwrap();
         courier
-            .pair(&code, "Test courier", Instant::now())
+            .pair(&code, "Test courier", Kind::Courier, Instant::now())
             .unwrap()
             .1
     }
@@ -1389,6 +1517,7 @@ mod tests {
         async fn ask(
             &self,
             _model: &str,
+            before: &[(String, String)],
             question: &str,
             stopped: &mut watch::Receiver<bool>,
             mut emit: impl FnMut(ChatEvent) + Send,
@@ -1407,7 +1536,15 @@ mod tests {
                 });
             }
             Ok(ChatDone {
-                answer: format!("Hello, courier. You asked: {question}"),
+                answer: if before.is_empty() {
+                    format!("Hello, courier. You asked: {question}")
+                } else {
+                    let roles: Vec<&str> = before.iter().map(|(role, _)| role.as_str()).collect();
+                    format!(
+                        "Hello, courier. You asked: {question}, after {}",
+                        roles.join(" ")
+                    )
+                },
                 ..ChatDone::default()
             })
         }
@@ -1530,16 +1667,24 @@ mod tests {
     fn a_code_pairs_once_and_the_key_is_kept_only_as_its_hash() {
         let (courier, place) = courier("pair", true);
         let now = Instant::now();
-        assert_eq!(courier.pair("123456", "Courier", now), Err(NoPair::NotOpen));
+        assert_eq!(
+            courier.pair("123456", "Courier", Kind::Courier, now),
+            Err(NoPair::NotOpen)
+        );
         let code = courier.start_pairing(now).unwrap();
         assert_eq!(code.len(), 6);
         assert!(code.bytes().all(|byte| byte.is_ascii_digit()));
-        let (id, key) = courier.pair(&code, "My courier", now).unwrap();
+        let (id, key) = courier
+            .pair(&code, "My courier", Kind::Courier, now)
+            .unwrap();
         assert_eq!(key.len(), 64);
         assert_eq!(courier.who(&key), Some(id.clone()));
         assert_eq!(courier.who(&key.replace(&key[..1], "x")), None);
         // Once: the same code again pairs nothing.
-        assert_eq!(courier.pair(&code, "Another", now), Err(NoPair::NotOpen));
+        assert_eq!(
+            courier.pair(&code, "Another", Kind::Courier, now),
+            Err(NoPair::NotOpen)
+        );
 
         let text = fs::read_to_string(place.join("couriers.json")).unwrap();
         assert!(!text.contains(&key), "the key itself was kept");
@@ -1578,18 +1723,24 @@ mod tests {
         let code = courier.start_pairing(now).unwrap();
         assert_eq!(courier.status(now).code_seconds, 300);
         assert_eq!(
-            courier.pair(&code, "Late", now + CODE_LIFE),
+            courier.pair(&code, "Late", Kind::Courier, now + CODE_LIFE),
             Err(NoPair::NotOpen),
             "an old code paired"
         );
         let code = courier.start_pairing(now).unwrap();
         let wrong = if code == "000000" { "000001" } else { "000000" };
         for _ in 0..4 {
-            assert_eq!(courier.pair(wrong, "Guess", now), Err(NoPair::Wrong));
+            assert_eq!(
+                courier.pair(wrong, "Guess", Kind::Courier, now),
+                Err(NoPair::Wrong)
+            );
         }
-        assert_eq!(courier.pair(wrong, "Guess", now), Err(NoPair::Voided));
         assert_eq!(
-            courier.pair(&code, "Right, too late", now),
+            courier.pair(wrong, "Guess", Kind::Courier, now),
+            Err(NoPair::Voided)
+        );
+        assert_eq!(
+            courier.pair(&code, "Right, too late", Kind::Courier, now),
             Err(NoPair::NotOpen)
         );
         assert!(courier.status(now).code.is_none());
@@ -1607,7 +1758,7 @@ mod tests {
         let code = courier.start_pairing(Instant::now()).unwrap();
         courier.set(false).unwrap();
         assert_eq!(
-            courier.pair(&code, "Courier", Instant::now()),
+            courier.pair(&code, "Courier", Kind::Courier, Instant::now()),
             Err(NoPair::NotOpen)
         );
         fs::remove_dir_all(place).ok();
@@ -1996,6 +2147,148 @@ mod tests {
             202
         );
         assert!(*stopped.borrow());
+        fs::remove_dir_all(place).ok();
+    }
+
+    // Brad, 2026-11-25: "one [Rusty Business™] can talk to another [Rusty
+    // Business™] on the same LAN, it has it's own connection handshake".
+    #[test]
+    fn an_install_signs_each_request_and_each_answer_carries_its_proof() {
+        let (courier, place) = courier("install", true);
+        let code = courier.start_pairing(Instant::now()).unwrap();
+        let (id, key) = courier
+            .pair(
+                &code,
+                "Rusty Business™ at 10.0.0.9",
+                Kind::Install,
+                Instant::now(),
+            )
+            .unwrap();
+        let secret = handshake::secret_of(&key);
+        let engine = Fake::default();
+        let signed = |body: &Value, nonce: &str, who: &str, secret: &str| {
+            let said = handshake::sign(
+                secret,
+                who,
+                nonce,
+                seconds_now(),
+                body.to_string().as_bytes(),
+            );
+            post(
+                "/mcp",
+                None,
+                body,
+                &format!("{}: {said}\r\n", handshake::SIGNED),
+            )
+        };
+        // An ask, with the turns before it, answered as it streams, the
+        // proof on the head.
+        let ask = call(
+            3,
+            "ask",
+            json!({ "model": "phi-4", "question": "And now?",
+                "before": [{ "role": "user", "content": "Hi" }, { "role": "assistant", "content": "Hello" }] }),
+        );
+        let nonce = "1".repeat(64);
+        let reply = exchange(&courier, &engine, &signed(&ask, &nonce, &id, &secret));
+        assert_eq!(status_of(&reply), 200, "{reply}");
+        let proof = handshake::proof(&secret, &nonce);
+        let head = &reply[..reply.find("\r\n\r\n").unwrap()];
+        assert!(
+            head.contains(&format!("{}: {proof}", handshake::PROOF)),
+            "{head}"
+        );
+        assert!(
+            reply.contains("You asked: And now?, after user assistant"),
+            "{reply}"
+        );
+        // A refusal after the handshake carries the proof too.
+        let nonce = "2".repeat(64);
+        let wrong = json!({ "jsonrpc": "2.0", "id": 4, "method": "nothing/here" });
+        let reply = exchange(&courier, &engine, &signed(&wrong, &nonce, &id, &secret));
+        assert!(
+            reply.contains(&handshake::proof(&secret, &nonce)),
+            "{reply}"
+        );
+        // A courier app's key cannot sign as an install, nor an id it was
+        // not given; the install's own key is not its secret.
+        let app = paired(&courier);
+        let ping = json!({ "jsonrpc": "2.0", "id": 5, "method": "ping" });
+        let app_id = courier.who(&app).unwrap();
+        for (who, secret) in [
+            (app_id.as_str(), handshake::secret_of(&app)),
+            ("nobody", secret.clone()),
+            (id.as_str(), key.clone()),
+        ] {
+            let reply = exchange(
+                &courier,
+                &engine,
+                &signed(&ping, &"3".repeat(64), who, &secret),
+            );
+            assert_eq!(status_of(&reply), 401, "{who}");
+            assert!(!reply.contains(handshake::PROOF));
+        }
+        // A signed header given twice is not read.
+        let said = handshake::sign(
+            &secret,
+            &id,
+            &"4".repeat(64),
+            seconds_now(),
+            ping.to_string().as_bytes(),
+        );
+        let twice = format!("{0}: {said}\r\n{0}: {said}\r\n", handshake::SIGNED);
+        let reply = exchange(&courier, &engine, &post("/mcp", None, &ping, &twice));
+        assert_eq!(status_of(&reply), 401);
+        // The courier list shows it as an install.
+        let listed = courier.status(Instant::now()).paired;
+        assert!(
+            listed
+                .iter()
+                .any(|entry| entry.id == id && entry.kind == Kind::Install)
+        );
+        fs::remove_dir_all(place).ok();
+    }
+
+    #[test]
+    fn the_turns_before_a_question_are_a_short_list_of_roles_and_words() {
+        assert_eq!(before_of(&json!({})), Some(Vec::new()));
+        assert_eq!(
+            before_of(&json!({ "before": [{ "role": "system", "content": "Be brief." }] })),
+            Some(vec![("system".to_string(), "Be brief.".to_string())])
+        );
+        let many: Vec<Value> = (0..=MOST_BEFORE)
+            .map(|_| json!({ "role": "user", "content": "x" }))
+            .collect();
+        for bad in [
+            json!({ "before": "Hi" }),
+            json!({ "before": [{ "role": "tool", "content": "x" }] }),
+            json!({ "before": [{ "role": "user" }] }),
+            json!({ "before": [{ "role": "user", "content": 5 }] }),
+            json!({ "before": [{ "role": "user", "content": "x", "images": [] }] }),
+            json!({ "before": many }),
+        ] {
+            assert_eq!(before_of(&bad), None, "{bad}");
+        }
+        let (courier, place) = courier("before", true);
+        let key = paired(&courier);
+        let reply = exchange(
+            &courier,
+            &Fake::default(),
+            &post(
+                "/mcp",
+                Some(&key),
+                &call(
+                    6,
+                    "ask",
+                    json!({ "model": "phi-4", "question": "Hi", "before": "no" }),
+                ),
+                "",
+            ),
+        );
+        assert!(
+            reply.contains("Before is a list of up to 200 turns"),
+            "{reply}"
+        );
         fs::remove_dir_all(place).ok();
     }
 }

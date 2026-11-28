@@ -130,6 +130,7 @@ import {
   withoutCard,
   withoutModel,
 } from "./rig.js";
+import { canPair, installModels as installOffered, installsLine, troubleOf } from "./installs.js";
 import { LIMIT_LEAST, LIMIT_MOST, limitOf, switchWord } from "./rules.js";
 
 // The page only works inside the app's own window, where Rust answers.
@@ -214,6 +215,14 @@ const rig = ref({ plan: { cards: [], models: [] }, cards: [], models: [] });
 const rigDraft = ref({ cards: [], models: [] });
 const rigBusy = ref(false);
 const rigNote = ref("");
+// Other installs on your network, paired through their doors. Rust pairs,
+// signs, and checks each answer's proof; the page offers their models only
+// while the circuit breaker and the LAN gate are on.
+const installs = ref({ installs: [], ready: false });
+const installFound = ref([]);
+const installDraft = ref({ address: "", code: "", name: "" });
+const installBusy = ref(false);
+const installNote = ref("");
 // The orchestrator's rules: coded in Rust, each with its toggle, and the
 // runner's time limit.
 const rulesView = ref({ rules: [], limitMinutes: 30 });
@@ -332,7 +341,10 @@ const visionModels = computed(() => (vision.value?.reachable ? (vision.value.mod
 // Every model on hand, switched on or off.
 // The rig's models are offered only while the LAN gate is on.
 const rigModels = computed(() => rigOffered(rig.value, lanGate.value));
-const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value, ...rigModels.value]);
+// So are another install's, and only while the breaker is on too.
+const installsReady = computed(() => installs.value.ready && lanGate.value && courier.value.on);
+const otherModels = computed(() => installOffered(installFound.value, installsReady.value));
+const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value, ...rigModels.value, ...otherModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -538,6 +550,11 @@ watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
 watch(webOn, (on) => store("web", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
 watch(votesOn, (on) => store("votes", on ? "on" : "off"));
+// Another install is asked only while the breaker and the LAN gate are on.
+watch(
+  () => [courier.value.on, lanGate.value],
+  () => readInstalls(),
+);
 
 /**
  * "the next step is user can run the same question in 1-nth models and checks
@@ -718,9 +735,68 @@ function rigShare(id) {
   return shareLine(rig.value.models.find((model) => model.id === id));
 }
 
-/** Where a rig model is served, for the card over its answer. */
+/** Where a rig model is served, or which install answered, for the card over its answer. */
 function placeOf(id) {
-  return rig.value.models.find((model) => model.chatId === id)?.place ?? "";
+  return (
+    rig.value.models.find((model) => model.chatId === id)?.place ??
+    installOffered(installFound.value, true).find((model) => model.id === id)?.place ??
+    ""
+  );
+}
+
+/** The installs paired, and the models each offers while they can be asked. */
+async function readInstalls() {
+  try {
+    installs.value = await invoke("installs_status");
+  } catch {
+    installs.value = { installs: [], ready: false };
+  }
+  if (!installs.value.ready || !installs.value.installs.length) {
+    installFound.value = [];
+    return;
+  }
+  try {
+    installFound.value = await invoke("install_models");
+  } catch (error) {
+    installNote.value = String(error);
+  }
+}
+
+/** Pairs with another install, with the code its window shows. */
+async function pairInstall() {
+  if (installBusy.value || !canPair(installDraft.value)) return;
+  installBusy.value = true;
+  installNote.value = "";
+  try {
+    const draft = installDraft.value;
+    installs.value = await invoke("pair_install", {
+      address: draft.address.trim(),
+      code: draft.code.replace(/\s/g, ""),
+      name: draft.name.trim(),
+    });
+    installDraft.value = { address: "", code: "", name: "" };
+    installNote.value = "Paired.";
+    await readInstalls();
+  } catch (error) {
+    installNote.value = String(error);
+  } finally {
+    installBusy.value = false;
+  }
+}
+
+/** Forgets an install here. Its owner unpairs this one there. */
+async function unpairInstall(id) {
+  if (installBusy.value) return;
+  installBusy.value = true;
+  installNote.value = "";
+  try {
+    installs.value = await invoke("unpair_install", { id });
+    await readInstalls();
+  } catch (error) {
+    installNote.value = String(error);
+  } finally {
+    installBusy.value = false;
+  }
 }
 
 /** Turns the courier breaker on or off, pairs, stops pairing, or unpairs. */
@@ -1538,12 +1614,13 @@ async function send() {
   const replies = session.messages.slice(start);
   const failed = [];
   // Each server on the rig holds its own model, so the rig's models answer at
-  // once, while the models here take their turns.
+  // once, while the models here take their turns. So do another install's:
+  // each takes its turn there.
   const onRig = askRig(asked, replies, history, failed);
   for (const [index, entry] of asked.entries()) {
     // Stop ends the reply under way, and the models still waiting are not asked.
     if (stopAll) break;
-    if (entry.rig) continue;
+    if (entry.rig || entry.install) continue;
     const reply = replies[index];
     reply.waiting = false;
     const error = await ask(reply, entry, requestMessages(history, entry.id, "", entry.pictures === true));
@@ -1585,13 +1662,13 @@ async function send() {
 
 /**
  * Brad, 2026-11-24: "many models at once on the LAN". Asks every rig model
- * picked at once, each into its own reply. One failing keeps no other from
- * answering.
+ * picked at once, each into its own reply, and every model on another
+ * install. One failing keeps no other from answering.
  */
 function askRig(asked, replies, history, failed) {
   return Promise.all(
     asked.map(async (entry, index) => {
-      if (!entry.rig) return;
+      if (!entry.rig && !entry.install) return;
       const reply = replies[index];
       reply.waiting = false;
       const error = await ask(reply, entry, requestMessages(history, entry.id, "", false));
@@ -2238,8 +2315,9 @@ function modelName(id) {
   // chat still names the model that wrote it.
   // So does a chat an outside engine answered after the engine is removed.
   // A model switched off still names the chats it wrote.
-  // So does a chat a rig model answered while the LAN gate is off.
-  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? []), ...rigOffered(rig.value, true)];
+  // So does a chat a rig model answered while the LAN gate is off, or
+  // another install's model while the breaker is off.
+  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? []), ...installOffered(installFound.value, true), ...rigOffered(rig.value, true)];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -2282,6 +2360,7 @@ onMounted(async () => {
   await Promise.all([readGate(), readLanGate()]);
   readCourier();
   readRig();
+  readInstalls();
   readRules();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
@@ -2700,6 +2779,7 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'couriers' }" @click="openTab('settings', 'couriers')">Couriers</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rig' }" @click="openTab('settings', 'rig')">Rig</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'installs' }" @click="openTab('settings', 'installs')">Installs</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rules' }" @click="openTab('settings', 'rules')">Rules</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
@@ -3148,11 +3228,53 @@ onBeforeUnmount(() => {
             <p v-if="!courier.paired.length" class="quiet">None yet.</p>
             <ul v-else class="couriers">
               <li v-for="one in courier.paired" :key="one.id">
-                <span>{{ one.name }} <span class="quiet small">since {{ pairedSince(one.since) }}</span></span>
+                <span
+                  >{{ one.name }} <span class="quiet small">{{ one.kind === "install" ? "an install, " : "" }}since {{ pairedSince(one.since) }}</span></span
+                >
                 <button type="button" :disabled="courierBusy" @click="changeCourier('unpair_courier', { id: one.id })">Unpair</button>
               </li>
             </ul>
             <p v-if="courierNote" class="small" role="alert">{{ courierNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'installs'" class="settings-pane">
+            <h3>Installs</h3>
+            <p class="quiet">
+              Ask the models on another Rusty Business™ install on your private network, with a handshake of its own. On the
+              other install, open Couriers and pair; type its address and the code it shows here. Each question is signed,
+              and each answer is shown only once it proves it came from the install you paired. A picture never goes to
+              another install.
+            </p>
+            <p v-if="!courier.on" class="gate-ask">
+              <span>{{ installsLine(false, lanGate) }}</span>
+              <button type="button" :disabled="courierBusy" @click="changeCourier('set_courier', { open: true })">Turn on the breaker</button>
+            </p>
+            <p v-else-if="!lanGate" class="gate-ask">
+              <span>{{ installsLine(true, false) }}</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <p v-else class="small">{{ installsLine(true, true) }}</p>
+            <h3 class="gap-above">Pair an install</h3>
+            <form class="rig-fields" @submit.prevent="pairInstall">
+              <label>Address <input v-model="installDraft.address" type="text" placeholder="192.168.1.20" spellcheck="false" autocomplete="off" :disabled="installBusy" /></label>
+              <label>Code <input v-model="installDraft.code" type="text" inputmode="numeric" maxlength="7" placeholder="123 456" autocomplete="off" :disabled="installBusy" /></label>
+              <label>Name <input v-model="installDraft.name" type="text" maxlength="40" placeholder="Upstairs" :disabled="installBusy" /></label>
+              <div class="settings-actions">
+                <button class="primary" type="submit" :disabled="installBusy || !installsReady || !canPair(installDraft)">Pair</button>
+              </div>
+            </form>
+            <h3 class="gap-above">Paired</h3>
+            <p v-if="!installs.installs.length" class="quiet">None yet.</p>
+            <ul v-else class="couriers">
+              <li v-for="one in installs.installs" :key="one.id">
+                <span
+                  >{{ one.name }} <span class="quiet small">at {{ one.address }}, since {{ pairedSince(one.since) }}</span>
+                  <span v-if="troubleOf(installFound, one.id)" class="small" role="alert"><br />{{ troubleOf(installFound, one.id) }}</span></span
+                >
+                <button type="button" :disabled="installBusy" :aria-label="`Unpair ${one.name}`" @click="unpairInstall(one.id)">Unpair</button>
+              </li>
+            </ul>
+            <p class="quiet small">Unpairing here forgets the handshake. The other install's owner unpairs this one in its Couriers list.</p>
+            <p v-if="installNote" class="small" role="alert">{{ installNote }}</p>
           </div>
           <div v-else-if="settingsTab === 'rig'" class="settings-pane">
             <h3>Rig</h3>

@@ -28,8 +28,10 @@ use tauri::ipc::Channel;
 use tokio::sync::watch;
 
 use crate::board::{Boards, Local, Work};
+use crate::courier::Courier;
 use crate::engine::{self, ChatDone, ChatEvent, ChatMessage, ChatRequest, Chats};
 use crate::gate::LanGate;
+use crate::installs::{self, Installs};
 use crate::outside;
 use crate::rig::{self, Rig};
 use crate::rules::{self, Move, Rules, Verdict};
@@ -106,11 +108,12 @@ pub(crate) async fn timed(
 }
 
 /// Whether a model may be a runner. A model outside this computer never is,
-/// nor one that reads pictures. A model on the rig is checked by the rig.
+/// nor one that reads pictures. A model on the rig is checked by the rig,
+/// and one on another install by that install.
 pub fn runnable(model: &str) -> Result<(), String> {
     if outside::is_outside(model) {
         Err(OUTSIDE.to_string())
-    } else if rig::is_rig(model) {
+    } else if rig::is_rig(model) || installs::is_install(model) {
         Ok(())
     } else if engine::reads_pictures(model) {
         Err(WORDS_ONLY.to_string())
@@ -394,6 +397,8 @@ pub async fn run_slice(
     chats: tauri::State<'_, Chats>,
     lan: tauri::State<'_, LanGate>,
     rig: tauri::State<'_, Rig>,
+    installs: tauri::State<'_, Installs>,
+    courier: tauri::State<'_, Courier>,
     id: String,
     story: u64,
     slice: String,
@@ -403,6 +408,9 @@ pub async fn run_slice(
     let lan: &LanGate = &lan;
     let chats: &Chats = &chats;
     let rig: &Rig = &rig;
+    let installs: &Installs = &installs;
+    let breaker = courier.breaker();
+    let breaker = &breaker;
     let emit = move |event| {
         let _ = on_event.send(event);
     };
@@ -419,6 +427,12 @@ pub async fn run_slice(
                 timed(
                     cut_off,
                     rig::run_chat(lan, rig, &request, &mut stopped, emit),
+                )
+                .await
+            } else if installs::is_install(&request.model) {
+                timed(
+                    cut_off,
+                    installs::run_chat(lan, breaker, installs, &request, &mut stopped, emit),
                 )
                 .await
             } else {

@@ -14,6 +14,8 @@ the network: everything it needs, it asks the Rust side for.
 | `board.test.js` | Tests for `board.js`, on the sample board the app carries. They run on Node alone: `npm test` |
 | `runners.js`   | Helpers for handing a slice to a model, with no Vue and no Tauri in them: the models a slice can go to, when a slice can be handed off, and the runner's clock and the line it ends with |
 | `runners.test.js` | Tests for `runners.js`. They run on Node alone: `npm test` |
+| `installs.js`  | Helpers for asking another install, with no Vue and no Tauri in them: the models each install paired offers, the line that says when they can be asked, and when a pairing can be sent |
+| `installs.test.js` | Tests for `installs.js`. They run on Node alone: `npm test` |
 
 Logic that can be tested without a window belongs in `chat.js`, or in
 `board.js` or `runners.js` for the Workflow view, with a test beside it. `App.vue` and

@@ -25,11 +25,13 @@ No version went out as 0.1.0, 0.4.0, or 0.8.2.
 - **Rules for the Workflow.** Every move of a slice is checked against four rules coded into the app, with tests: lanes in order, each lane by its own party, only you take a slice into main, and a runner keeps to its time. Settings, Rules, turns the first, second, and fourth on or off, and sets the time limit: 30 minutes to start, from 5 to 480. The main rule has no switch, and the app never merges.
 - **Move slices in the Workflow view.** Each slice offers its next lane and a way back to each lane it has been through. A move the rules allow is written into the board on this computer, with whose move is next. A refused move writes nothing, and the view says which rule refused it and why. A move from the page is made as you.
 - **Hand a slice to a model.** A slice whose next lane is written can go to a runner: a model you turned on, on this computer, on your network, or on your rig. A model outside this computer is never one, because direct API connections are refused. The rules are checked before the model is asked and again once it is done. A clock shows how long it has taken, beside the limit, and at the limit the runner is stopped, nothing it wrote is kept, and the slice comes back to you. Stop stops it sooner. What a runner wrote is kept beside the board, cut to 64 KB, and never in the board's file.
+- **One install asks another.** Settings, Installs, pairs this Rusty Business™ with another on your private network, with the six-digit code that one's Couriers tab shows. Its models then join the ones you can pick in the chat, and a slice can go to one of them too. Each question is signed, and each answer proves it came from the install you paired, so a question copied off the network can't be sent again or changed. The key crosses once, when you pair, and both installs keep only its SHA-256. Nothing goes unless the Courier breaker and the LAN gate are on, on both installs. A picture never goes to another install, and the other install never asks a third.
 
 **Good to know**
 
 - On a computer with no key store, the boards stay as files, and the app says so when it starts.
 - The app works out each rig model's split, and for now you start each of the rig's servers with it yourself.
+- What crosses between two installs is signed but not sealed, so pair them only on a network you trust.
 
 ## 0.8.5
 

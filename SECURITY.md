@@ -143,6 +143,26 @@ I want to hear about:
   in a file only you can read, and holds the path to a key, never the key.
   Anyone on the network can read what crosses plain http: use the rig on a
   network you trust.
+- **Another install is asked only through its handshake.** Two Rusty
+  Business™ installs on your private network pair the way a courier app
+  does: the other install shows a six-digit code under Settings, Couriers,
+  and this one takes it, with the other's address, under Settings,
+  Installs. The key the door gives crosses plain http once, while the code
+  is open, and is then kept on both sides only as its SHA-256, in a file
+  only you can read. It never reaches the page, and never crosses the
+  network again. Each request is signed with that secret, over a fresh
+  number, the time, and the question, so a request copied off the network
+  cannot be sent again or changed, and one more than two minutes off is
+  turned away. Each answer carries a proof only the install you paired
+  could make, and an answer without it is never shown. An install's
+  secret is never taken as a courier app's key. One install asks another
+  only while its own Courier breaker and LAN gate are on, and the other
+  answers only while its own are; turning either off stops an answer under
+  way. The other install asks only the models it runs itself, never a
+  third install, and a picture never goes to it. The proof shows who
+  answered, but the words are not sealed: anyone on the network can read
+  what crosses plain http, so pair only on a network you trust, and unpair
+  on both sides to end it.
 - **Only you take a slice into main.** The Workflow checks every move of a
   slice against the app's rules, which are coded into it. Each rule has a
   switch, but this one does not: no model, check, or reviewer moves a slice

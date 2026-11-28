@@ -345,6 +345,28 @@ node scripts/fake-rig.mjs
 Then add a model at `127.0.0.1:8091` with the model id `phi-4`, and one at
 `127.0.0.1:8092`, and ask them both a question.
 
+## Installs
+
+Two Rusty Business™ installs on your private network can ask each other's
+models, with a handshake of their own. You ask on one, it asks the other
+over the wire, and the answer comes back the same way, to the first
+install, and then to you. The other install answers with its own models.
+
+1. On both, turn on the **LAN gate** and the **Courier breaker** at the
+   foot of the window.
+2. On the other install, open **Settings**, then **Couriers**, and select
+   **Pair a courier app**. A six-digit code shows for five minutes.
+3. On this one, open **Settings**, then **Installs**. Type the other's
+   address (such as `192.168.1.20`), the code, and a name for it, and
+   select **Pair**.
+
+Its models join the models you can pick in the chat, named after the
+install, and each answers in its turn there. Each question is signed, and
+each answer is shown only once it proves it came from the install you
+paired. A picture never goes to another install, and the other install
+never asks a third. **Unpair** under Installs forgets it here; the other
+install's owner unpairs this one in its Couriers list.
+
 ## Rules
 
 The Workflow checks every move of a slice against the app's rules. They are

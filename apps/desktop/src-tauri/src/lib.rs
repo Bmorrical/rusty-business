@@ -6,6 +6,8 @@ mod deactivated;
 mod downloads;
 mod engine;
 mod gate;
+mod handshake;
+mod installs;
 mod makers;
 mod models;
 mod outside;
@@ -114,6 +116,9 @@ pub fn run() {
                 data.join("couriers.json"),
             ));
             courier::start(app.handle());
+            // Other installs on your network, paired through their doors
+            // with a handshake of their own, behind the circuit breaker.
+            app.manage(installs::Installs::new(data.join("installs.json")));
             // The rig plan: many models at once on servers on your private
             // network, behind the LAN gate.
             app.manage(rig::Rig::new(data.join("rig.json")));
@@ -185,6 +190,10 @@ pub fn run() {
             courier::pair_courier,
             courier::stop_pairing_courier,
             courier::unpair_courier,
+            installs::installs_status,
+            installs::pair_install,
+            installs::unpair_install,
+            installs::install_models,
             makers::makers_status,
             makers::set_makers,
             outside::outside_status,

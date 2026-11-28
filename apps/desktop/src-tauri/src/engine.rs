@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
+use crate::courier::Courier;
 use crate::gate::{Gate, LanGate};
+use crate::installs::{self, Installs};
 use crate::makers::Makers;
 use crate::outside::{self, Outside};
 use crate::rig::{self, Rig};
@@ -1004,18 +1006,25 @@ pub(crate) async fn courier_ask(
     lan: &LanGate,
     chats: &Chats,
     model: &str,
+    before: &[(String, String)],
     question: &str,
     stopped: &mut watch::Receiver<bool>,
     emit: impl FnMut(ChatEvent),
 ) -> Result<ChatDone, String> {
     let base = base_url()?;
+    let words = |role: &str, content: &str| ChatMessage {
+        role: role.to_string(),
+        content: content.to_string(),
+        images: Vec::new(),
+    };
+    let mut messages: Vec<ChatMessage> = before
+        .iter()
+        .map(|(role, content)| words(role, content))
+        .collect();
+    messages.push(words("user", question));
     let request = ChatRequest {
         model: model.to_string(),
-        messages: vec![ChatMessage {
-            role: "user".to_string(),
-            content: question.to_string(),
-            images: Vec::new(),
-        }],
+        messages,
         max_tokens: None,
     };
     chat_on_engine(&base, lan, chats, &request, stopped, emit).await
@@ -1046,8 +1055,14 @@ pub(crate) async fn runner_ask(
     }
 }
 
+/// The installs paired, and the circuit breaker they go behind.
+pub(crate) struct Others<'a> {
+    pub installs: &'a Installs,
+    pub breaker: Gate,
+}
+
 /// Where a chat goes: an engine outside this computer, a server on the rig,
-/// or the engine here or on the LAN in its turn.
+/// another install, or the engine here or on the LAN in its turn.
 #[allow(clippy::too_many_arguments)]
 async fn route(
     chats: &Chats,
@@ -1055,6 +1070,7 @@ async fn route(
     lan: &LanGate,
     outside: &Outside,
     rig: &Rig,
+    others: &Others<'_>,
     request: &ChatRequest,
     stopped: &mut watch::Receiver<bool>,
     emit: impl FnMut(ChatEvent),
@@ -1069,6 +1085,18 @@ async fn route(
         // A server on the rig holds its own model, so it waits for no turn
         // here either, and many answer at once.
         rig::run_chat(lan, rig, request, stopped, emit).await
+    } else if installs::is_install(&request.model) {
+        // Another install answers with its own engine, so it waits for no
+        // turn here; it takes its turn there.
+        installs::run_chat(
+            lan,
+            &others.breaker,
+            others.installs,
+            request,
+            stopped,
+            emit,
+        )
+        .await
     } else {
         // A model that reads pictures answers on the picture engine, on this
         // computer, and takes its turn with the chat engine's models.
@@ -1092,6 +1120,8 @@ pub async fn chat_stream(
     lan: tauri::State<'_, LanGate>,
     outside: tauri::State<'_, Outside>,
     rig: tauri::State<'_, Rig>,
+    installs: tauri::State<'_, Installs>,
+    courier: tauri::State<'_, Courier>,
     chat_id: String,
     request: ChatRequest,
     on_event: Channel<ChatEvent>,
@@ -1108,6 +1138,10 @@ pub async fn chat_stream(
         &lan,
         &outside,
         &rig,
+        &Others {
+            installs: &installs,
+            breaker: courier.breaker(),
+        },
         &request,
         &mut stopped,
         |event| {
@@ -1791,6 +1825,10 @@ mod tests {
                     &lan,
                     &outside,
                     &rig,
+                    &Others {
+                        installs: &crate::installs::Installs::new(place.join("installs.json")),
+                        breaker: Gate::at(false),
+                    },
                     &request,
                     &mut stopped,
                     |_| {},

@@ -223,7 +223,7 @@ test('the page sends only the path, keeps none of it, and offers an engine only 
       app.includes('const outsideModels = computed(() => (gate.value ? outsideListed.value : []));'),
     "an outside engine's models are offered with the gate off, or before it is added",
   );
-  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.engineModels\.value, \.\.\.visionModels\.value, \.\.\.outsideModels\.value, \.\.\.rigModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
+  assert.match(app, /const onHand = computed\(\(\) => \[\.\.\.engineModels\.value, \.\.\.visionModels\.value, \.\.\.outsideModels\.value, \.\.\.rigModels\.value, \.\.\.otherModels\.value\]\);/, 'an outside engine can no longer answer alone or as one of several');
   assert.ok(app.includes('const models = computed(() => switchedOn(onHand.value, off.value));'), 'an outside engine switched off is still asked');
   // Rust gives every engine, as a list.
   assert.ok(pageFunction(app, 'readOutside').includes('outside.value = Array.isArray(listed) ? listed : [];'), 'the page no longer reads the engines as a list');

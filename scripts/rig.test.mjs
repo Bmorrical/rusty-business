@@ -93,11 +93,11 @@ test('the page asks the rig at once, the models here in turn, and Stop stops eve
   const send = functionOf(app, 'send');
   assert.ok(send.includes('const onRig = askRig(asked, replies, history, failed);'), 'the rig is no longer asked beside the models here');
   assert.ok(send.indexOf('const onRig = askRig(') < send.indexOf('for (const [index, entry] of asked.entries()) {'), 'the rig is asked only after the models here');
-  assert.match(send, /if \(stopAll\) break;\s+if \(entry\.rig\) continue;/, 'a rig model is asked twice, or waits its turn');
+  assert.match(send, /if \(stopAll\) break;\s+if \(entry\.rig \|\| entry\.install\) continue;/, 'a rig model is asked twice, or waits its turn');
   assert.ok(send.includes('await onRig;'), 'the question ends before the rig has answered');
   const rig = functionOf(app, 'askRig');
   assert.ok(rig.includes('Promise.all('), 'the rig models are no longer asked at once');
-  assert.ok(rig.includes('if (!entry.rig) return;'), 'a model here is asked at once with the rig');
+  assert.ok(rig.includes('if (!entry.rig && !entry.install) return;'), 'a model here is asked at once with the rig');
   assert.ok(rig.includes('if (error) failed.push(`${entry.name}: ${error}`);'), "one rig model's failure is lost, or stops the rest");
   assert.ok(rig.includes('requestMessages(history, entry.id, "", false)'), 'a picture goes to the rig');
 
