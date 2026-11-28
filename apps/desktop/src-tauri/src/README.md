@@ -19,9 +19,14 @@ The desktop app's Rust code.
 | `web.rs`      | Web search: while Settings allows it and the gate is on, a model's search goes to Brave Search's API with the person's key, kept as a path, or to DuckDuckGo's plain results page without one |
 | `stack.rs`    | The stack's start: when its front door does not answer, opens Docker Desktop if it is not running, then starts the stack in `../stack-compose.yaml` |
 | `sessions.rs` | Saved chats: one JSON file each, a grade kept apart from the answers. Trash moves a file; nothing deletes |
-| `board.rs`    | Boards for the Workflow view: a copy of each board as one JSON file, your notes in a second file, and the made-up sample board. It also does every read and write for a board in step with a file. It asks nothing of the network, and nothing deletes |
+| `board.rs`    | Boards for the Workflow view: a copy of each board, your notes on it apart from the copy, and the made-up sample board, kept in `store.rs`'s encrypted database, or as JSON files when the system has no key store. It also does every read and write for a board in step with a file. It asks nothing of the network, and nothing deletes |
+| `store.rs`    | The boards' database: one SQLite file, `boards.db`, encrypted whole by SQLCipher, its key 32 random bytes kept in the system's key store, the Keychain, the Credential Manager, or the Secret Service. Boards already kept as files are copied in and left where they are |
 | `sync.rs`     | What two copies of a board come to: what each side changed since the last sync, and the conflicts. It only compares, and touches no file |
 | `cli.rs`      | The `board` command: `import`, `export`, `pull`, `push`, `sync`, and `list`, run in a terminal. The one place a path comes in, typed by the person |
+| `courier.rs`  | The courier door: an MCP server on the private network, for a courier app the person brings and pairs. It listens on port 4710 only while its own breaker and the LAN gate are on, and asks only the chat engine's models |
+| `rig.rs`      | The rig: many models at once on servers on the private network. Keeps the plan of its cards and each model's share of them, draws no key into it, and asks a rig model only while the LAN gate is on, without waiting for the turn here |
+| `rules.rs`    | The orchestrator's rules: the checks the Workflow applies to every move of a slice, coded here, each with its toggle, and the runner's time limit, kept for this account alone. It also moves a slice on a board, as you, once the rules allow it |
+| `runners.rs`  | The runners: a slice handed to a model on this computer, the network, or the rig, with the rules checked before and after, the clock that stops it at its time limit, one runner a slice, and its work kept beside the board |
 | `update.rs`   | The notice of a new version: asks GitHub for the newest release, opens this system's file in the browser, and installs it when its signature matches |
 
 Three rules live in `gate.rs`, each with tests:
@@ -177,6 +182,17 @@ Six more live in `board.rs`, each with tests:
 - On a Mac and on Linux, the boards folder and its files are readable by
   this computer's user only.
 
+Three more live in `store.rs`, each with tests:
+
+- The database is encrypted whole: no board, note, or path in it reads as
+  text without its key, and a build that cannot encrypt refuses to open it.
+- The key is never written to a file, a log, or the page. A key is made
+  only when there is no database yet, so a database whose key is missing is
+  said and left as it is, never written over.
+- The boards already kept as files are copied in, once, and the files are
+  left where they are. A board file dropped in the folder later is taken in
+  too. With no key store, the boards stay files, and the app says so.
+
 Five more keep a board in step with a file, across `board.rs`, `sync.rs`,
 and `cli.rs`, each with tests:
 
@@ -192,6 +208,59 @@ and `cli.rs`, each with tests:
   compare against, nothing is taken away.
 - The program leaves from `main.rs` alone, with what the command came to.
 
+Five more live in `courier.rs`, each with tests:
+
+- The door is closed until the person turns its breaker on, and while the
+  LAN gate is off. Turning either off turns away what arrives and stops an
+  answer part way.
+- Only an address on a private network is answered, and no request that
+  carries an Origin, so no web page reaches it.
+- Only a paired courier app is served. A code lasts five minutes and five
+  wrong tries void it. The key is given once and kept only as its SHA-256.
+- No key, and no hash of one, reaches the page.
+- A courier app can stop only its own questions.
+
+Five more live in `rig.rs`, each with tests:
+
+- A plan is checked before it is kept: at most four cards and sixteen
+  models, no card shared past 100 percent, and only a model on the app's
+  list, at a private address over plain http.
+- The plan is kept for this account alone, and holds the path to a key,
+  never the key. No key reaches the page.
+- A rig model is asked only while the LAN gate is on, and turning the gate
+  off stops its answer.
+- Rig models wait for no turn here: two answer at once, and one that cannot
+  be reached holds up no other.
+- A picture never goes to the rig.
+
+Five more live in `rules.rs`, each with tests:
+
+- A slice goes through the lanes in order, and each lane is worked by its
+  own party or by you; each has a toggle, and starts on.
+- Only you take a slice into main, whatever else is off. That rule has no
+  toggle, and nothing kept can turn it off.
+- A runner past its time limit has drifted: its work is set aside, and the
+  slice goes back to you to be cut smaller.
+- The toggles are kept for this account alone. A move into a lane, or by a
+  party, the app does not know is refused.
+- A move from the Workflow view is made as you, from the lane the board
+  says the slice is in. An allowed move writes its lane and whose move is
+  next, a refused one writes nothing, and a drifted runner leaves the lane
+  where it was and adds a note.
+
+Five more live in `runners.rs`, each with tests:
+
+- A slice goes only to a model on this computer, on the network, or on the
+  rig, that writes words. A model outside this computer is refused before
+  anything is asked: direct API connections are refused.
+- The rules are checked before the model is asked, and again once it is
+  done, and a runner moves a slice only into written, as a model.
+- A runner is stopped at its time limit and a second more, and has drifted:
+  nothing it wrote is kept. The clock starts once it holds its turn.
+- A run you stop, or one that writes nothing, moves nothing, and only one
+  runner writes a slice at a time.
+- The work is kept beside the board, never in its file, cut to 64 KB, and
+  readable by its owner only.
 An engine the app starts listens on this computer only, is told to stay
 offline, and is never asked to log what is typed. A stack the app starts
 has its front door on this computer only, and its passwords are made on its

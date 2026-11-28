@@ -25,7 +25,7 @@ wrong and what fixed it. It credits you by name unless you ask me not to.
 
 ## What is covered
 
-The app's version is 0.8.5. Its downloads, for a Mac, for Windows, and for
+The app's version is 0.8.6. Its downloads, for a Mac, for Windows, and for
 Linux, are on the newest release on GitHub, built from `main`. Fixes go into `main`,
 then into a new release, and only `main` and the newest release are
 covered.
@@ -90,11 +90,14 @@ I want to hear about:
   key. The app keeps the path to your key file, never the key, and the key
   never reaches the page. What comes back is cut to at most 8 results of
   plain text, with every tag taken out, before the model reads it.
-- The Workflow view reads only the boards kept on this computer, in the
-  app's own data folder. It asks nothing of the network and works with both
-  gates off. No command it uses takes a path, a new copy of a board never
-  changes or removes your notes, and nothing in the boards folder is
-  deleted.
+- The Workflow view reads and moves only the boards kept on this
+  computer, in the app's own data folder. It asks nothing of the network
+  and works with both gates off. No command it uses takes a path, a new
+  copy of a board never changes or removes your notes, and nothing in the
+  boards folder is deleted. A move of a slice is checked against the rules
+  before anything is written, and is made as you: the page names only the
+  lane, so it cannot say a model, the check, or a reviewer made it. Where
+  the slice is comes from the board, never from the page.
 - The `board` command, run in a terminal, reads and writes one board file
   at a path you type. The path never comes from the page. The file is read
   as a plain file of at most 4 MB, never through a link, and checked
@@ -113,9 +116,69 @@ I want to hear about:
   this computer by itself, and the app has no door for a backend to be
   reached through. "For now" is meant: the rule stands until a pull request
   changes [BOARD.md](BOARD.md), which has it in full.
+- **The courier door is off until you turn it on.** It lets a courier app
+  you bring, on your private network, ask a model on this computer a
+  question over MCP. It listens on port 4710 only while both its own
+  breaker, Courier breaker at the foot of the window, and the LAN gate are
+  on. Turning either off closes it and stops any answer under way. It
+  answers only an address on a private network (this computer, the private
+  ranges, and link-local addresses), turns away any request that carries
+  an Origin, which every web page's request does, and serves only a
+  courier app you paired. Pairing takes a six-digit code shown under
+  Settings, Couriers, for five minutes; five wrong codes void it. The key
+  it gives is sent once and kept only as its SHA-256, in a file only you
+  can read, and never reaches the page. A paired courier app can list the
+  models you turned on and ask one of them a question, and stop only its
+  own questions. It reads no chat, no file, and no setting, and reaches no
+  engine outside this computer. The door speaks plain http, so anyone on
+  the network can read what crosses it: pair only on a network you trust,
+  and unpair a courier app in Settings to take its key away.
+- **The rig is asked only through the LAN gate.** A model on the rig is
+  asked only while the LAN gate is on, at an address on this computer or a
+  private network, over plain http, with no proxy and no redirects, and only
+  a model on the app's list. Turning the gate off stops any answer under
+  way. A picture never goes to the rig. If a server asks for a key, the app
+  reads it from the file you named for each chat and sends it only in that
+  server's Authorization header; it never reaches the page. The plan is kept
+  in a file only you can read, and holds the path to a key, never the key.
+  Anyone on the network can read what crosses plain http: use the rig on a
+  network you trust.
+- **Another install is asked only through its handshake.** Two Rusty
+  Business™ installs on your private network pair the way a courier app
+  does: the other install shows a six-digit code under Settings, Couriers,
+  and this one takes it, with the other's address, under Settings,
+  Installs. The key the door gives crosses plain http once, while the code
+  is open, and is then kept on both sides only as its SHA-256, in a file
+  only you can read. It never reaches the page, and never crosses the
+  network again. Each request is signed with that secret, over a fresh
+  number, the time, and the question, so a request copied off the network
+  cannot be sent again or changed, and one more than two minutes off is
+  turned away. Each answer carries a proof only the install you paired
+  could make, and an answer without it is never shown. An install's
+  secret is never taken as a courier app's key. One install asks another
+  only while its own Courier breaker and LAN gate are on, and the other
+  answers only while its own are; turning either off stops an answer under
+  way. The other install asks only the models it runs itself, never a
+  third install, and a picture never goes to it. The proof shows who
+  answered, but the words are not sealed: anyone on the network can read
+  what crosses plain http, so pair only on a network you trust, and unpair
+  on both sides to end it.
+- **Only you take a slice into main.** The Workflow checks every move of a
+  slice against the app's rules, which are coded into it. Each rule has a
+  switch, but this one does not: no model, check, or reviewer moves a slice
+  into main, and the app never merges. The switches are kept in a file only
+  you can read.
+- **A slice goes only to a model here.** A slice is handed only to a model
+  on this computer, on your network, or on your rig. Direct API connections
+  are refused. The rules are checked before the model is asked and again
+  once it is done, and a model only ever moves a slice into written. A
+  runner is stopped at its time limit, and nothing it wrote is kept. What a
+  runner writes is kept in the app's own store, beside the board, cut to
+  64 KB, and readable by you only; it never goes into the board's file.
 - Nothing in the models folder is written over, moved, or removed.
 - No chat is deleted: the trash is a folder.
-- Every port the stack opens listens on this computer only.
+- Every port the stack opens listens on this computer only. The courier
+  door, above, is the app's one port beyond it.
 
 [AGENTS.md](AGENTS.md) sets the rules a change follows to keep these
 promises, for people and for the AI models that work for them.

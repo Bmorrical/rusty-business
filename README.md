@@ -41,7 +41,7 @@ a private-network llama-server you configure. Turn on the LAN gate to use
 that server. With the WAN gate on, you can also ask Grok, GPT, Claude, and
 Gemini with your own keys.
 
-**Status:** version 0.8.5, and early. It runs on a Mac with Apple silicon:
+**Status:** version 0.8.6, and early. It runs on a Mac with Apple silicon:
 [download it](#run-the-chat-window-macos), or [build it from source](#on-a-mac)
 with one command. Windows has [an installer](#run-the-chat-window-windows), and Linux
 has [a .deb, an .rpm, and a .tar.gz](#run-the-chat-window-linux). The Mac and
@@ -559,10 +559,13 @@ next.
   Its engine, mlx-vlm, is not in the download yet: `pip install mlx-vlm`
   puts it on the Mac. Phi-4-multimodal and Molmo-7B-O are listed as coming,
   and scanned PDFs are not read. (On the roadmap: Reading images.)
-- **The Workflow view only reads.** A board gets there as a file: imported
-  with the `board` command in a terminal, which also keeps the two in step,
-  or put in the boards folder. The view cannot change a story or a slice
-  yet. (On the roadmap: Slices you can write.)
+- **The Workflow view moves slices, and writes nothing else.** A board
+  gets there as a file: imported with the `board` command in a terminal,
+  which also keeps the two in step, or put in the boards folder. The view
+  moves a slice from lane to lane under the rules, but cannot add a story
+  or a slice, or change their words, yet. (On the roadmap: Slices you can
+  write.) It can hand a slice to a model on this computer or your network,
+  kept to its time limit, which writes it into written.
 - **A board moves as a file.** [BOARD.md](BOARD.md) is the file's ruleset:
   what it holds, each rule, and why, so anyone can bring in a road of their
   own and build the other side. No direct API connection to a board's

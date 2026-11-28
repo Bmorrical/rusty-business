@@ -142,12 +142,18 @@ test('LAN and WAN switches independently control model discovery, providers, and
         default: throw new Error(command);
       }
     },
+    rig: { value: { models: [] } },
+    rigOffered: () => [],
+    installs: { value: { installs: [], ready: false } },
+    installFound: { value: [] },
+    courier: { value: { on: false } },
+    installOffered: () => [],
     pickModels() {},
     checkEngine() { calls.push('engine'); },
     checkStack() { calls.push('stack'); },
     checkUpdate() { calls.push('update'); },
   });
-  const values = ['outsideListed', 'outsideModels', 'lanEngine', 'engineModels', 'visionModels', 'onHand', 'installGateOpen', 'canDownload'];
+  const values = ['outsideListed', 'outsideModels', 'lanEngine', 'engineModels', 'visionModels', 'rigModels', 'installsReady', 'otherModels', 'onHand', 'installGateOpen', 'canDownload'];
   const formulas = values.map((name) => app.match(new RegExp(`^const ${name} = .+;`, 'm'))?.[0]);
   assert.ok(formulas.every(Boolean));
   vm.runInContext([

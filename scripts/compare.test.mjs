@@ -5,11 +5,12 @@
 // question in 1-nth models and checks the results of each one", and "if they
 // can't run asychronos then the models can iterate on the question". The
 // engine on this computer holds one model at a time, so the models here take
-// turns.
+// turns. A model on the rig holds a server of its own, so the rig's models
+// answer at once beside them (rig.test.mjs).
 //
 // Rust keeps the turn, and its tests in engine.rs and sessions.rs check how
 // it behaves; chat.test.js checks the page's helpers. These fail when the
-// page asks the models all at once, keeps asking after Stop, lets one model's
+// page asks the models here all at once, keeps asking after Stop, lets one model's
 // failure stop the rest, shows one model another's answer, loses the buttons
 // that pick the models or the cards that sit side by side, or stops picking a
 // reopened chat's models, or when a rule loses its Rust test.
@@ -113,7 +114,7 @@ test('the answers to one question sit side by side, each under its model\'s name
   // "and checks the results of each one".
   const app = read(APP);
   assert.ok(app.includes('<div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">'), 'the answers to a question are no longer kept together');
-  assert.ok(app.includes('<h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>'), 'an answer beside others no longer names its model');
+  assert.ok(app.includes('<h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}<span v-if="placeOf(turn.model)" class="quiet"> on {{ placeOf(turn.model) }}</span></h3>'), 'an answer beside others no longer names its model');
   const grid = app.slice(app.indexOf('.answers.many {'), app.indexOf('}', app.indexOf('.answers.many {')));
   assert.match(grid, /display: grid;/, 'the answers are no longer side by side');
   assert.match(grid, /grid-template-columns: repeat\(auto-fit, minmax\(13rem, 1fr\)\);/, 'the answers no longer share the width');

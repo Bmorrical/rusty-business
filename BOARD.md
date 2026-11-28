@@ -238,6 +238,20 @@ been through. A slice with no `lane` has been through none.
 `check`, or `review`. Leave it out, and the move goes to whoever takes the
 slice into its next lane.
 
+The app checks every move of a slice against its rules, which are coded
+into it, each with a switch in Settings, under Rules. Only you take a slice
+into `main`: that rule has no switch, and the app never merges.
+
+When you move a slice in the Workflow view, the app writes its `lane` and
+`move` into the copy on this computer, and nothing else on the board.
+`board sync` then carries them to the shared file like any other change.
+
+A slice whose next lane is `written` can be handed to a model on this
+computer, on your network, or on your rig, which writes it and moves it into
+`written`. A runner's work is kept in the app's own store, beside the board,
+and never in the board's file. Only the slice's `lane` and `move` change on
+the board, as with any other move.
+
 Lanes and moves are this app's own. A backend that has no use for them keeps
 them and writes them back as they arrived.
 

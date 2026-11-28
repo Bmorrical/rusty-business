@@ -13,6 +13,11 @@
 // reaches past this computer or needs a new crate, when Show can open any
 // path, or when another system is offered what only a Mac does.
 //
+// Brad, 2026-11-24: "heic worked great, but I need a confirmation I looked in
+// folder and saw they converted." They also fail when a copy is called saved
+// before it is read back from its folder, or when the page stops saying which
+// folder each JPEG was found in.
+//
 // The checks read the files as text, so nothing has to be installed to run
 // them.
 
@@ -99,6 +104,28 @@ test('the converter stays on this computer and adds no crate', () => {
   assert.doesNotMatch(rust, /\bimage::|use image\b/, 'the converter does not use the image crate');
   const image = read(CARGO).match(/^image = .*$/m)?.[0] ?? '';
   assert.doesNotMatch(image, /heif|heic|avif/i, 'the image crate reads no HEIC');
+});
+
+// Brad, 2026-11-24: "heic worked great, but I need a confirmation I looked in
+// folder and saw they converted."
+test('a copy is called saved only once it is read back from its folder, and the page says which folder', () => {
+  const rust = read(RUST);
+  const convert = rustFn(rust, 'convert');
+  const written = convert.indexOf('write_beside(source, &jpeg)?');
+  const found = convert.indexOf('found_in_folder(&out, &jpeg)?');
+  assert.ok(written > 0 && found > written, 'convert reads each copy back after writing it');
+  assert.ok(convert.indexOf('Ok(out)') > found, 'and answers only after that');
+  const check = rustFn(rust, 'found_in_folder');
+  assert.match(check, /fs::symlink_metadata\(out\)/, 'a link is never taken for the copy');
+  assert.match(check, /meta\.is_file\(\)/);
+  assert.match(check, /on_disk != made/, 'the bytes in the folder are the bytes made');
+  assert.match(rust, /fn a_copy_is_called_saved_only_once_it_is_found_in_its_folder\(\)/);
+  assert.match(rust, /pub struct Converted \{[^}]*pub folder: String,[^}]*pub kept_location: bool,/);
+  const app = read(APP);
+  assert.match(app, /const heicSaved = computed\(\(\) => heicConfirmation\(heicList\.value\)\);/);
+  assert.match(app, /<div v-if="heicSaved" class="utility-confirm" role="status"/);
+  assert.match(app, /v-for="one in heicSaved\.folders"[\s\S]*?\{\{ one\.folder \}\}[\s\S]*?@click="showJpeg\(one\.first\)"/);
+  assert.match(app, /outFolder: made\.folder,\s*keptPlace: made\.kept_location,/);
 });
 
 test('Show opens only a JPEG this window made, and the commands are registered', () => {

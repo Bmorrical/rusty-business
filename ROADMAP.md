@@ -17,6 +17,68 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 
 ## Next
 
+- **The orchestrator, run by your rulesheet.** Rusty Business™ becomes the
+  orchestrator for the work on your boards, and a rulesheet you write and
+  amend says how it works. It listens to you first. It reads the work
+  from the Workflow view and hands each story to a model on this
+  computer, on your private network, or at an outside service, as the
+  rulesheet says. Each step has a label on a label workflow that says
+  who holds the ball, and when that party is done, the orchestrator
+  moves the label and hands the ball to the next one. Watching those
+  labels and moving them is the orchestrator's job. It sets a drift
+  threshold on its runners, the models it hands stories to, as the
+  rulesheet says. A runner that runs past it has its build rejected, and
+  the orchestrator is told to split the story into more shards. Every
+  rule you set is checked by code, not left to a runner to remember, and
+  work that does not pass a rule goes no further. When the work comes
+  back as a pull request,
+  Copilot
+  takes over on GitHub: it keeps the stacks of pull requests in order and
+  reviews a stack once it is ready. The orchestrator sends each review
+  point back to whoever did the work, the fix comes back up, the points
+  are answered and resolved, and Copilot reviews again, until it is
+  green. Then the backend and end-to-end tests pass on this computer, and
+  only then does the pull request get its merge labels. The orchestrator
+  merges nothing, and only you merge into main. The rulesheet grows as
+  you amend it.
+- **Many models at once, on your own network.** A computer on your private
+  network runs models on its GPUs, from one hardware slice of a card to
+  four whole cards. You split that compute the way you would partition a
+  drive: the app shows each card as a pie, and a slider gives each model
+  its share of what is free. A share can be part of one card, or span
+  several: a model that needs two and a half cards gets them. Run a model
+  rich or lean, with more of the compute or less, to get the results you
+  want. Each model runs in a container of its own, and the app reaches
+  them only with the LAN gate on. Then One question, many models asks each
+  model at the same time: each answers on its own, and none waits for
+  another. The models on this computer still take turns, since the engine
+  here holds one at a time. The app sets the shares, and the computer that
+  runs the models carries them out: it starts, places, and stops the
+  containers.
+- **Newer models, and where each maker is from.** More models install in
+  one click: Inkling 2 Mini from Thinking Machines Lab, Gemma 4 31B,
+  Nemotron 3.5 Super VL, Qwen, DeepSeek, Mistral, Kimi, GLM, and the other
+  top open models, each added once it is checked. The project picks which
+  models are on the list, and you pick which to install. No model comes
+  with the app, as now: each one is downloaded only when you click to get
+  it. Each maker shows its country of origin, and you can filter the list
+  by country, so you can see at a glance which models are made in the
+  United States and which are not.
+- **One Rusty Business™ to another, on your own network.** Two installs of
+  Rusty Business™ on your private network talk to each other, once each
+  has said yes to the other in a handshake of their own. You drive one,
+  and it passes what you ask over the wire to the other, which does the
+  work there. Everything that comes of it bubbles back the same way: to
+  the first install, and then to you. The second install works with its
+  own models, so the whole path runs with nothing but Rusty Business™ at
+  each end. Each install also opens an API on your private network, so you
+  can bring your own courier app to carry work to it and back. The API is
+  an MCP server that any courier app can connect to. It starts with what
+  the first courier app needs, and grows with the apps that use it. The link and the API have a circuit breaker of their own:
+  a switch, off until you turn it on, that stops both at once. Each
+  install reaches the other, and a courier app reaches an install, only
+  with that switch and the LAN gate on, and nothing passes past your
+  private network.
 - **Kits.** A kit is a small file, kept outside the app, that names what a
   board needs before work on it can start, such as a folder on this
   computer or a repository to fetch. The app reads a kit and says what is
@@ -27,6 +89,14 @@ Decided, and parked until it is picked up again. A pin keeps its number.
   syncs, pulled from the Workflow view. A pull leaves your notes. A source
   that is an address on a network is refused for now: `BOARD.md` has the
   rule.
+- **Boards kept in an encrypted database.** The copy of a board on this
+  computer is kept in SQLite, a database that is one file the app opens
+  itself, with no server to run. The file is encrypted, and its key stays
+  in the operating system's own key store, such as the Mac's Keychain. A
+  board that a courier app hands the install over the MCP server goes
+  there, and goes back out as a board file, exported as now. The database
+  is the app's own copy, not a board's backend, so the rule in `BOARD.md`
+  stands.
 - **Slices you can write.** Add and edit a story's slices in the Workflow
   view, each with a brief small enough for a local model, a meter that
   says whether the brief fits the model's window, and a way to copy your
@@ -186,9 +256,11 @@ Decided, and parked until it is picked up again. A pin keeps its number.
 - **The Workflow view.** A board is a road of releases, the stories and
   bugs under each, and the slices each story is cut into. The view shows
   one, with the five lanes a slice goes through, Sliced, Written, Checked,
-  Reviewed, and Main, and whose move each slice and each story is. It
-  reads only a copy kept on this computer, so it works with both gates
-  off, and it keeps a note of your own on any story. A made-up sample
+  Reviewed, and Main, and whose move each slice and each story is. You
+  move a slice into its next lane, or back to be done again, and the rules
+  check each move first. It reads and moves only a copy kept on this
+  computer, so it works with both gates off, and it keeps a note of your
+  own on any story. A made-up sample
   board shows how one reads.
 - **A board in step with a file.** One command in a terminal,
   `rusty-business board`, keeps a board on this computer in step with one

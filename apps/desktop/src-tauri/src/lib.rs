@@ -1,19 +1,26 @@
 mod attachments;
 mod board;
 mod cli;
+mod courier;
 mod deactivated;
 mod downloads;
 mod engine;
 mod gate;
+mod handshake;
+mod installs;
 mod makers;
 mod models;
 mod outside;
 mod picture;
 mod projects;
 mod remote;
+mod rig;
+mod rules;
+mod runners;
 mod sessions;
 mod stack;
 mod starter;
+mod store;
 mod sync;
 mod uninstall;
 mod update;
@@ -93,10 +100,33 @@ pub fn run() {
             app.manage(deactivated::Deactivated::new(data.join("deactivated")));
             // Web search: the path to a Brave key, never the key.
             app.manage(web::Web::new(data.join("web.json")));
-            // Boards: the local copies the Workflow view reads, and the notes on them.
-            app.manage(board::Boards::new(data.join("boards")));
+            // Boards: the local copies the Workflow view reads, and the notes on
+            // them, in an encrypted database whose key is in the system's key store.
+            app.manage(board::Boards::open(
+                data.join("boards"),
+                &store::SystemKeys::new(&app.config().identifier),
+                |said| eprintln!("{said}"),
+            ));
             // The picture check: its model, once the person installs it.
             app.manage(picture::PictureCheck::new(data.join("picture-check")));
+            // The courier door: an MCP server on your private network, behind
+            // its own circuit breaker (off until you turn it on) and the LAN gate.
+            app.manage(courier::Courier::new(
+                data.join("courier-breaker"),
+                data.join("couriers.json"),
+            ));
+            courier::start(app.handle());
+            // Other installs on your network, paired through their doors
+            // with a handshake of their own, behind the circuit breaker.
+            app.manage(installs::Installs::new(data.join("installs.json")));
+            // The rig plan: many models at once on servers on your private
+            // network, behind the LAN gate.
+            app.manage(rig::Rig::new(data.join("rig.json")));
+            // The orchestrator's rules: coded checks on every move of a
+            // slice, each behind its own toggle.
+            app.manage(rules::Rules::new(data.join("rules.json")));
+            // The runners: slices handed to models, on their time limits.
+            app.manage(runners::Runs::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -119,6 +149,15 @@ pub fn run() {
             board::load_board,
             board::open_sample_board,
             board::save_board_note,
+            rules::rules_status,
+            rules::set_rule,
+            rules::set_rule_limit,
+            rules::check_move,
+            rules::move_slice,
+            runners::run_slice,
+            runners::stop_run,
+            runners::runs_going,
+            runners::slice_work,
             sessions::list_sessions,
             sessions::list_votes,
             sessions::load_session,
@@ -144,6 +183,17 @@ pub fn run() {
             gate::set_gate,
             gate::lan_gate_status,
             gate::set_lan_gate,
+            courier::courier_status,
+            rig::rig_status,
+            rig::save_rig,
+            courier::set_courier,
+            courier::pair_courier,
+            courier::stop_pairing_courier,
+            courier::unpair_courier,
+            installs::installs_status,
+            installs::pair_install,
+            installs::unpair_install,
+            installs::install_models,
             makers::makers_status,
             makers::set_makers,
             outside::outside_status,

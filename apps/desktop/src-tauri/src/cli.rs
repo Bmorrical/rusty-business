@@ -104,7 +104,11 @@ pub fn run(args: &[String]) -> Option<i32> {
             "Could not find this computer's data folder.",
         ));
     };
-    let boards = Boards::new(data.join(IDENTIFIER).join("boards"));
+    let boards = Boards::open(
+        data.join(IDENTIFIER).join("boards"),
+        &crate::store::SystemKeys::new(IDENTIFIER),
+        |said| eprintln!("{said}"),
+    );
     Some(run_in(&boards, &args[1..], &mut out))
 }
 

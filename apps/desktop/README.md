@@ -48,8 +48,10 @@ Select the picture to open it full size. The rest of the set is in
   Sliced, Written, Checked, Reviewed, and Main, and the view says whose
   move each slice and each story is. A story shows five marks, one for
   each lane all of its slices have been through, and all five make a royal
-  flush. The view reads only a copy kept on this computer, so it works
-  with both gates off, and it keeps a note of your own on any story. The
+  flush. You move a slice into its next lane, or back to be done again,
+  and the [rules](#rules) check each move first. The view reads and moves
+  only a copy kept on this computer, so it works with both gates off, and
+  it keeps a note of your own on any story. The
   sample board is made up, and shows how one reads. [Boards](#boards)
   says where a board is kept and what is in one.
 - **A switch for each model**, in Settings under Models, for the models on
@@ -282,6 +284,140 @@ If your server supports chat only, you can install a catalog GGUF on the
 server and refresh the app after llama-server lists it. Use this HTTP
 connection on a trusted private network.
 
+## Courier apps
+
+A courier app is a program of your own, on another computer on your
+private network, that asks a model here a question. The app is its MCP
+server, over Streamable HTTP, at `http://<this computer>:4710/mcp`. Its
+two tools are `models`, the chat models you turned on, and `ask`, which
+asks one of them and streams the answer back as progress while it comes.
+
+1. Turn on the **LAN gate** and the **Courier breaker** at the foot of the
+   window. The door listens only while both are on.
+2. Open **Settings**, then **Couriers**, and select **Pair a courier app**.
+   A six-digit code shows for five minutes.
+3. From the courier app, send it once:
+
+   ```sh
+   curl -s http://192.168.1.20:4710/pair \
+     -H 'Content-Type: application/json' \
+     -d '{"code":"123456","name":"My courier"}'
+   ```
+
+   The answer holds the key, once. Keep it in the courier app.
+4. The courier app sends it with every request to `/mcp`, as
+   `Authorization: Bearer <key>`.
+
+**Unpair** in the same pane takes a key away. A request from a web page,
+or from an address outside your private network, is turned away. The door
+speaks plain http: use it on a network you trust.
+
+## Rig
+
+The rig is a computer on your private network with cards of its own, each
+serving models with llama-server, one model to a server, each at its own
+port. The app asks them at once: each answers beside the others while the
+models on this computer still take their turns.
+
+1. Turn on the **LAN gate** at the foot of the window.
+2. Open **Settings**, then **Rig**. Add each card, with its memory.
+3. Add each model: a name, the server's address (such as
+   `192.168.1.20:8091`), the model's id on that server, which must be on the
+   app's list, and, if the server asks for one, the path to a file that holds
+   its key.
+4. Give each model its share of one card or more with the sliders. Each card
+   shows as a pie of the models that share it, and each model says what its
+   shares come to, in cards and in GB.
+5. Select **Save**. The rig's models join the models you can pick in the
+   chat.
+
+The app works out each model's split across the cards, such as `2,2,1`,
+for the server's `--tensor-split`; for now you start each server with it
+yourself. A picture never goes to the rig.
+
+To try the pane with no cards, start a stand-in rig on this computer: four
+small servers, at ports 8091 to 8094, that answer a word at a time.
+
+```sh
+node scripts/fake-rig.mjs
+```
+
+Then add a model at `127.0.0.1:8091` with the model id `phi-4`, and one at
+`127.0.0.1:8092`, and ask them both a question.
+
+## Installs
+
+Two Rusty Business™ installs on your private network can ask each other's
+models, with a handshake of their own. You ask on one, it asks the other
+over the wire, and the answer comes back the same way, to the first
+install, and then to you. The other install answers with its own models.
+
+1. On both, turn on the **LAN gate** and the **Courier breaker** at the
+   foot of the window.
+2. On the other install, open **Settings**, then **Couriers**, and select
+   **Pair a courier app**. A six-digit code shows for five minutes.
+3. On this one, open **Settings**, then **Installs**. Type the other's
+   address (such as `192.168.1.20`), the code, and a name for it, and
+   select **Pair**.
+
+Its models join the models you can pick in the chat, named after the
+install, and each answers in its turn there. Each question is signed, and
+each answer is shown only once it proves it came from the install you
+paired. A picture never goes to another install, and the other install
+never asks a third. **Unpair** under Installs forgets it here; the other
+install's owner unpairs this one in its Couriers list.
+
+## Rules
+
+The Workflow checks every move of a slice against the app's rules. They are
+coded into the app, with tests, not kept in a file you edit: what you keep is
+which are on, and one time limit. Open **Settings**, then **Rules**.
+
+- **Lanes in order.** A slice goes forward one lane at a time: sliced,
+  written, checked, reviewed, then main. It may go back to an earlier lane to
+  be done again, and a slice in main stays there.
+- **Each lane by its own party.** You slice, a local model writes, the check
+  checks, and a reviewer reviews. You may take any lane's move yourself.
+  After each move, the next move goes to the next lane's party.
+- **Only you take a slice into main.** This rule has no switch. No model,
+  check, or reviewer moves a slice into main, and the app never merges.
+- **A runner keeps to its time.** A local model that takes longer than the
+  time limit to write a slice has drifted. Its work is set aside, and the
+  slice goes back to you to be cut smaller. The limit is 30 minutes to start,
+  and from 5 to 480.
+
+A move the rules allow is written into the board's copy on this computer:
+the slice's lane, and whose move is next. A refused move writes nothing,
+and the view says why. A runner that drifted leaves the slice in its lane,
+hands the move to you, and adds a note saying so.
+
+Every rule starts on. A rule only ever stops a move, and none reaches past
+this computer.
+
+## Runners
+
+A slice whose next lane is written can be handed to a model, a runner, from
+the open slice in the Workflow view: pick a model, then **Hand it to a
+model**. The runner writes the work the slice asks for, and the slice moves
+into written, for the check.
+
+- **Only a model here.** The list holds the models you turned on that are
+  on this computer, on your network, or on your rig, and that write words.
+  A model outside this computer is never a runner: direct API connections
+  are refused, as a rule for now.
+- **The rules first, and again after.** A move the rules would refuse is
+  refused before the model is asked. Once the model is done, the move is
+  checked again, with how long it took.
+- **The clock.** While a runner writes, the view shows how long it has
+  taken, and the limit while the time rule is on. At the limit, and a second
+  more, the runner is stopped: it has drifted, nothing it wrote is kept, and
+  the slice goes back to you. **Stop** stops it sooner, and keeps nothing.
+- **One at a time.** Only one runner writes a slice at a time. A runner goes
+  on when you close the view, and what it writes is kept.
+- **Where the work is kept.** What a runner wrote is kept in the app's own
+  store, beside the board, cut to 64 KB, readable by you only, and never in
+  the board's file. The open slice shows it under **What the model wrote**.
+
 ## Boards
 
 The Workflow view shows a board: releases, the stories and bugs under each,
@@ -298,6 +434,23 @@ board, which is made up. The app does not reach the network for one. The
 file is named `<id>.json`, and its name is the board's id: up to 64 letters,
 digits, and hyphens. The view lists every board in the folder. A file it
 cannot read is listed with what is wrong, and left as it is.
+
+### Kept encrypted
+
+The app keeps its own copy of each board, your notes on it, and the file it
+syncs with in one database in that folder, `boards.db`. SQLCipher encrypts
+the whole file, so none of it reads as text without its key. The key is 32
+random bytes the app makes the first time, kept in the system's key store:
+the Keychain on a Mac, the Credential Manager on Windows, and the Secret
+Service on Linux. It is never written to a file. The database runs inside
+the app, with no server to start, and asks nothing of the network.
+
+A board file put in the folder is copied in, the first time the app starts
+and whenever it lists the boards, and the file is left where it is. From
+then on the database's copy is the one the app reads and writes: a change
+goes there, not back to the file. To take a board out as a file, use
+`rusty-business board export`. On a computer with no key store, the app
+keeps the boards as files, as below, and says so when it starts.
 
 The file's ruleset is [BOARD.md](../../BOARD.md), at the root of the
 repository: what the file holds, each rule, and why the rule is there. In

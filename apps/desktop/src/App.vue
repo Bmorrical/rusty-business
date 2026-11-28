@@ -102,6 +102,7 @@ import {
 } from "./chat.js";
 import {
   addPictures,
+  heicConfirmation,
   isHeic,
   passedLine,
   pictureLine,
@@ -113,6 +114,24 @@ import {
   smallDownloadLine,
   splitDrop,
 } from "./utilities.js";
+import {
+  CARDS_MOST,
+  draftOf,
+  MODELS_MOST,
+  pieOf,
+  pieStyle,
+  planOf,
+  rigModels as rigOffered,
+  roomFor,
+  SHARE_STEP,
+  shareLine,
+  withCard,
+  withModel,
+  withoutCard,
+  withoutModel,
+} from "./rig.js";
+import { canPair, installModels as installOffered, installsLine, troubleOf } from "./installs.js";
+import { LIMIT_LEAST, LIMIT_MOST, limitOf, switchWord } from "./rules.js";
 
 // The page only works inside the app's own window, where Rust answers.
 const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -184,6 +203,33 @@ const gateNote = ref("");
 const lanGate = ref(false);
 const lanGateBusy = ref(false);
 const lanGateNote = ref("");
+// The courier door: its breaker, where it listens, the code shown while a
+// courier app pairs, and the apps paired. No key ever comes to the page.
+const courier = ref({ on: false, port: 4710, address: null, place: null, error: null, paired: [], code: null, codeSeconds: 0 });
+const courierBusy = ref(false);
+const courierNote = ref("");
+// The rig: many models at once on servers on your private network. The page
+// edits a draft; Rust checks and keeps the plan, and works out what it comes
+// to. No key ever comes to the page, only the path to its file.
+const rig = ref({ plan: { cards: [], models: [] }, cards: [], models: [] });
+const rigDraft = ref({ cards: [], models: [] });
+const rigBusy = ref(false);
+const rigNote = ref("");
+// Other installs on your network, paired through their doors. Rust pairs,
+// signs, and checks each answer's proof; the page offers their models only
+// while the circuit breaker and the LAN gate are on.
+const installs = ref({ installs: [], ready: false });
+const installFound = ref([]);
+const installDraft = ref({ address: "", code: "", name: "" });
+const installBusy = ref(false);
+const installNote = ref("");
+// The orchestrator's rules: coded in Rust, each with its toggle, and the
+// runner's time limit.
+const rulesView = ref({ rules: [], limitMinutes: 30 });
+const limitDraft = ref("30");
+const rulesBusy = ref(false);
+const rulesNote = ref("");
+let courierTimer = 0;
 const makers = ref([]);
 const makersBusy = ref(false);
 const makersNote = ref("");
@@ -263,7 +309,8 @@ let learnedTimer = 0;
 let clockTimer = 0;
 let learning = Promise.resolve();
 
-let chatId = "";
+// The chats under way, so Stop stops every one: the rig's models answer at once.
+const liveChats = new Set();
 let learnId = "";
 /** True once Stop is pressed: the models still waiting, and the steps in a project's folder, end too. */
 let stopAll = false;
@@ -292,7 +339,12 @@ const visionNote = ref("");
 let visionStarting = false;
 const visionModels = computed(() => (vision.value?.reachable ? (vision.value.models ?? []) : []).map((entry) => ({ ...entry, pictures: true })));
 // Every model on hand, switched on or off.
-const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value]);
+// The rig's models are offered only while the LAN gate is on.
+const rigModels = computed(() => rigOffered(rig.value, lanGate.value));
+// So are another install's, and only while the breaker is on too.
+const installsReady = computed(() => installs.value.ready && lanGate.value && courier.value.on);
+const otherModels = computed(() => installOffered(installFound.value, installsReady.value));
+const onHand = computed(() => [...engineModels.value, ...visionModels.value, ...outsideModels.value, ...rigModels.value, ...otherModels.value]);
 // A model switched off is left out of the models a question can go to, the
 // grader's place, and every comparison, since each of those reads this list.
 const models = computed(() => switchedOn(onHand.value, off.value));
@@ -334,6 +386,9 @@ const heicQuality = ref(QUALITY);
 const heicKeepPlace = ref(false);
 const heicNote = ref("");
 const heicBusy = ref(false);
+// What a finished run saved, and where. Brad, 2026-11-24: "I need a
+// confirmation I looked in folder and saw they converted."
+const heicSaved = computed(() => heicConfirmation(heicList.value));
 // The picture check: its model is installed only when the person asks, from
 // the Installers page. A score lives here, on the page, and nowhere else; it
 // is cleared each time the page opens.
@@ -495,6 +550,11 @@ watch(autoApply, (on) => store("autoApply", on ? "on" : "off"));
 watch(webOn, (on) => store("web", on ? "on" : "off"));
 watch(sideOpen, (open) => store("side", open ? "open" : "closed"));
 watch(votesOn, (on) => store("votes", on ? "on" : "off"));
+// Another install is asked only while the breaker and the LAN gate are on.
+watch(
+  () => [courier.value.on, lanGate.value],
+  () => readInstalls(),
+);
 
 /**
  * "the next step is user can run the same question in 1-nth models and checks
@@ -601,6 +661,178 @@ async function setLanGate(open) {
     pickModels(picked.value);
     await checkEngine();
   }
+}
+
+async function readCourier() {
+  try {
+    courier.value = await invoke("courier_status");
+  } catch {
+    courier.value = { ...courier.value, on: false, address: null, place: null, code: null };
+  }
+}
+
+async function readRig() {
+  try {
+    rig.value = await invoke("rig_status");
+    rigDraft.value = draftOf(rig.value.plan);
+  } catch {
+    rig.value = { plan: { cards: [], models: [] }, cards: [], models: [] };
+  }
+}
+
+async function readRules() {
+  try {
+    rulesView.value = await invoke("rules_status");
+    limitDraft.value = String(rulesView.value.limitMinutes);
+  } catch {
+    rulesView.value = { rules: [], limitMinutes: 30 };
+  }
+}
+
+/** Turns one rule on or off, or sets the time limit. */
+async function changeRules(command, args) {
+  if (rulesBusy.value) return;
+  rulesBusy.value = true;
+  rulesNote.value = "";
+  try {
+    rulesView.value = await invoke(command, args);
+    limitDraft.value = String(rulesView.value.limitMinutes);
+    if (command === "set_rule_limit") rulesNote.value = "Saved.";
+  } catch (error) {
+    rulesNote.value = String(error);
+  } finally {
+    rulesBusy.value = false;
+  }
+}
+
+function saveLimit() {
+  const minutes = limitOf(limitDraft.value);
+  if (minutes === null) {
+    rulesNote.value = `The time limit is from ${LIMIT_LEAST} to ${LIMIT_MOST} minutes.`;
+    return;
+  }
+  changeRules("set_rule_limit", { minutes });
+}
+
+/** Checks and keeps the rig plan as the draft lays it out. */
+async function saveRig() {
+  if (rigBusy.value) return;
+  rigBusy.value = true;
+  rigNote.value = "";
+  try {
+    rig.value = await invoke("save_rig", { plan: planOf(rigDraft.value) });
+    rigDraft.value = draftOf(rig.value.plan);
+    rigNote.value = "Saved.";
+  } catch (error) {
+    rigNote.value = String(error);
+  } finally {
+    rigBusy.value = false;
+  }
+}
+
+/** What a saved model's shares come to, by its id. */
+function rigShare(id) {
+  return shareLine(rig.value.models.find((model) => model.id === id));
+}
+
+/** Where a rig model is served, or which install answered, for the card over its answer. */
+function placeOf(id) {
+  return (
+    rig.value.models.find((model) => model.chatId === id)?.place ??
+    installOffered(installFound.value, true).find((model) => model.id === id)?.place ??
+    ""
+  );
+}
+
+/** The installs paired, and the models each offers while they can be asked. */
+async function readInstalls() {
+  try {
+    installs.value = await invoke("installs_status");
+  } catch {
+    installs.value = { installs: [], ready: false };
+  }
+  if (!installs.value.ready || !installs.value.installs.length) {
+    installFound.value = [];
+    return;
+  }
+  try {
+    installFound.value = await invoke("install_models");
+  } catch (error) {
+    installNote.value = String(error);
+  }
+}
+
+/** Pairs with another install, with the code its window shows. */
+async function pairInstall() {
+  if (installBusy.value || !canPair(installDraft.value)) return;
+  installBusy.value = true;
+  installNote.value = "";
+  try {
+    const draft = installDraft.value;
+    installs.value = await invoke("pair_install", {
+      address: draft.address.trim(),
+      code: draft.code.replace(/\s/g, ""),
+      name: draft.name.trim(),
+    });
+    installDraft.value = { address: "", code: "", name: "" };
+    installNote.value = "Paired.";
+    await readInstalls();
+  } catch (error) {
+    installNote.value = String(error);
+  } finally {
+    installBusy.value = false;
+  }
+}
+
+/** Forgets an install here. Its owner unpairs this one there. */
+async function unpairInstall(id) {
+  if (installBusy.value) return;
+  installBusy.value = true;
+  installNote.value = "";
+  try {
+    installs.value = await invoke("unpair_install", { id });
+    await readInstalls();
+  } catch (error) {
+    installNote.value = String(error);
+  } finally {
+    installBusy.value = false;
+  }
+}
+
+/** Turns the courier breaker on or off, pairs, stops pairing, or unpairs. */
+async function changeCourier(command, args = {}) {
+  if (courierBusy.value) return;
+  courierBusy.value = true;
+  courierNote.value = "";
+  try {
+    courier.value = await invoke(command, args);
+  } catch (error) {
+    courierNote.value = String(error);
+    await readCourier();
+  } finally {
+    courierBusy.value = false;
+  }
+}
+
+const courierLine = computed(() => {
+  if (!courier.value.on) return "The courier door is closed.";
+  if (!lanGate.value) return "On, but the LAN gate is off, so the courier door stays closed.";
+  return "Courier apps you pair can ask your models over your private network.";
+});
+
+/** The code as two groups of three, the way it is read aloud. */
+const courierCode = computed(() => {
+  const code = courier.value.code || "";
+  return code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+});
+
+const courierCountdown = computed(() => {
+  const seconds = courier.value.codeSeconds || 0;
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+});
+
+function pairedSince(seconds) {
+  return new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 function turnOnInstallGate() {
@@ -834,8 +1066,8 @@ async function setMaker(name, on, box) {
  * last three share the Settings page, so moving between them keeps the focus
  * on the tabs and a memory being written. Installers and Settings show the
  * makers, and Installers shows the outside engines, as Rust keeps them, so
- * each asks Rust afresh. Workflow reads only its board, and asks for that
- * itself.
+ * each asks Rust afresh. Workflow reads and moves only its board, and asks
+ * for that itself.
  */
 async function openPage(name) {
   const arriving = !(SETTINGS_PAGES.includes(name) && settingsPage.value);
@@ -1113,6 +1345,13 @@ async function loadVotes() {
 
 watch([page, settingsTab], ([where, tab]) => {
   if (where === "settings" && tab === "votes") loadVotes();
+  // While the Couriers tab is open, its countdown and address stay current.
+  window.clearInterval(courierTimer);
+  courierTimer = 0;
+  if (where === "settings" && tab === "couriers") {
+    readCourier();
+    courierTimer = window.setInterval(readCourier, 1000);
+  }
 });
 
 function newChat(project = null) {
@@ -1374,15 +1613,21 @@ async function send() {
   }
   const replies = session.messages.slice(start);
   const failed = [];
+  // Each server on the rig holds its own model, so the rig's models answer at
+  // once, while the models here take their turns. So do another install's:
+  // each takes its turn there.
+  const onRig = askRig(asked, replies, history, failed);
   for (const [index, entry] of asked.entries()) {
     // Stop ends the reply under way, and the models still waiting are not asked.
     if (stopAll) break;
+    if (entry.rig || entry.install) continue;
     const reply = replies[index];
     reply.waiting = false;
     const error = await ask(reply, entry, requestMessages(history, entry.id, "", entry.pictures === true));
     // One model failing does not keep the next from answering.
     if (error) failed.push(`${entry.name}: ${error}`);
   }
+  await onRig;
   for (const reply of replies) {
     reply.pending = false;
     reply.waiting = false;
@@ -1413,6 +1658,23 @@ async function send() {
   focusComposer();
   // An outside engine looks for memories only when Settings allows it.
   if (answered && text && (learnOutside.value || !isOutside(asked[0].id))) learning = learn(text, asked[0].id, project);
+}
+
+/**
+ * Brad, 2026-11-24: "many models at once on the LAN". Asks every rig model
+ * picked at once, each into its own reply, and every model on another
+ * install. One failing keeps no other from answering.
+ */
+function askRig(asked, replies, history, failed) {
+  return Promise.all(
+    asked.map(async (entry, index) => {
+      if (!entry.rig && !entry.install) return;
+      const reply = replies[index];
+      reply.waiting = false;
+      const error = await ask(reply, entry, requestMessages(history, entry.id, "", false));
+      if (error) failed.push(`${entry.name}: ${error}`);
+    }),
+  );
 }
 
 /** The chat with what the model is told first, when there is anything to tell. */
@@ -1735,7 +1997,15 @@ async function convertWaiting() {
           quality: Number(heicQuality.value),
           keepLocation: heicKeepPlace.value,
         });
-        Object.assign(item, { status: "done", out: made.path, outName: made.name, outBytes: made.bytes });
+        // Done only once Rust found the JPEG in its folder, read back.
+        Object.assign(item, {
+          status: "done",
+          out: made.path,
+          outName: made.name,
+          outBytes: made.bytes,
+          outFolder: made.folder,
+          keptPlace: made.kept_location,
+        });
       } catch (error) {
         Object.assign(item, { status: "failed", error: String(error) });
       }
@@ -1775,7 +2045,8 @@ async function ask(reply, entry, messages) {
     }
     followAnswer();
   };
-  chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const chatId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  liveChats.add(chatId);
   try {
     const done = await invoke("chat_stream", {
       chatId,
@@ -1796,7 +2067,7 @@ async function ask(reply, entry, messages) {
     return String(error);
   } finally {
     reply.pending = false;
-    chatId = "";
+    liveChats.delete(chatId);
   }
 }
 
@@ -1931,7 +2202,7 @@ function decide(yes) {
 function stop() {
   if (!busy.value) return;
   stopAll = true;
-  if (chatId) invoke("stop_chat", { chatId });
+  for (const chatId of liveChats) invoke("stop_chat", { chatId });
   // A look for memories the new question waits on stops too.
   if (learnId) invoke("stop_chat", { chatId: learnId });
   approve?.(false);
@@ -2044,7 +2315,9 @@ function modelName(id) {
   // chat still names the model that wrote it.
   // So does a chat an outside engine answered after the engine is removed.
   // A model switched off still names the chats it wrote.
-  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? [])];
+  // So does a chat a rig model answered while the LAN gate is off, or
+  // another install's model while the breaker is off.
+  const known = [...onHand.value, ...(engine.value?.setAside ?? []), ...outside.value.flatMap((entry) => entry.models ?? []), ...installOffered(installFound.value, true), ...rigOffered(rig.value, true)];
   return known.find((entry) => entry.id === id)?.name ?? "";
 }
 
@@ -2085,6 +2358,10 @@ onMounted(async () => {
   clockTimer = window.setInterval(() => (now.value = Date.now()), 60_000);
   // While the gate is off, Rust starts no stack and asks for no new version.
   await Promise.all([readGate(), readLanGate()]);
+  readCourier();
+  readRig();
+  readInstalls();
+  readRules();
   // So is the path to each outside engine's key, and the models found with it.
   await readOutside();
   await readWeb();
@@ -2121,6 +2398,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("click", onWindowClick);
   window.clearInterval(updateTimer);
   window.clearInterval(clockTimer);
+  window.clearInterval(courierTimer);
   stopDropping?.();
 });
 </script>
@@ -2388,6 +2666,25 @@ onBeforeUnmount(() => {
             </span>
           </div>
           <p v-if="lanGateNote" class="small" role="alert">{{ lanGateNote }}</p>
+          <div class="gate">
+            <button
+              class="switch"
+              type="button"
+              role="switch"
+              :aria-checked="courier.on"
+              aria-describedby="courier-line"
+              :disabled="courierBusy"
+              @click="changeCourier('set_courier', { open: !courier.on })"
+            >
+              <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              Courier breaker
+            </button>
+            <span class="info" tabindex="0" aria-label="About the courier breaker">
+              <span aria-hidden="true">i</span>
+              <span id="courier-line" class="tip" role="tooltip">{{ courierLine }}</span>
+            </span>
+          </div>
+          <p v-if="courierNote && page !== 'settings'" class="small" role="alert">{{ courierNote }}</p>
           <p v-if="updateChecked" class="small">{{ updateChecked }}</p>
         </div>
         <div class="gear-wrap">
@@ -2460,6 +2757,7 @@ onBeforeUnmount(() => {
         :wan="gate"
         :lan="lanGate"
         :side-open="sideOpen"
+        :models="models"
         @close="closePage"
         @side="sideOpen = true"
       />
@@ -2479,6 +2777,10 @@ onBeforeUnmount(() => {
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'folders' }" @click="openTab('settings', 'folders')">Folders</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'web' }" @click="openTab('settings', 'web')">Web</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'votes' }" @click="openTab('settings', 'votes')">Votes</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'couriers' }" @click="openTab('settings', 'couriers')">Couriers</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rig' }" @click="openTab('settings', 'rig')">Rig</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'installs' }" @click="openTab('settings', 'installs')">Installs</button>
+            <button type="button" :class="{ here: page === 'settings' && settingsTab === 'rules' }" @click="openTab('settings', 'rules')">Rules</button>
             <button type="button" :class="{ here: page === 'settings' && settingsTab === 'appearance' }" @click="openTab('settings', 'appearance')">Appearance</button>
             <span class="tabs-label" aria-hidden="true">Installers</span>
             <button type="button" :class="{ here: page === 'installers' && installersTab === 'pictures' }" @click="openTab('installers', 'pictures')">Pictures</button>
@@ -2739,6 +3041,26 @@ onBeforeUnmount(() => {
                   <span class="small" role="status">{{ pictureSummary(heicList) }}</span>
                   <button type="button" :disabled="heicBusy" @click="clearHeic">Clear the list</button>
                 </p>
+                <div v-if="heicSaved" class="utility-confirm" role="status" aria-label="What was saved">
+                  <p class="utility-confirm-head">{{ heicSaved.headline }}</p>
+                  <ul v-if="heicSaved.folders.length" class="utility-folders">
+                    <li v-for="one in heicSaved.folders" :key="one.folder">
+                      <span class="offer-text">
+                        <span class="offer-name">{{ one.line }}</span>
+                        <span class="quiet small">{{ one.folder }}</span>
+                      </span>
+                      <button type="button" :aria-label="`Show the ${one.name} folder in the Finder`" @click="showJpeg(one.first)">
+                        Show in the Finder
+                      </button>
+                    </li>
+                  </ul>
+                  <p v-if="heicSaved.location" class="quiet small">{{ heicSaved.location }}</p>
+                  <ul v-if="heicSaved.failed.length" class="utility-failed">
+                    <li v-for="(one, index) in heicSaved.failed" :key="`${index}-${one.name}`" class="small">
+                      <strong>{{ one.name }}</strong>: {{ one.error }}
+                    </li>
+                  </ul>
+                </div>
                 <ul class="offers" aria-label="Pictures to convert">
                   <li v-for="item in heicList" :key="item.path" class="offer">
                     <span class="offer-text">
@@ -2873,6 +3195,190 @@ onBeforeUnmount(() => {
               </span>
             </form>
             <p v-if="webNote" class="small" role="alert">{{ webNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'couriers'" class="settings-pane">
+            <h3>Courier apps</h3>
+            <p class="quiet">
+              A courier app you bring can ask your models over your private network. It speaks MCP, and only an app you
+              pair here gets in. It never reaches an engine outside this computer, or a picture.
+            </p>
+            <p v-if="!courier.on" class="gate-ask">
+              <span>The courier breaker is off, so the door is closed.</span>
+              <button type="button" :disabled="courierBusy" @click="changeCourier('set_courier', { open: true })">Turn on the breaker</button>
+            </p>
+            <p v-else-if="!lanGate" class="gate-ask">
+              <span>The LAN gate is off, so the door stays closed.</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <p v-else-if="courier.place" class="small key-file">Listening at <code>{{ courier.place }}</code></p>
+            <p v-else-if="courier.address" class="small">Listening on {{ courier.address }}.</p>
+            <p v-if="courier.on && courier.error" class="small" role="alert">{{ courier.error }}</p>
+            <h3 class="gap-above">Pair a courier app</h3>
+            <template v-if="courier.code">
+              <p class="courier-code" aria-live="polite">{{ courierCode }}</p>
+              <p class="quiet small">Type this code into the courier app. It works once, for the next {{ courierCountdown }}.</p>
+              <div class="settings-actions">
+                <button type="button" :disabled="courierBusy" @click="changeCourier('stop_pairing_courier')">Stop pairing</button>
+              </div>
+            </template>
+            <div v-else class="settings-actions">
+              <button class="primary" type="button" :disabled="courierBusy || !courier.on" @click="changeCourier('pair_courier')">Pair a courier app</button>
+            </div>
+            <h3 class="gap-above">Paired</h3>
+            <p v-if="!courier.paired.length" class="quiet">None yet.</p>
+            <ul v-else class="couriers">
+              <li v-for="one in courier.paired" :key="one.id">
+                <span
+                  >{{ one.name }} <span class="quiet small">{{ one.kind === "install" ? "an install, " : "" }}since {{ pairedSince(one.since) }}</span></span
+                >
+                <button type="button" :disabled="courierBusy" @click="changeCourier('unpair_courier', { id: one.id })">Unpair</button>
+              </li>
+            </ul>
+            <p v-if="courierNote" class="small" role="alert">{{ courierNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'installs'" class="settings-pane">
+            <h3>Installs</h3>
+            <p class="quiet">
+              Ask the models on another Rusty Business™ install on your private network, with a handshake of its own. On the
+              other install, open Couriers and pair; type its address and the code it shows here. Each question is signed,
+              and each answer is shown only once it proves it came from the install you paired. A picture never goes to
+              another install.
+            </p>
+            <p v-if="!courier.on" class="gate-ask">
+              <span>{{ installsLine(false, lanGate) }}</span>
+              <button type="button" :disabled="courierBusy" @click="changeCourier('set_courier', { open: true })">Turn on the breaker</button>
+            </p>
+            <p v-else-if="!lanGate" class="gate-ask">
+              <span>{{ installsLine(true, false) }}</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <p v-else class="small">{{ installsLine(true, true) }}</p>
+            <h3 class="gap-above">Pair an install</h3>
+            <form class="rig-fields" @submit.prevent="pairInstall">
+              <label>Address <input v-model="installDraft.address" type="text" placeholder="192.168.1.20" spellcheck="false" autocomplete="off" :disabled="installBusy" /></label>
+              <label>Code <input v-model="installDraft.code" type="text" inputmode="numeric" maxlength="7" placeholder="123 456" autocomplete="off" :disabled="installBusy" /></label>
+              <label>Name <input v-model="installDraft.name" type="text" maxlength="40" placeholder="Upstairs" :disabled="installBusy" /></label>
+              <div class="settings-actions">
+                <button class="primary" type="submit" :disabled="installBusy || !installsReady || !canPair(installDraft)">Pair</button>
+              </div>
+            </form>
+            <h3 class="gap-above">Paired</h3>
+            <p v-if="!installs.installs.length" class="quiet">None yet.</p>
+            <ul v-else class="couriers">
+              <li v-for="one in installs.installs" :key="one.id">
+                <span
+                  >{{ one.name }} <span class="quiet small">at {{ one.address }}, since {{ pairedSince(one.since) }}</span>
+                  <span v-if="troubleOf(installFound, one.id)" class="small" role="alert"><br />{{ troubleOf(installFound, one.id) }}</span></span
+                >
+                <button type="button" :disabled="installBusy" :aria-label="`Unpair ${one.name}`" @click="unpairInstall(one.id)">Unpair</button>
+              </li>
+            </ul>
+            <p class="quiet small">Unpairing here forgets the handshake. The other install's owner unpairs this one in its Couriers list.</p>
+            <p v-if="installNote" class="small" role="alert">{{ installNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'rig'" class="settings-pane">
+            <h3>Rig</h3>
+            <p class="quiet">
+              Lay out the cards on a rig on your private network, and the models served on it, each at its own address. Each
+              model answers at once beside the others. Give each a share of one card or more, and each card shows as a pie.
+              A picture never goes to the rig.
+            </p>
+            <p v-if="!lanGate" class="gate-ask">
+              <span>The LAN gate is off, so the rig's models are not offered.</span>
+              <button type="button" :disabled="lanGateBusy" @click="setLanGate(true)">Turn on the LAN gate</button>
+            </p>
+            <h3 class="gap-above">Cards</h3>
+            <p v-if="!rigDraft.cards.length" class="quiet">None yet.</p>
+            <ul v-else class="rig-cards">
+              <li v-for="(card, place) in rigDraft.cards" :key="place" class="rig-card">
+                <div class="rig-pie" role="img" :aria-label="`${card.name || 'Card'}: ${pieOf(rigDraft, place).free} percent free`" :style="pieStyle(pieOf(rigDraft, place))"></div>
+                <div class="rig-fields">
+                  <label>Name <input v-model="card.name" type="text" maxlength="40" :disabled="rigBusy" /></label>
+                  <label>Memory, GB <input v-model.number="card.memoryGb" type="number" min="1" max="1024" step="1" :disabled="rigBusy" /></label>
+                  <p class="quiet small" :role="pieOf(rigDraft, place).over ? 'alert' : null">
+                    {{ pieOf(rigDraft, place).over ? "Shared past 100 percent." : `${pieOf(rigDraft, place).free} percent free` }}
+                  </p>
+                  <ul class="rig-slices small">
+                    <li v-for="slice in pieOf(rigDraft, place).slices" :key="slice.name"><span class="rig-swatch" :style="`background: ${slice.color};`"></span>{{ slice.name }}, {{ slice.percent }}%</li>
+                  </ul>
+                </div>
+                <button type="button" :disabled="rigBusy" :aria-label="`Remove ${card.name || 'this card'}`" @click="rigDraft = withoutCard(rigDraft, place)">Remove</button>
+              </li>
+            </ul>
+            <div class="settings-actions">
+              <button type="button" :disabled="rigBusy || rigDraft.cards.length >= CARDS_MOST" @click="rigDraft = withCard(rigDraft)">Add a card</button>
+            </div>
+            <h3 class="gap-above">Models</h3>
+            <p v-if="!rigDraft.models.length" class="quiet">None yet.</p>
+            <ul v-else class="rig-models">
+              <li v-for="(model, index) in rigDraft.models" :key="index" class="rig-model">
+                <div class="rig-fields">
+                  <label>Name <input v-model="model.name" type="text" maxlength="40" :disabled="rigBusy" /></label>
+                  <label>Address <input v-model="model.address" type="text" placeholder="192.168.1.20:8091" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Model id on the server <input v-model="model.model" type="text" placeholder="phi-4" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Key file, if the server asks for one <input v-model="model.keyFile" type="text" placeholder="~/keys/rig.key" spellcheck="false" :disabled="rigBusy" /></label>
+                  <label>Needs, GB <input v-model="model.needsGb" type="number" min="0" step="1" :disabled="rigBusy" /></label>
+                  <label v-for="(card, place) in rigDraft.cards" :key="place" class="rig-share">
+                    Share of {{ card.name || `card ${place + 1}` }}: {{ model.percents[place] }}%
+                    <input
+                      v-model.number="model.percents[place]"
+                      type="range"
+                      min="0"
+                      :max="roomFor(rigDraft, index, place)"
+                      :step="SHARE_STEP"
+                      :disabled="rigBusy"
+                    />
+                  </label>
+                  <p v-if="model.id && rigShare(model.id)" class="quiet small">{{ rigShare(model.id) }}</p>
+                </div>
+                <button type="button" :disabled="rigBusy" :aria-label="`Remove ${model.name || 'this model'}`" @click="rigDraft = withoutModel(rigDraft, index)">Remove</button>
+              </li>
+            </ul>
+            <div class="settings-actions">
+              <button type="button" :disabled="rigBusy || !rigDraft.cards.length || rigDraft.models.length >= MODELS_MOST" @click="rigDraft = withModel(rigDraft)">Add a model</button>
+              <button class="primary" type="button" :disabled="rigBusy" @click="saveRig">Save</button>
+            </div>
+            <p v-if="rigNote" class="small" role="alert">{{ rigNote }}</p>
+          </div>
+          <div v-else-if="settingsTab === 'rules'" class="settings-pane">
+            <h3>Rules</h3>
+            <p class="quiet">
+              The Workflow checks every move of a slice against these rules. They are part of the app, and each has its own
+              switch. A rule only ever stops a move, and none reaches past this computer.
+            </p>
+            <ul class="maker-models" aria-label="Rules">
+              <li v-for="rule in rulesView.rules" :key="rule.id" class="offer">
+                <span class="offer-text">
+                  <span class="offer-name">{{ rule.name }}</span>
+                  <span class="quiet small">{{ rule.words }}</span>
+                </span>
+                <button
+                  class="switch model-switch"
+                  type="button"
+                  role="switch"
+                  :aria-checked="rule.on"
+                  :aria-label="rule.name"
+                  :disabled="rule.locked || rulesBusy"
+                  @click="changeRules('set_rule', { id: rule.id, on: !rule.on })"
+                >
+                  <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                  <span class="quiet small">{{ switchWord(rule) }}</span>
+                </button>
+              </li>
+            </ul>
+            <h3 class="gap-above">Time limit</h3>
+            <p class="quiet">
+              How long a local model may take to write one slice before it has drifted, from {{ LIMIT_LEAST }} to
+              {{ LIMIT_MOST }} minutes.
+            </p>
+            <div class="settings-actions">
+              <label>
+                <span class="quiet small">Minutes</span>
+                <input v-model="limitDraft" type="number" inputmode="numeric" :min="LIMIT_LEAST" :max="LIMIT_MOST" step="1" />
+              </label>
+              <button class="primary" type="button" :disabled="rulesBusy" @click="saveLimit">Save</button>
+            </div>
+            <p v-if="rulesNote" class="small" role="alert">{{ rulesNote }}</p>
           </div>
           <div v-else-if="settingsTab === 'models'" class="settings-pane">
             <h3>Model makers</h3>
@@ -3280,7 +3786,7 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="round.answers.length" class="answers" :class="{ many: round.answers.length > 1 }">
             <section v-for="(turn, index) in round.answers" :key="index" class="turn assistant" :class="{ opened: wide.has(turn), best: votesOn && turn.best }">
-              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}</h3>
+              <h3 v-if="round.answers.length > 1" class="card-head">{{ modelName(turn.model) || "A model not on hand" }}<span v-if="placeOf(turn.model)" class="quiet"> on {{ placeOf(turn.model) }}</span></h3>
               <button
                 v-if="round.answers.length > 1"
                 class="copy widen"
@@ -4651,6 +5157,32 @@ button.switch.model-switch {
   overflow-wrap: anywhere;
 }
 
+.courier-code {
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.couriers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-width: 32rem;
+}
+
+.couriers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+}
+
 .key-path,
 .brave-key {
   display: grid;
@@ -5142,6 +5674,50 @@ textarea.memory:focus,
   border-color: var(--faint);
 }
 
+.rig-cards,
+.rig-models,
+.rig-slices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rig-card,
+.rig-model {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rig-pie {
+  flex: none;
+  width: 5rem;
+  height: 5rem;
+  border-radius: 50%;
+}
+
+.rig-fields {
+  display: grid;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.rig-fields label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.rig-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.4rem;
+  border-radius: 50%;
+}
+
 .settings-actions {
   display: flex;
   align-items: center;
@@ -5184,6 +5760,45 @@ textarea.memory:focus,
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+/* What a finished run saved, and in which folder. */
+.utility-confirm {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+}
+
+.utility-confirm p {
+  margin: 0;
+}
+
+.utility-confirm-head {
+  font-weight: 600;
+}
+
+.utility-folders,
+.utility-failed {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.utility-folders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.utility-folders .offer-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* A score, with its caution under it. It reads the same high or low. */

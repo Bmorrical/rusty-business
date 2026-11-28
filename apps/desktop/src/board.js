@@ -60,6 +60,36 @@ export function sliceSteps(slice) {
   }));
 }
 
+const FORWARD = {
+  sliced: "Mark it sliced",
+  written: "Mark it written",
+  checked: "Mark it checked",
+  reviewed: "Mark it reviewed",
+  main: "Take it into main",
+};
+
+const AGAIN = {
+  written: "Write it again",
+  checked: "Check it again",
+  reviewed: "Review it again",
+};
+
+/**
+ * The moves you can make with a slice: into its next lane, or back so a lane
+ * it has been through is done again. The rules in Rust decide; these are
+ * only the buttons. A slice on main has none.
+ */
+export function movesFor(slice) {
+  const through = cleared(slice);
+  const next = LANES[through];
+  if (!next) return [];
+  const moves = [{ to: next.id, label: FORWARD[next.id], forward: true }];
+  for (let at = 0; at + 1 < through; at += 1) {
+    moves.push({ to: LANES[at].id, label: AGAIN[LANES[at + 1].id], forward: false });
+  }
+  return moves;
+}
+
 /**
  * A story's hand: one card for each lane, held when every slice has been
  * through it. A story with no slices holds none.

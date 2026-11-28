@@ -1,8 +1,9 @@
 //! Boards: a road of epics, stories, and slices, one JSON file per board in
 //! the app's own data folder, beside the saved chats.
 //!
-//! The Workflow view reads only these copies, so it opens with both gates
-//! off. Nothing here uses the network, takes a path from the page, or
+//! The Workflow view reads and moves only these copies, so it opens with
+//! both gates off. A move changes one slice's lane and whose move it is,
+//! under the rules in `rules.rs`. Nothing here uses the network, takes a path from the page, or
 //! deletes a file. A pull replaces a board's snapshot. What the person wrote,
 //! their drafts, lives in a second file that a pull never touches.
 //!
@@ -27,6 +28,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
+use crate::store::{Keys, Kind, Store};
+
 /// What a board file on line 2 names in `meta.format`.
 pub const FORMAT: &str = "board";
 /// What a board file on line 1 names in its `format` field.
@@ -37,12 +40,18 @@ const LINE: u32 = 2;
 pub const DRAFTS_FORMAT: &str = "board drafts v1";
 /// The format of the file that says where a board's shared file is kept.
 pub const SOURCE_FORMAT: &str = "board source v1";
+/// What the runners wrote for a board's slices: kept on this computer, in
+/// the board's own database, and never in the board's file.
+pub const WORK_FORMAT: &str = "board work v1";
+/// The most of one runner's work that is kept, in bytes. Past it, the work
+/// is cut, and says so.
+pub(crate) const WORK_LIMIT: usize = 64 * 1024;
 
 /// The five lanes a slice goes through, in order. A slice's `lane` is the
 /// last one it has been through; empty means none yet.
-const LANES: [&str; 5] = ["sliced", "written", "checked", "reviewed", "main"];
+pub(crate) const LANES: [&str; 5] = ["sliced", "written", "checked", "reviewed", "main"];
 /// Whose move it can be. Empty leaves it to the lane.
-const MOVES: [&str; 4] = ["you", "model", "check", "review"];
+pub(crate) const MOVES: [&str; 4] = ["you", "model", "check", "review"];
 const KINDS: [&str; 2] = ["story", "bug"];
 
 /// The most the app reads of one board file, and the most it writes.
@@ -51,7 +60,7 @@ const BOARD_LIMIT: usize = 100;
 const EPIC_LIMIT: usize = 500;
 const STORY_LIMIT: usize = 5_000;
 const SLICE_LIMIT: usize = 100;
-const NOTES_LIMIT: usize = 200;
+pub(crate) const NOTES_LIMIT: usize = 200;
 const NUMBER_LIMIT: u64 = 999_999_999;
 const NAME_LIMIT: usize = 120;
 const TITLE_LIMIT: usize = 300;
@@ -78,6 +87,11 @@ fn zero(number: &u64) -> bool {
 /// The made-up board the app carries, so the view has something to show
 /// before a board of the person's own arrives.
 const SAMPLE: &str = include_str!("../sample-board.json");
+
+/// What a runner's work says when keeping it would take a board's work past
+/// the size cap.
+const WORK_FULL: &str =
+    "The work kept for this board would be larger than 4 MB, so this slice's was not kept.";
 
 /// What a note says when one more would take the notes past the size cap.
 const NOTES_FULL: &str =
@@ -354,6 +368,30 @@ pub struct Drafts {
     pub format: String,
     #[serde(default)]
     pub stories: BTreeMap<u64, StoryDraft>,
+}
+
+/// What a runner wrote for one slice, and how long it took.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Work {
+    pub model: String,
+    pub took_ms: u64,
+    /// When it was kept, in milliseconds since 1970.
+    pub at: u64,
+    pub text: String,
+    /// True when the work was longer than the most that is kept, and cut.
+    #[serde(default)]
+    pub cut: bool,
+}
+
+/// Every slice's work on one board, by "story/slice".
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Works {
+    #[serde(default)]
+    format: String,
+    #[serde(default)]
+    slices: BTreeMap<String, Work>,
 }
 
 /// A board as the view shows it: the snapshot, and the drafts beside it.
@@ -730,15 +768,166 @@ impl Drafts {
 /// The boards kept on this computer.
 pub struct Boards {
     dir: PathBuf,
+    /// The encrypted database the boards are kept in, or `None` when they
+    /// are kept as files in the folder.
+    store: Option<Store>,
     /// One write at a time, so two saves never cross.
     writing: Mutex<()>,
 }
 
 impl Boards {
+    /// The boards kept as files in a folder.
     pub fn new(dir: PathBuf) -> Self {
         Boards {
             dir,
+            store: None,
             writing: Mutex::new(()),
+        }
+    }
+
+    /// The boards kept in the encrypted database in a folder, its key from
+    /// `keys`. Whatever the folder holds as files is copied in, once, and
+    /// the files are left where they are.
+    pub fn kept(dir: PathBuf, keys: &dyn Keys) -> Result<Self, String> {
+        fs::create_dir_all(&dir).map_err(failed("Could not open the boards folder"))?;
+        own(&dir, 0o700);
+        let store = Store::open(&dir, keys)?;
+        let boards = Boards {
+            dir,
+            store: Some(store),
+            writing: Mutex::new(()),
+        };
+        boards.take_in()?;
+        Ok(boards)
+    }
+
+    /// The encrypted database, when the boards are kept in one. Falls back
+    /// to the files when the system has no key store to give it a key, and
+    /// says why in `said`.
+    pub fn open(dir: PathBuf, keys: &dyn Keys, said: impl FnOnce(&str)) -> Self {
+        match Self::kept(dir.clone(), keys) {
+            Ok(boards) => boards,
+            Err(problem) => {
+                said(&format!(
+                    "{problem} The boards are kept as files in {} instead.",
+                    dir.display()
+                ));
+                Self::new(dir)
+            }
+        }
+    }
+
+    /// Copies every board the folder holds as a file into the database,
+    /// when it has none of that kind under that id yet. The files are left
+    /// as they are. A file that cannot be read is left, and not copied.
+    fn take_in(&self) -> Result<usize, String> {
+        let Some(store) = &self.store else {
+            return Ok(0);
+        };
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut copied = 0;
+        for kind in Kind::ALL {
+            for id in Self::files_in(&self.dir_of(kind)) {
+                if store.get(kind, &id)?.is_some() {
+                    continue;
+                }
+                let Ok(text) = Self::text(&self.path(kind, &id)?, "") else {
+                    continue;
+                };
+                if store.add(kind, &id, &text)? {
+                    copied += 1;
+                }
+            }
+        }
+        Ok(copied)
+    }
+
+    /// The folder that holds one kind of file.
+    fn dir_of(&self, kind: Kind) -> PathBuf {
+        match kind {
+            Kind::Board => self.dir.clone(),
+            Kind::Drafts => self.drafts_dir(),
+            Kind::Synced => self.synced_dir(),
+            Kind::Source => self.sources_dir(),
+            Kind::Work => self.work_dir(),
+        }
+    }
+
+    /// The file one kind of thing for a board is kept in, when the boards
+    /// are files. The id is checked either way.
+    fn path(&self, kind: Kind, id: &str) -> Result<PathBuf, String> {
+        match kind {
+            Kind::Board => self.snapshot(id),
+            Kind::Drafts => self.drafts_file(id),
+            Kind::Synced => self.base_file(id),
+            Kind::Source => self.source_file(id),
+            Kind::Work => self.work_file(id),
+        }
+    }
+
+    /// The id of every board with a file in a folder, in order.
+    fn files_in(dir: &Path) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<String> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|end| end.to_str()) == Some("json"))
+            .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
+            .filter(|id| valid_id(id))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// The id of every board with this kind of thing kept, in order.
+    fn ids(&self, kind: Kind) -> Vec<String> {
+        match &self.store {
+            Some(store) => store.ids(kind).unwrap_or_default(),
+            None => Self::files_in(&self.dir_of(kind)),
+        }
+    }
+
+    /// Whether this kind of thing is kept for a board.
+    fn has(&self, kind: Kind, id: &str) -> Result<bool, String> {
+        let path = self.path(kind, id)?;
+        match &self.store {
+            Some(store) => Ok(store.get(kind, id)?.is_some()),
+            None => Ok(Self::found(&path)),
+        }
+    }
+
+    /// The text kept for a board, or `None` when there is none.
+    fn fetch(&self, kind: Kind, id: &str, what: &str) -> Result<Option<String>, String> {
+        if !self.has(kind, id)? {
+            return Ok(None);
+        }
+        self.must(kind, id, what).map(Some)
+    }
+
+    /// The text kept for a board, which must be there.
+    fn must(&self, kind: Kind, id: &str, what: &str) -> Result<String, String> {
+        let path = self.path(kind, id)?;
+        let Some(store) = &self.store else {
+            return Self::text(&path, what);
+        };
+        let text = store
+            .get(kind, id)?
+            .ok_or_else(|| format!("{what}: it is not on this computer."))?;
+        if text.len() as u64 > SIZE_LIMIT {
+            return Err(format!("{what}: it is larger than 4 MB."));
+        }
+        Ok(text)
+    }
+
+    /// Keeps text for a board, in place of what was kept before. The caller
+    /// holds the write lock.
+    fn put(&self, kind: Kind, id: &str, text: &str, what: &str) -> Result<(), String> {
+        let path = self.path(kind, id)?;
+        match &self.store {
+            Some(store) => store.put(kind, id, text),
+            None => write(&path, text, what),
         }
     }
 
@@ -756,12 +945,21 @@ impl Boards {
         self.dir.join("sources")
     }
 
+    /// What the runners wrote for each board's slices.
+    fn work_dir(&self) -> PathBuf {
+        self.dir.join("work")
+    }
+
     fn ready(&self) -> Result<(), String> {
+        if self.store.is_some() {
+            return Ok(());
+        }
         for dir in [
             self.dir.clone(),
             self.drafts_dir(),
             self.synced_dir(),
             self.sources_dir(),
+            self.work_dir(),
         ] {
             fs::create_dir_all(&dir).map_err(failed("Could not open the boards folder"))?;
             own(&dir, 0o700);
@@ -795,6 +993,13 @@ impl Boards {
             return Err("That is not a board.".to_string());
         }
         Ok(self.sources_dir().join(format!("{id}.json")))
+    }
+
+    fn work_file(&self, id: &str) -> Result<PathBuf, String> {
+        if !valid_id(id) {
+            return Err("That is not a board.".to_string());
+        }
+        Ok(self.work_dir().join(format!("{id}.json")))
     }
 
     /// Whether anything is at a path. A link counts, wherever it leads.
@@ -929,9 +1134,9 @@ impl Boards {
         Ok(text)
     }
 
-    /// One of the app's own files for a board.
-    fn kept(path: &Path, id: &str, what: &str) -> Result<Board, String> {
-        let mut board = Self::parse(&Self::text(path, what)?)?;
+    /// One of the app's own copies of a board.
+    fn board_in(text: &str, id: &str) -> Result<Board, String> {
+        let mut board = Self::parse(text)?;
         // The file's name is the board's id, whatever the file says inside.
         board.id = id.to_string();
         if board.name.trim().is_empty() {
@@ -941,12 +1146,12 @@ impl Boards {
     }
 
     fn read(&self, id: &str) -> Result<Board, String> {
-        Self::kept(&self.snapshot(id)?, id, "Could not read the board")
+        Self::board_in(&self.must(Kind::Board, id, "Could not read the board")?, id)
     }
 
     /// The local copy of a board, or `None` when this computer has none.
     pub fn local(&self, id: &str) -> Result<Option<Board>, String> {
-        if !Self::found(&self.snapshot(id)?) {
+        if !self.has(Kind::Board, id)? {
             return Ok(None);
         }
         self.read(id).map(Some)
@@ -955,32 +1160,35 @@ impl Boards {
     /// A board as it was when this computer and its file last agreed, or
     /// `None` when they never have.
     pub fn base(&self, id: &str) -> Result<Option<Board>, String> {
-        let path = self.base_file(id)?;
-        if !Self::found(&path) {
-            return Ok(None);
+        match self.fetch(Kind::Synced, id, "Could not read the last synced copy")? {
+            Some(text) => Self::board_in(&text, id).map(Some),
+            None => Ok(None),
         }
-        Self::kept(&path, id, "Could not read the last synced copy").map(Some)
     }
 
     /// Keeps a board as the state this computer and its file last agreed on.
     /// Neither the snapshot nor the drafts are touched.
     pub fn keep_base(&self, board: &Board) -> Result<(), String> {
-        let path = self.base_file(&board.id)?;
+        self.path(Kind::Synced, &board.id)?;
         let text = Self::json(board)?;
         self.ready()?;
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
-        write(&path, &text, "Could not save the last synced copy")
+        self.put(
+            Kind::Synced,
+            &board.id,
+            &text,
+            "Could not save the last synced copy",
+        )
     }
 
     /// Where a board's file is, or `None` when the person has named none.
     pub fn source(&self, id: &str) -> Result<Option<PathBuf>, String> {
-        let path = self.source_file(id)?;
-        if !Self::found(&path) {
-            return Ok(None);
-        }
         let what = "Could not read where this board's file is";
-        let source: Source = serde_json::from_str(&Self::text(&path, what)?)
-            .map_err(|error| format!("{what}: {error}."))?;
+        let Some(text) = self.fetch(Kind::Source, id, what)? else {
+            return Ok(None);
+        };
+        let source: Source =
+            serde_json::from_str(&text).map_err(|error| format!("{what}: {error}."))?;
         if source.format != SOURCE_FORMAT || source.file.is_empty() {
             return Err(format!("{what}: it is not a \"{SOURCE_FORMAT}\" file."));
         }
@@ -989,7 +1197,7 @@ impl Boards {
 
     /// Remembers where a board's file is, so the next sync needs no path.
     pub fn remember(&self, id: &str, file: &Path) -> Result<(), String> {
-        let path = self.source_file(id)?;
+        self.path(Kind::Source, id)?;
         let Some(file) = file.to_str() else {
             return Err("That file's path is not text.".to_string());
         };
@@ -1001,23 +1209,12 @@ impl Boards {
             .map_err(|_| "Could not remember the file.".to_string())?;
         self.ready()?;
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
-        write(&path, &text, "Could not remember the file")
+        self.put(Kind::Source, id, &text, "Could not remember the file")
     }
 
     /// The id of every board that has a file, in order.
     pub fn sources(&self) -> Vec<String> {
-        let Ok(entries) = fs::read_dir(self.sources_dir()) else {
-            return Vec::new();
-        };
-        let mut ids: Vec<String> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().and_then(|end| end.to_str()) == Some("json"))
-            .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
-            .filter(|id| valid_id(id))
-            .collect();
-        ids.sort();
-        ids
+        self.ids(Kind::Source)
     }
 
     /// A board file kept somewhere else, at a path the person typed, or
@@ -1074,11 +1271,11 @@ impl Boards {
     /// The person's drafts for a board. No file yet means none yet. A file
     /// that cannot be read is an error, so a save never writes over it.
     fn read_drafts(&self, id: &str) -> Result<Drafts, String> {
-        let path = self.drafts_file(id)?;
-        if fs::symlink_metadata(&path).is_err() {
+        let Some(text) =
+            self.fetch(Kind::Drafts, id, "Could not read your notes for this board")?
+        else {
             return Ok(Drafts::new());
-        }
-        let text = Self::text(&path, "Could not read your notes for this board")?;
+        };
         let mut drafts: Drafts = serde_json::from_str(&text)
             .map_err(|error| format!("Could not read your notes for this board: {error}."))?;
         drafts.format = DRAFTS_FORMAT.to_string();
@@ -1088,34 +1285,25 @@ impl Boards {
     /// Keeps a board as the local copy, and stamps when. It replaces that
     /// board's snapshot and leaves the drafts as they are.
     pub fn pull(&self, mut board: Board) -> Result<Board, String> {
-        let path = self.snapshot(&board.id)?;
+        self.path(Kind::Board, &board.id)?;
         board.check()?;
         board.pulled_at = now_ms();
         let text = Self::json(&board)?;
         self.ready()?;
         let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
-        write(&path, &text, "Could not save the board")?;
+        self.put(Kind::Board, &board.id, &text, "Could not save the board")?;
         Ok(board)
     }
 
     /// Every board in the folder, the newest copy first. Nothing is removed:
     /// a file that is not a board is listed with what is wrong with it.
     pub fn list(&self) -> Result<Vec<Summary>, String> {
-        let Ok(entries) = fs::read_dir(&self.dir) else {
-            return Ok(Vec::new());
-        };
+        // A board file dropped in the folder while the database is in use
+        // is taken in, as at the start.
+        self.take_in()?;
         let mut found = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|end| end.to_str()) != Some("json") {
-                continue;
-            }
-            let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            if !valid_id(id) {
-                continue;
-            }
+        for id in self.ids(Kind::Board) {
+            let id = id.as_str();
             found.push(match self.read(id) {
                 Ok(board) => Summary {
                     id: board.id.clone(),
@@ -1149,7 +1337,7 @@ impl Boards {
     /// Saves the person's note on a story, in the drafts file. An empty note
     /// clears it. The snapshot is not touched.
     pub fn note(&self, id: &str, story: u64, text: &str) -> Result<Drafts, String> {
-        let path = self.drafts_file(id)?;
+        self.path(Kind::Drafts, id)?;
         let board = self.read(id)?;
         let text = text.trim_end();
         too_long("A note", text, NOTE_LIMIT)?;
@@ -1178,8 +1366,95 @@ impl Boards {
         if json.len() as u64 > SIZE_LIMIT {
             return Err(NOTES_FULL.to_string());
         }
-        write(&path, &json, "Could not save the note")?;
+        self.put(Kind::Drafts, id, &json, "Could not save the note")?;
         Ok(drafts)
+    }
+
+    /// Changes one slice in the local copy of a board, and keeps it when the
+    /// change says so. The copy is checked as a pull checks it, and its
+    /// `pulled_at` stays as it was: a move is not a pull. The drafts are not
+    /// touched. A change that keeps nothing writes nothing.
+    pub fn shift<T>(
+        &self,
+        id: &str,
+        story: u64,
+        slice: &str,
+        change: impl FnOnce(&mut Slice) -> Result<(T, bool), String>,
+    ) -> Result<(T, Local), String> {
+        self.path(Kind::Board, id)?;
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut board = self.read(id)?;
+        let held = board
+            .epics
+            .iter_mut()
+            .flat_map(|epic| epic.stories.iter_mut())
+            .find(|found| found.number == story)
+            .ok_or("That story is not on this board.")?
+            .slices
+            .iter_mut()
+            .find(|found| found.id == slice)
+            .ok_or("That slice is not on this story.")?;
+        let (said, keep) = change(held)?;
+        if keep {
+            let text = Self::json(&board)?;
+            self.put(Kind::Board, id, &text, "Could not save the board")?;
+        }
+        let drafts = self.read_drafts(id)?;
+        Ok((said, Local { board, drafts }))
+    }
+
+    fn read_works(&self, id: &str) -> Result<Works, String> {
+        let Some(text) = self.fetch(Kind::Work, id, "Could not read the runners' work")? else {
+            return Ok(Works::default());
+        };
+        serde_json::from_str(&text)
+            .map_err(|error| format!("Could not read the runners' work: {error}."))
+    }
+
+    /// What a runner last wrote for a slice, or `None` when none has.
+    pub fn work(&self, id: &str, story: u64, slice: &str) -> Result<Option<Work>, String> {
+        self.path(Kind::Work, id)?;
+        Ok(self
+            .read_works(id)?
+            .slices
+            .remove(&format!("{story}/{slice}")))
+    }
+
+    /// Keeps what a runner wrote for a slice, in place of what it wrote
+    /// before. Work past `WORK_LIMIT` is cut, and says so. The board and the
+    /// drafts are not touched.
+    pub fn keep_work(
+        &self,
+        id: &str,
+        story: u64,
+        slice: &str,
+        mut work: Work,
+    ) -> Result<Work, String> {
+        self.path(Kind::Work, id)?;
+        if work.text.len() > WORK_LIMIT {
+            let mut end = WORK_LIMIT;
+            while !work.text.is_char_boundary(end) {
+                end -= 1;
+            }
+            work.text.truncate(end);
+            work.cut = true;
+        }
+        work.at = now_ms();
+        self.ready()?;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut works = self.read_works(id)?;
+        works.format = WORK_FORMAT.to_string();
+        works
+            .slices
+            .insert(format!("{story}/{slice}"), work.clone());
+        let json = serde_json::to_string_pretty(&works)
+            .map_err(|_| "Could not write the runner's work.".to_string())?;
+        if json.len() as u64 > SIZE_LIMIT {
+            return Err(WORK_FULL.to_string());
+        }
+        self.put(Kind::Work, id, &json, "Could not keep the runner's work")?;
+        Ok(work)
     }
 
     /// Opens the made-up sample board. The first time, it is put in the
@@ -1188,7 +1463,7 @@ impl Boards {
     pub fn sample(&self) -> Result<Local, String> {
         let board =
             Self::parse(SAMPLE).map_err(|_| "Could not read the sample board.".to_string())?;
-        if Self::found(&self.snapshot(&board.id)?) {
+        if self.has(Kind::Board, &board.id)? {
             return self.load(&board.id);
         }
         let board = self.pull(board)?;
@@ -2410,5 +2685,190 @@ mod tests {
         assert_eq!(grouped(4_000), "4,000");
         assert_eq!(grouped(20_000), "20,000");
         assert_eq!(grouped(1_234_567), "1,234,567");
+    }
+
+    // The road's line for this: "Boards kept in an encrypted SQLite
+    // database, with its key in the system's key store".
+    mod kept {
+        use super::*;
+        use crate::store::tests::TestKeys;
+
+        fn every_file(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+            let mut found = BTreeMap::new();
+            let mut left = vec![dir.to_path_buf()];
+            while let Some(at) = left.pop() {
+                for entry in fs::read_dir(&at).unwrap().flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        left.push(path);
+                    } else {
+                        found.insert(path.clone(), fs::read(&path).unwrap());
+                    }
+                }
+            }
+            found
+        }
+
+        /// A board, its note, its last synced copy, and where its file is.
+        fn everything(boards: &Boards, dir: &Path) {
+            boards.pull(sample()).unwrap();
+            boards.note("sample", 412, "Mine.").unwrap();
+            boards.keep_base(&sample()).unwrap();
+            boards
+                .remember("sample", &dir.join("elsewhere.json"))
+                .unwrap();
+        }
+
+        fn has_everything(boards: &Boards, dir: &Path) {
+            let local = boards.load("sample").unwrap();
+            assert_eq!(local.board.name, sample().name);
+            assert_eq!(local.drafts.stories[&412].note, "Mine.");
+            assert_eq!(boards.base("sample").unwrap().unwrap().name, sample().name);
+            assert_eq!(
+                boards.source("sample").unwrap(),
+                Some(dir.join("elsewhere.json"))
+            );
+            assert_eq!(boards.sources(), ["sample"]);
+            let list = boards.list().unwrap();
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0].id, "sample");
+            assert_eq!(list[0].problem, None);
+        }
+
+        #[test]
+        fn the_database_keeps_everything_the_files_do() {
+            let (_, dir) = scratch();
+            let boards = Boards::kept(dir.join("boards"), &TestKeys::default()).unwrap();
+            assert!(boards.store.is_some());
+            everything(&boards, &dir);
+            has_everything(&boards, &dir);
+            assert_eq!(boards.local("missing").unwrap().map(|board| board.id), None);
+            assert_eq!(boards.base("missing").unwrap().map(|board| board.id), None);
+            assert_eq!(
+                boards.load("missing").unwrap_err(),
+                "Could not read the board: it is not on this computer."
+            );
+            assert!(
+                boards.load("../up").is_err(),
+                "an id reached outside the folder"
+            );
+        }
+
+        #[test]
+        fn nothing_is_written_as_a_file_and_the_database_is_not_text() {
+            let (_, dir) = scratch();
+            let keys = TestKeys::default();
+            let boards = Boards::kept(dir.join("boards"), &keys).unwrap();
+            everything(&boards, &dir);
+            drop(boards);
+            let files = every_file(&dir.join("boards"));
+            let names: Vec<_> = files
+                .keys()
+                .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+                .collect();
+            assert_eq!(names, [crate::store::FILE]);
+            let bytes = &files[&dir.join("boards").join(crate::store::FILE)];
+            let found = |word: &str| bytes.windows(word.len()).any(|at| at == word.as_bytes());
+            assert!(
+                !found(&sample().name),
+                "the board's name is in the database in the clear"
+            );
+            assert!(!found("Mine."), "a note is in the database in the clear");
+            assert!(
+                !found("elsewhere.json"),
+                "a path is in the database in the clear"
+            );
+            // And it all comes back with its key.
+            has_everything(&Boards::kept(dir.join("boards"), &keys).unwrap(), &dir);
+        }
+
+        #[test]
+        fn the_files_already_there_are_copied_in_and_left_where_they_are() {
+            let (files, dir) = scratch();
+            everything(&files, &dir);
+            let before = every_file(&dir.join("boards"));
+            let keys = TestKeys::default();
+            let boards = Boards::kept(dir.join("boards"), &keys).unwrap();
+            has_everything(&boards, &dir);
+            let mut after = every_file(&dir.join("boards"));
+            assert!(
+                after
+                    .remove(&dir.join("boards").join(crate::store::FILE))
+                    .is_some()
+            );
+            assert_eq!(after, before, "a file was changed, moved, or removed");
+
+            // The database's copy is the one kept from then on: a change is
+            // written there, and the file is left as it was.
+            boards.note("sample", 412, "Changed.").unwrap();
+            let again = Boards::kept(dir.join("boards"), &keys).unwrap();
+            assert_eq!(
+                again.load("sample").unwrap().drafts.stories[&412].note,
+                "Changed."
+            );
+            assert_eq!(
+                files.load("sample").unwrap().drafts.stories[&412].note,
+                "Mine."
+            );
+        }
+
+        #[test]
+        fn a_file_dropped_in_the_folder_later_is_taken_in() {
+            let (_, dir) = scratch();
+            let boards = Boards::kept(dir.join("boards"), &TestKeys::default()).unwrap();
+            assert!(boards.list().unwrap().is_empty());
+            fs::write(dir.join("boards").join("my-road.json"), text(&sample())).unwrap();
+            assert_eq!(boards.list().unwrap()[0].id, "my-road");
+            assert_eq!(boards.load("my-road").unwrap().board.id, "my-road");
+        }
+
+        #[test]
+        fn a_file_that_is_not_a_board_is_copied_in_and_named() {
+            let (_, dir) = scratch();
+            fs::create_dir_all(dir.join("boards")).unwrap();
+            fs::write(dir.join("boards").join("odd.json"), "[1, 2]").unwrap();
+            let boards = Boards::kept(dir.join("boards"), &TestKeys::default()).unwrap();
+            let list = boards.list().unwrap();
+            assert_eq!(list[0].id, "odd");
+            assert_eq!(list[0].problem.as_deref(), Some(NOT_A_BOARD));
+        }
+
+        /// A computer with no key store to hand out a key.
+        struct NoKeys;
+
+        impl Keys for NoKeys {
+            fn get(&self) -> Result<Option<Vec<u8>>, String> {
+                Err("There is no key store.".to_string())
+            }
+            fn set(&self, _: &[u8]) -> Result<(), String> {
+                Err("There is no key store.".to_string())
+            }
+        }
+
+        #[test]
+        fn with_no_key_store_the_boards_are_files_and_that_is_said() {
+            let (_, dir) = scratch();
+            let mut said = String::new();
+            let boards = Boards::open(dir.join("boards"), &NoKeys, |text| said = text.to_string());
+            assert!(boards.store.is_none());
+            assert!(
+                said.starts_with("There is no key store. The boards are kept as files in "),
+                "{said}"
+            );
+            boards.pull(sample()).unwrap();
+            assert!(dir.join("boards").join("sample.json").is_file());
+            assert!(!dir.join("boards").join(crate::store::FILE).exists());
+        }
+
+        #[test]
+        fn with_a_key_store_nothing_is_said() {
+            let (_, dir) = scratch();
+            let mut said = None;
+            let boards = Boards::open(dir.join("boards"), &TestKeys::default(), |text| {
+                said = Some(text.to_string())
+            });
+            assert!(boards.store.is_some());
+            assert_eq!(said, None);
+        }
     }
 }

@@ -7,7 +7,7 @@
 // Rust keeps the boards, and its tests in board.rs check how it behaves. The
 // page's reading of a board has its tests in board.test.js. These fail when
 // the side loses its Workflow button, when the view asks Rust for anything
-// but its four commands or a command takes a path, when the view or the store
+// but its own commands or a command takes a path, when the view or the store
 // gains a way to reach past this computer, to delete a file, or to start a
 // program, when a file could be written in one step, when a note could be
 // left behind, when one board that cannot be opened could hide the rest,
@@ -59,6 +59,7 @@ const APP = 'apps/desktop/src/App.vue';
 const VIEW = 'apps/desktop/src/Workflow.vue';
 const HELPERS = 'apps/desktop/src/board.js';
 const STORE = 'apps/desktop/src-tauri/src/board.rs';
+const KEPT = 'apps/desktop/src-tauri/src/store.rs';
 const LIB = 'apps/desktop/src-tauri/src/lib.rs';
 const SAMPLE = 'apps/desktop/src-tauri/sample-board.json';
 const MERGE = 'apps/desktop/src-tauri/src/sync.rs';
@@ -84,6 +85,12 @@ const NO_API = [
 
 /** Everything the view asks of Rust. */
 const COMMANDS = ['list_boards', 'load_board', 'open_sample_board', 'save_board_note'];
+
+/** What the view asks of the rules: to move a slice, and the time limit. scripts/rules.test.mjs checks it. */
+const RULE_COMMANDS = ['move_slice', 'rules_status'];
+
+/** What the view asks of the runners: a slice handed to a model. scripts/runners.test.mjs checks it. */
+const RUNNER_COMMANDS = ['run_slice', 'stop_run', 'runs_going', 'slice_work'];
 
 /** What a command may take from the page: a board's id, a story's number, and a note. */
 const TAKEN = ['id: String', 'story: u64', 'text: String'];
@@ -236,11 +243,11 @@ test('the side has a Workflow button, and it opens the view in place of the chat
   assert.ok(early < open.indexOf('await '), 'opening Workflow asks Rust before it stops');
 });
 
-test('the view asks Rust for four things, and each is a command the app offers', () => {
+test('the view asks Rust for eleven things, and each is a command the app offers', () => {
   const view = read(VIEW);
   const asked = [...view.matchAll(/invoke\(\s*"([a-z_]+)"/g)].map((match) => match[1]);
   assert.equal(count(view, 'invoke('), asked.length, 'the view calls a command it does not name');
-  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS].sort(), 'the view asks Rust for something else');
+  assert.deepEqual([...new Set(asked)].sort(), [...COMMANDS, ...RULE_COMMANDS, ...RUNNER_COMMANDS].sort(), 'the view asks Rust for something else');
 
   const lib = read(LIB);
   const store = code(read(STORE));
@@ -251,6 +258,8 @@ test('the view asks Rust for four things, and each is a command the app offers',
   }
   assert.equal(count(store, '#[tauri::command]'), COMMANDS.length, 'the store offers a command the view does not use');
   assert.equal(count(lib, 'board::'), COMMANDS.length + 1, `${LIB} offers a board command this check does not know`);
+  for (const name of RULE_COMMANDS) assert.ok(lib.includes(`rules::${name},`), `the app does not offer ${name}`);
+  for (const name of RUNNER_COMMANDS) assert.ok(lib.includes(`runners::${name},`), `the app does not offer ${name}`);
 });
 
 // Brad, 2026-11-20: "offline first, security second".
@@ -272,15 +281,15 @@ test('no command takes a path from the page, and an id cannot name one', () => {
     /fn valid_id\(id: &str\) -> bool \{\s+!id\.is_empty\(\) && id\.len\(\) <= 64 && id\.chars\(\)\.all\(\|c\| c\.is_ascii_alphanumeric\(\) \|\| c == '-'\)\s+\}/,
     'an id may hold more than letters, digits, and hyphens',
   );
-  // All four files of a board are found through the id check, and nowhere else.
-  for (const name of ['snapshot', 'drafts_file', 'base_file', 'source_file']) {
+  // All five files of a board are found through the id check, and nowhere else.
+  for (const name of ['snapshot', 'drafts_file', 'base_file', 'source_file', 'work_file']) {
     const start = store.indexOf(`fn ${name}(&self, id: &str)`);
     assert.ok(start >= 0, `${STORE} has no ${name}`);
     const body = store.slice(start, store.indexOf('\n    }', start));
     assert.ok(body.indexOf('if !valid_id(id)') >= 0, `${name} skips the id check`);
     assert.ok(body.indexOf('if !valid_id(id)') < body.indexOf('.join('), `${name} builds the path before it checks the id`);
   }
-  assert.equal(count(store, 'format!("{id}.json")'), 4, 'a board file is named somewhere the id check does not cover');
+  assert.equal(count(store, 'format!("{id}.json")'), 5, 'a board file is named somewhere the id check does not cover');
 });
 
 test('the view and the store have no way past this computer, delete nothing, and start nothing', () => {
@@ -292,9 +301,37 @@ test('the view and the store have no way past this computer, delete nothing, and
   // The tests too: not one of them deletes, or reaches out.
   const store = read(STORE);
   for (const never of NEVER) assert.ok(!store.includes(never), `${STORE} holds ${never}`);
-  // The store stands alone. It asks nothing of the network, so it needs no gate.
-  assert.ok(!code(store).includes('crate::'), `${STORE} reaches into another part of the app`);
+  // The store stands alone, but for its database. It asks nothing of the
+  // network, so it needs no gate.
+  const reaches = code(store).match(/crate::[a-z_]+/g) ?? [];
+  assert.deepEqual([...new Set(reaches)], ['crate::store'], `${STORE} reaches into another part of the app`);
   assert.ok(!code(store).includes('std::env'), `${STORE} reads the environment`);
+
+  // The database is held to the same: the tests too.
+  const kept = read(KEPT);
+  for (const never of NEVER) assert.ok(!kept.includes(never), `${KEPT} holds ${never}`);
+  assert.ok(!code(kept, KEPT).includes('crate::'), `${KEPT} reaches into another part of the app`);
+  assert.ok(!code(kept, KEPT).includes('std::env'), `${KEPT} reads the environment`);
+});
+
+// The road's line for this: "Boards kept in an encrypted SQLite database,
+// with its key in the system's key store".
+test('the boards are kept in an encrypted database, its key in the key store', () => {
+  const kept = code(read(KEPT), KEPT);
+  const cargo = read('apps/desktop/src-tauri/Cargo.toml');
+  assert.match(cargo, /^rusqlite = \{ version = "[^"]+", features = \["bundled-sqlcipher"\] \}$/m, 'rusqlite is not built with SQLCipher');
+  assert.match(cargo, /^rusqlite = \{ version = "[^"]+", features = \["bundled-sqlcipher-vendored-openssl"\] \}$/m, 'Windows has no SQLCipher');
+  assert.ok(!/features = \["bundled"\]/.test(cargo), 'a plain SQLite is built beside SQLCipher');
+  // The key goes to SQLCipher before anything is read, and a build that
+  // cannot encrypt is refused.
+  assert.ok(kept.indexOf('pragma_update(None, "key"') >= 0, `${KEPT} never gives the database its key`);
+  assert.ok(kept.indexOf('pragma_update(None, "key"') < kept.indexOf('PRAGMA cipher_version'), `${KEPT} reads before it gives the key`);
+  assert.ok(kept.includes('This build cannot encrypt'), `${KEPT} would open a database it cannot encrypt`);
+  assert.ok(kept.includes('keyring::Entry::new'), `${KEPT} does not keep its key in the system's key store`);
+  // The app and the command both open the boards through it.
+  assert.ok(read(LIB).includes('board::Boards::open('), `${LIB} keeps the boards as files`);
+  assert.ok(read('apps/desktop/src-tauri/src/cli.rs').includes('Boards::open('), 'the board command keeps the boards as files');
+  assert.ok(read(LIB).includes('mod store;'), `${LIB} does not hold the database`);
 });
 
 test('a file is written beside itself, then moved into place', () => {
@@ -328,7 +365,7 @@ test('a file is written beside itself, then moved into place', () => {
     const from = store.indexOf(`pub fn ${name}(&self`);
     const body = store.slice(from, store.indexOf('\n    }', from));
     assert.ok(body.includes('self.writing.lock()'), `${name} does not wait its turn to write`);
-    assert.ok(body.indexOf('self.writing.lock()') < body.indexOf('write(&path'), `${name} writes before it has its turn`);
+    assert.ok(body.indexOf('self.writing.lock()') < body.indexOf('self.put('), `${name} writes before it has its turn`);
   }
 });
 
@@ -361,9 +398,11 @@ test('a pull writes the snapshot alone, and a note the drafts alone', () => {
     assert.ok(from >= 0, `${STORE} has no ${name}`);
     return store.slice(from, store.indexOf('\n    }', from));
   };
-  assert.ok(body('pull').includes('let path = self.snapshot(&board.id)?;'), 'a pull writes somewhere other than the snapshot');
+  assert.match(body('pull'), /self\.put\(\s*Kind::Board,\s*&board\.id,/, 'a pull writes somewhere other than the snapshot');
   assert.ok(!body('pull').includes('drafts'), 'a pull touches the notes');
-  assert.ok(body('note').includes('let path = self.drafts_file(id)?;'), 'a note is written somewhere other than the drafts');
+  assert.match(body('note'), /self\.put\(\s*Kind::Drafts,\s*id,/, 'a note is written somewhere other than the drafts');
+  assert.equal(count(body('note'), 'self.put('), 1, 'a note writes more than the drafts');
+  assert.equal(count(body('pull'), 'self.put('), 1, 'a pull writes more than the snapshot');
   assert.ok(!body('note').includes('self.snapshot('), 'a note writes the snapshot');
   // A file that is a link, or larger than a board may be, is not read.
   assert.match(store, /fs::symlink_metadata\(path\)\s+\.map\(\|found\| found\.file_type\(\)\.is_file\(\)\)/, 'a linked file is read');
@@ -390,7 +429,7 @@ test('a note is never left behind', () => {
   assert.ok(view.includes('@click="leave">Back to the chat</button>'), '"Back to the chat" leaves without saving the note');
   assert.match(functionOf(view, 'leave'), /if \(await saveNote\(\)\) emit\("close"\);/, 'the view closes on a note it could not save');
   assert.equal(count(view, 'emit("close")') + count(view, "emit('close')"), 1, 'the view closes some other way');
-  assert.match(view, /onBeforeUnmount\(\(\) => \{\s+saveNote\(\);\s+\}\);/, 'a note is not saved when the view goes');
+  assert.match(view, /onBeforeUnmount\(\(\) => \{(?:\s+\/\/[^\n]*)*\s+window\.clearInterval\(ticking\);\s+saveNote\(\);\s+\}\);/, 'a note is not saved when the view goes');
 
   // Another story, another board, or the sample opens only once the note is safe.
   const pick = functionOf(view, 'pickStory');
@@ -429,7 +468,7 @@ test('a picked story or slice is in view, with the keyboard on its heading', () 
   assert.ok(bring.includes('?.scrollIntoView({ block: "start" });'), 'the pane is not brought into view');
 });
 
-test('the view shows a board as text, says where the gates stand, and changes neither', () => {
+test('the view shows a board as text, says where the gates stand, and changes neither gate', () => {
   const view = read(VIEW);
   assert.ok(!view.includes('v-html'), 'the view shows a board\'s words as markup');
   assert.ok(!view.includes('innerHTML'), 'the view writes markup itself');
@@ -437,7 +476,7 @@ test('the view shows a board as text, says where the gates stand, and changes ne
 
   assert.ok(view.includes('WAN {{ wan ? "on" : "off" }}'), 'the view does not say where the WAN gate stands');
   assert.ok(view.includes('LAN {{ lan ? "on" : "off" }}'), 'the view does not say where the LAN gate stands');
-  assert.ok(view.includes('This view reads only that copy.'), 'the view does not say it reads the local copy alone');
+  assert.ok(view.includes('This view reads and moves only that copy.'), 'the view does not say it reads and moves the local copy alone');
   // Its only words to the rest of the page: close me, and show the side.
   assert.ok(view.includes('const emit = defineEmits(["close", "side"]);'), 'the view can ask the page for something else');
   assert.ok(view.includes('pulledLine(board.pulledAt)'), 'the view does not say when the copy was pulled');
@@ -523,7 +562,7 @@ test('the READMEs, the roadmap, and SECURITY.md say what the view does', () => {
 
   const security = read('SECURITY.md');
   const promises = security.slice(security.indexOf('These are the promises that matter most.'));
-  assert.match(promises, /The Workflow view reads only the boards kept on this computer/, 'SECURITY.md does not promise the view reads the local copy alone');
+  assert.match(promises, /The Workflow view reads and moves only the boards kept on this\s+computer/, 'SECURITY.md does not promise the view reads and moves the local copy alone');
   assert.match(promises, /with both\s+gates\s+off/, 'SECURITY.md does not say the view works with both gates off');
   assert.match(promises, /never\s+changes\s+(?:or\s+removes\s+)?your\s+notes/, 'SECURITY.md does not promise a new copy leaves the notes');
 });
@@ -548,7 +587,7 @@ test('one command in a terminal does it, and the program leaves from its entry a
   // It runs without the app, so it finds the app's data folder by the app's own name.
   const identifier = JSON.parse(read(CONF)).identifier;
   assert.ok(command.includes(`pub const IDENTIFIER: &str = "${identifier}";`), `${COMMAND} and ${CONF} name two data folders`);
-  assert.ok(command.includes('Boards::new(data.join(IDENTIFIER).join("boards"))'), 'the command reads another boards folder than the app');
+  assert.ok(/Boards::open\(\s+data\.join\(IDENTIFIER\)\.join\("boards"\),/.test(command), 'the command reads another boards folder than the app');
 
   for (const word of WORDS) {
     assert.ok(command.includes(`["${word}"`), `the command does not take ${word}`);
@@ -643,8 +682,8 @@ test('the file somewhere else is read and written as any board file is', () => {
   assert.equal(count(store, 'write(path, &text,'), 1, 'the store writes to a typed path somewhere other than a send');
 
   // The last synced copy and the remembered file each have their own folder.
-  assert.ok(body('keep_base').includes('let path = self.base_file(&board.id)?;'), 'the last synced copy is written somewhere else');
-  assert.ok(body('remember').includes('let path = self.source_file(id)?;'), 'the file is remembered somewhere else');
+  assert.match(body('keep_base'), /self\.put\(\s*Kind::Synced,\s*&board\.id,/, 'the last synced copy is written somewhere else');
+  assert.match(body('remember'), /self\.put\(\s*Kind::Source,\s*id,/, 'the file is remembered somewhere else');
   assert.ok(!body('keep_base').includes('self.snapshot(') && !body('remember').includes('self.snapshot('), 'the sync files write the snapshot');
 });
 

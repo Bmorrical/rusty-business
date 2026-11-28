@@ -12,6 +12,7 @@ import {
   laneCounts,
   LANES,
   moveLabel,
+  movesFor,
   nextLane,
   noteOf,
   notesOf,
@@ -93,6 +94,21 @@ test("a slice's five steps say which are done, which is next, and which come lat
     ["done", "done", "done", "done", "done"],
   );
   assert.equal(sliceSteps({})[0].state, "next");
+});
+
+test("a slice offers its next lane, and a way back to each lane it has been through", () => {
+  const moves = (lane) => movesFor({ lane }).map((move) => [move.to, move.label, move.forward]);
+  assert.deepEqual(moves(""), [["sliced", "Mark it sliced", true]]);
+  assert.deepEqual(moves("sliced"), [["written", "Mark it written", true]]);
+  assert.deepEqual(moves("checked"), [
+    ["reviewed", "Mark it reviewed", true],
+    ["sliced", "Write it again", false],
+    ["written", "Check it again", false],
+  ]);
+  assert.deepEqual(moves("reviewed").map(([to, label]) => [to, label])[0], ["main", "Take it into main"]);
+  assert.equal(moves("reviewed").length, 4);
+  assert.deepEqual(movesFor({ lane: "main" }), [], "a slice on main can be moved");
+  assert.deepEqual(movesFor(undefined), [["sliced", "Mark it sliced", true]].map(([to, label, forward]) => ({ to, label, forward })));
 });
 
 test("a story holds a lane when every slice has been through it", () => {

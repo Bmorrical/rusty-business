@@ -142,6 +142,78 @@ test('the engine for Windows is next, inside the installer, and is llama.cpp', (
   assert.ok(!later.includes('An engine for Windows.'), 'the engine is still in Later');
 });
 
+// Brad, 2026-11-25: "don't build it yet, in a x4 gpu rig, or even 1 slice of
+// that. I can assign a model to a worker node, or logically split it's
+// resource parts. this requires containerization, and heavy orchistration.
+// mark it next to do". Then: "this is extension of LAN capabilities", "so if
+// I had 4 hardware slices I could run 1 model on each one", and "asynch".
+// Then: "ammend so if I had 1 slice or 4. I can also sub-divide the
+// resources. with 4 cards, I could run essentially run and split any model
+// on any percentage of available, can easily tune the resource availability
+// in app, like a slider or meter. I'm thinking like how we partition drives,
+// with pie graphs, but in this case it's compute", "I should be able to span
+// the resources across cards too, multiplex", "so if model 1 needs 2.5 cards
+// of compute, no problem", and "and I can run them rich or lean to get the
+// results I want". So it is first in Next, on your own network behind the
+// LAN gate: a pie for each card, a slider for each model's share, a share
+// that can span cards, run rich or lean, each model in its own container,
+// and each answering without waiting.
+// Brad, 2026-11-25: "the next thing that gets built in 8.5. It starts a
+// rulesheet that I write and ammend", "It's the orchestrator. It's first
+// listening to me, it never merges to main or has the capability to. in fact
+// it doesn't merge anything", "the story may go to local, lan, or wan", and
+// Copilot "does not merge into main only I do that". Then: "roadmap it all,
+// descript is more general as this will grow". And: "it sets a drift threshold
+// on runners, if they run past that that build is rejected and it tells the
+// orchistrator to split into more shards". Then: "everything claude "forgets"
+// to do ... it's a seam", and "everything is ruled from the code, if it can't
+// pass a rule I set, it doesn't continue".
+test('the orchestrator, run by your rulesheet, is first in Next, rejects a build past its drift threshold, checks every rule by code, and merges nothing', () => {
+  const [first] = itemsOf(section('Next').body);
+  assert.equal(first.title, 'The orchestrator, run by your rulesheet.', 'the orchestrator is not first in Next');
+  const text = first.text.replace(/\s+/g, ' ');
+  assert.match(text, /a rulesheet you write and amend/);
+  assert.match(text, /It listens to you first/);
+  assert.match(text, /from the Workflow view/);
+  assert.match(text, /on this computer, on your private network, or at an outside service/);
+  assert.match(text, /Copilot takes over on GitHub/);
+  assert.match(text, /until it is green/);
+  assert.match(text, /only then does the pull request get its merge labels/);
+  assert.match(text, /a label workflow that says who holds the ball/);
+  assert.match(text, /hands the ball to the next one/);
+  assert.match(text, /Watching those labels and moving them is the orchestrator's job/);
+  assert.match(text, /It sets a drift threshold on its runners, the models it hands stories to/);
+  assert.match(text, /A runner that runs past it has its build rejected/);
+  assert.match(text, /the orchestrator is told to split the story into more shards/);
+  assert.match(text, /Every rule you set is checked by code, not left to a runner to remember/);
+  assert.match(text, /work that does not pass a rule goes no further/);
+  assert.match(text, /The orchestrator merges nothing, and only you merge into main/);
+  const done = itemsOf(section('Done').body).map((item) => item.title);
+  assert.ok(!done.includes('The orchestrator, run by your rulesheet.'), 'it is called done before it is built');
+});
+
+test('many models at once, on your own network, is next after the orchestrator, with a pie and a slider for the compute', () => {
+  const next = itemsOf(section('Next').body);
+  const first = next[1];
+  assert.equal(first?.title, 'Many models at once, on your own network.', 'many models at once is not next after the orchestrator');
+  const text = first.text.replace(/\s+/g, ' ');
+  assert.match(text, /your private network/);
+  assert.match(text, /from one hardware slice of a card to four whole cards/);
+  assert.match(text, /partition a drive/);
+  assert.match(text, /each card as a pie/);
+  assert.match(text, /a slider gives each model its share of what is free/);
+  assert.match(text, /part of one card, or span several/);
+  assert.match(text, /two and a half cards/);
+  assert.match(text, /Run a model rich or lean/);
+  assert.match(text, /a container of its own/);
+  assert.match(text, /only with the LAN gate on/);
+  assert.match(text, /at the same time/);
+  assert.match(text, /none waits for another/);
+  assert.match(text, /The app sets the shares, and the computer that runs the models carries them out/);
+  const done = itemsOf(section('Done').body).map((item) => item.title);
+  assert.ok(!done.includes('Many models at once, on your own network.'), 'it is called done before it is built');
+});
+
 test('the engine for Linux is done, inside the packages, and is llama.cpp', () => {
   const linux = itemsOf(section('Done').body).find((item) => item.title === 'An engine for Linux.');
   assert.ok(linux, 'the roadmap does not have the Linux engine done');
@@ -209,4 +281,78 @@ test('sections, items, and dates are read from the text', () => {
     datesIn('In Q3 2027, by the end of March, on May 5 or 12/1, maybe next month.'),
     ['2027', 'Q3', 'March', 'May 5', '12/1', 'next month', 'by the end of'],
   );
+});
+
+// Brad, 2026-11-25: "8.5 brings it, who makes it (country of origin)",
+// "ensure users can 1 click install these too", "users choice what to
+// install", "developers choice what to make available", and "put in the
+// country of origin and it's filterable ... user can easily see what is us
+// and what is not". Then: "they can also install qwen and deepseek, any
+// other missing top models", "they don't ship any models by default from
+// scratch as rules as already exists", and "user must click to get the ones
+// they want".
+test('newer models, and where each maker is from, is third in Next, with a filter by country', () => {
+  const item = itemsOf(section('Next').body)[2];
+  assert.equal(item?.title, 'Newer models, and where each maker is from.', 'newer models is not third in Next');
+  const text = item.text.replace(/\s+/g, ' ');
+  assert.match(text, /install in one click/);
+  assert.match(text, /Inkling 2 Mini/);
+  for (const name of ['Qwen', 'DeepSeek', 'Mistral', 'the other top open models']) assert.ok(text.includes(name), `it lost ${name}`);
+  assert.match(text, /The project picks which models are on the list, and you pick which to install/);
+  assert.match(text, /No model comes with the app/);
+  assert.match(text, /downloaded only when you click to get it/);
+  assert.match(text, /Each maker shows its country of origin/);
+  assert.match(text, /filter the list by country/);
+  assert.match(text, /made in the United States and which are not/);
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('Newer models, and where each maker is from.'), 'it is called done before it is built');
+});
+
+// Brad, 2026-11-25: "one [Rusty Business™] can talk to another [Rusty Business™]
+// on the same LAN, it has it's own connection handshake", "I am driving one, and
+// it's telling the other over the LAN wire", "anything bubbled back ... goes to
+// rb to rb back to me", and "keep out the 'external connector' it doesn't fit
+// the shape of the project". Then: "no fork. LAN only there is an API exposed,
+// bring your own courier app, we shape it for my needs to start", and "that has
+// a circuit breaker too". Then: "the api with the courier is an mcp on the RB
+// side that any courier client can connect to".
+test('one Rusty Business™ to another is fourth in Next, with its own handshake, a LAN-only API that is an MCP server for any courier app, and a circuit breaker, behind the LAN gate', () => {
+  const item = itemsOf(section('Next').body)[3];
+  assert.equal(item?.title, 'One Rusty Business™ to another, on your own network.', 'one Rusty Business™ to another is not fourth in Next');
+  const text = item.text.replace(/\s+/g, ' ');
+  assert.match(text, /Two installs of Rusty Business™ on your private network talk to each other/);
+  assert.match(text, /a handshake of their own/);
+  assert.match(text, /You drive one, and it passes what you ask over the wire to the other/);
+  assert.match(text, /bubbles back the same way: to the first install, and then to you/);
+  assert.match(text, /nothing but Rusty Business™ at each end/);
+  assert.match(text, /opens an API on your private network/);
+  assert.match(text, /bring your own courier app to carry work to it and back/);
+  assert.match(text, /The API is an MCP server that any courier app can connect to/);
+  assert.match(text, /starts with what the first courier app needs/);
+  assert.match(text, /The link and the API have a circuit breaker of their own/);
+  assert.match(text, /off until you turn it on, that stops both at once/);
+  assert.match(text, /a courier app reaches an install, only with that switch and the LAN gate on/);
+  assert.match(text, /nothing passes past your private network/);
+  assert.doesNotMatch(text, /connector/i, 'an external connector does not fit the shape of the project');
+  assert.doesNotMatch(text, /\bfork/i, 'the courier API stays in this project, with no fork');
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('One Rusty Business™ to another, on your own network.'), 'it is called done before it is built');
+});
+
+// Brad, 2026-11-25: "keep it in a postgres or mysql", then, asked whether Rust
+// has a better alternative for a desktop app: "SQLite, encrypted".
+test('boards kept in an encrypted database follow a source for boards in Next, in SQLite with its key in the system key store, and are not a board backend', () => {
+  const titles = itemsOf(section('Next').body).map((each) => each.title);
+  const at = titles.indexOf('Boards kept in an encrypted database.');
+  assert.ok(at > 0, 'boards kept in an encrypted database is not in Next');
+  assert.equal(titles[at - 1], 'A source for boards.', 'it does not follow a source for boards');
+  const text = itemsOf(section('Next').body)[at].text.replace(/\s+/g, ' ');
+  assert.match(text, /is kept in SQLite, a database that is one file the app opens itself, with no server to run/);
+  assert.match(text, /The file is encrypted, and its key stays in the operating system's own key store/);
+  assert.match(text, /a courier app hands the install over the MCP server goes there/);
+  assert.match(text, /goes back out as a board file/);
+  assert.match(text, /not a board's backend, so the rule in `BOARD\.md` stands/);
+  assert.doesNotMatch(text, /Postgre|MySQL/i, 'the copy of a board is kept in SQLite');
+  const done = itemsOf(section('Done').body).map((each) => each.title);
+  assert.ok(!done.includes('Boards kept in an encrypted database.'), 'it is called done before it is built');
 });
